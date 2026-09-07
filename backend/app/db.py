@@ -1,11 +1,27 @@
-from sqlalchemy import create_engine
+﻿from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 
-engine = create_engine(settings.database_url, connect_args=connect_args)
+def _normalized_url(url: str) -> str:
+    """Railway (and most hosts) hand out a bare postgresql:// URL, which
+    SQLAlchemy defaults to the psycopg2 dialect for. We install psycopg 3
+    instead (broader pre-built wheel coverage, avoids the classic Railpack
+    "failed to build psycopg2-binary from source" failure), so the scheme
+    needs to explicitly say so. SQLite passes through untouched.
+    """
+    if url.startswith("postgresql://") or url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+psycopg://", 1).replace(
+            "postgresql://", "postgresql+psycopg://", 1
+        )
+    return url
+
+
+DATABASE_URL = _normalized_url(settings.database_url)
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
