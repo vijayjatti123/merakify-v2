@@ -1,4 +1,4 @@
-import json
+﻿import json
 from typing import Callable
 
 from sqlalchemy.orm import Session
@@ -79,11 +79,14 @@ def run_pipeline(db: Session, job_id: str) -> None:
             f"Locked {len(continuity['characters'])} character(s), {len(continuity['locations'])} location(s) as identity anchors.",
         )
 
-        # 4. Cinematography Agent
+        # 4. Cinematography Agent — the largest output in the pipeline (one
+        # object per shot, several fields each), so it gets a bigger token
+        # budget than the default rather than risking truncation.
         emit("cinematography", "Assigning camera, lens and lighting per shot...")
         cine = call_agent(
             prompts.CINEMATOGRAPHY_AGENT,
             f"Scenes: {json.dumps(script['scenes'])}\nCharacters: {json.dumps(continuity['characters'])}",
+            max_tokens=4096,
         )
         cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"])
         dialogue_shots = sum(1 for s in cine["shots"] if s.get("has_dialogue"))
@@ -102,6 +105,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
         qa = call_agent(
             prompts.QA_AGENT,
             f"Shots: {json.dumps(cine['shots'])}\nCharacters: {json.dumps(continuity['characters'])}",
+            max_tokens=3072,
         )
 
         if not qa.get("approved") and qa.get("issues"):
@@ -113,6 +117,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             cine = call_agent(
                 prompts.CINEMATOGRAPHY_FIX,
                 f"Current shots: {json.dumps(cine['shots'])}\nRequired fixes: {json.dumps(qa['issues'])}",
+                max_tokens=4096,
             )
             cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"])
             emit("cinematography", "Revision complete.")
@@ -121,6 +126,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             qa = call_agent(
                 prompts.QA_AGENT,
                 f"Shots: {json.dumps(cine['shots'])}\nCharacters: {json.dumps(continuity['characters'])}",
+                max_tokens=3072,
             )
             emit("qa", "Approved — continuity holds." if qa.get("approved") else "Residual notes remain; proceeding with best version.")
         else:
