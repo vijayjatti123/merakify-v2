@@ -81,11 +81,14 @@ def run_pipeline(db: Session, job_id: str) -> None:
 
         # 4. Cinematography Agent — the largest output in the pipeline (one
         # object per shot, several fields each), so it gets a bigger token
-        # budget than the default rather than risking truncation.
+        # budget than the default rather than risking truncation. It also
+        # needs the target runtime explicitly — without it, there's nothing
+        # stopping the total from drifting well past what was asked for.
         emit("cinematography", "Assigning camera, lens and lighting per shot...")
         cine = call_agent(
             prompts.CINEMATOGRAPHY_AGENT,
-            f"Scenes: {json.dumps(script['scenes'])}\nCharacters: {json.dumps(continuity['characters'])}",
+            f"Scenes: {json.dumps(script['scenes'])}\nCharacters: {json.dumps(continuity['characters'])}"
+            f"\nTarget total duration: {fmt['duration_target_sec']} seconds",
             max_tokens=4096,
         )
         cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"])
@@ -136,6 +139,41 @@ def run_pipeline(db: Session, job_id: str) -> None:
         emit("assembly", "Sequencing shots and choosing transitions...")
         assembly = call_agent(prompts.SHOT_ASSEMBLER, json.dumps(cine["shots"]))
         emit("assembly", f"Runtime locked at {assembly['total_duration_sec']}s.")
+
+        # 7. Duration self-check — the same inspect-judge-act shape as the QA
+        # loop above, applied to total runtime. Without this, nothing ever
+        # verifies the assembled total against what was actually requested;
+        # real runs have overshot a 30s target by 33% and a 15s target by
+        # over 100% with no error raised, because summing durations correctly
+        # isn't the same as checking the sum against a target. One retry,
+        # same cap as the QA loop, for the same reason: bound the cost of an
+        # autonomous correction rather than looping indefinitely.
+        target = fmt["duration_target_sec"]
+        actual = assembly["total_duration_sec"]
+        if actual > target * 1.15:
+            emit(
+                "assembly",
+                f"{actual}s overshoots the {target}s target — sending back to Cinematography to trim, no human needed.",
+            )
+            cine = call_agent(
+                prompts.CINEMATOGRAPHY_TRIM,
+                f"Current shots: {json.dumps(cine['shots'])}\nTarget total duration: {target} seconds\n"
+                f"Current total: {actual} seconds",
+                max_tokens=4096,
+            )
+            cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"])
+            emit("cinematography", "Trimmed to fit the target runtime.")
+
+            emit("assembly", "Re-sequencing the trimmed shot list...")
+            assembly = call_agent(prompts.SHOT_ASSEMBLER, json.dumps(cine["shots"]))
+            emit(
+                "assembly",
+                f"Runtime now {assembly['total_duration_sec']}s (target {target}s)."
+                if assembly["total_duration_sec"] <= target * 1.15
+                else f"Still {assembly['total_duration_sec']}s after one trim pass; proceeding with best version.",
+            )
+        else:
+            emit("assembly", f"{actual}s is within range of the {target}s target — no trim needed.")
 
         # TODO (next milestone, not this skeleton): fan out here to real asset
         # generation — one call per character/location in continuity, run
