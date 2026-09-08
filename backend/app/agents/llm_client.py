@@ -1,11 +1,11 @@
-﻿import json
+import json
 import re
 
 import anthropic
 
 from app.config import settings
 
-_client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+_client = anthropic.Anthropic(api_key=settings.anthropic_api_key, timeout=90.0, max_retries=2)
 
 FAST_MODEL = "claude-haiku-4-5-20251001"
 REASONING_MODEL = "claude-sonnet-5"
