@@ -1,4 +1,5 @@
 ﻿from sqlalchemy import create_engine
+from sqlalchemy import inspect
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
@@ -24,6 +25,31 @@ connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite")
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+JOB_COLUMN_DDL = {
+    "aspect_ratio": "VARCHAR NOT NULL DEFAULT '16:9'",
+    "quality": "VARCHAR NOT NULL DEFAULT '720p'",
+    "language": "VARCHAR NOT NULL DEFAULT 'English'",
+    "ai_model": "VARCHAR NOT NULL DEFAULT 'Seedance 2.5'",
+}
+
+
+def ensure_job_intake_columns() -> None:
+    """Add intake columns for existing SQLite/Postgres deployments.
+
+    SQLAlchemy's create_all creates new tables but deliberately does not alter
+    an existing jobs table. This small idempotent upgrade keeps the skeleton's
+    no-migration-framework setup deployable without maintaining parallel DDL.
+    """
+    inspector = inspect(engine)
+    if "jobs" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("jobs")}
+    with engine.begin() as connection:
+        for name, definition in JOB_COLUMN_DDL.items():
+            if name not in existing:
+                connection.exec_driver_sql(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
 
 
 def get_db():

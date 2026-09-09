@@ -84,6 +84,22 @@ def upload_bytes(
     }
 
 
+def upload_file(
+    key: str,
+    file: BinaryIO,
+    *,
+    content_type: Optional[str] = None,
+    cache_control: Optional[str] = None,
+) -> dict:
+    """Upload an open file object without buffering the whole asset in memory."""
+    return upload_bytes(
+        key,
+        file,
+        content_type=content_type,
+        cache_control=cache_control,
+    )
+
+
 def download_bytes(key: str) -> bytes:
     """Read an object from the private bucket."""
     response = _s3_client().get_object(Bucket=_bucket(), Key=_object_key(key))

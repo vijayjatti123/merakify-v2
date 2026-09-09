@@ -1,11 +1,25 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class JobCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     brief: str
+    aspect_ratio: Literal["9:16", "16:9"] = "16:9"
+    quality: Literal["480p", "720p"] = "720p"
+    language: str = "English"
+    ai_model: Literal["Wan 2.5", "Seedance 2.0", "Kling 3.0", "Seedance 2.5", "Veo 3.1", "Sora 2"] = (
+        "Seedance 2.5"
+    )
+
+    @model_validator(mode="after")
+    def validate_language_model_compatibility(self):
+        if self.language.strip().lower() != "english" and self.ai_model not in {"Seedance 2.0", "Seedance 2.5"}:
+            raise ValueError("non-English jobs require Seedance 2.0 or Seedance 2.5")
+        return self
 
 
 class ShotEdit(BaseModel):
@@ -31,6 +45,10 @@ class JobRetry(BaseModel):
 class JobOut(BaseModel):
     id: str
     brief: str
+    aspect_ratio: str
+    quality: str
+    language: str
+    ai_model: str
     status: str
     error_message: Optional[str] = None
     result: Optional[Any] = None
@@ -39,6 +57,13 @@ class JobOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AssetOut(BaseModel):
+    id: str
+    filename: str
+    url: str
+    created_at: datetime
 
 
 class AgentEventOut(BaseModel):

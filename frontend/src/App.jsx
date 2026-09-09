@@ -6,8 +6,8 @@ import NewJob from "./pages/NewJob";
 export default function App() {
   const [jobId, setJobId] = useState(null);
 
-  async function handleSubmit(brief) {
-    const job = await createJob(brief);
+  async function handleSubmit(payload) {
+    const job = await createJob(payload);
     setJobId(job.id);
   }
 

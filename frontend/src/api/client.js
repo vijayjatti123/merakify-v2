@@ -1,12 +1,29 @@
 const BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
-export async function createJob(brief) {
+export async function createJob(payload) {
   const res = await fetch(`${BASE_URL}/api/jobs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ brief }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error("Failed to create job");
+  return res.json();
+}
+
+export async function listAssets() {
+  const res = await fetch(`${BASE_URL}/api/assets`);
+  if (!res.ok) throw new Error("Failed to load assets");
+  return res.json();
+}
+
+export async function uploadAsset(file) {
+  const body = new FormData();
+  body.append("file", file);
+  const res = await fetch(`${BASE_URL}/api/assets/upload`, {
+    method: "POST",
+    body,
+  });
+  if (!res.ok) throw new Error("Failed to upload asset");
   return res.json();
 }
 

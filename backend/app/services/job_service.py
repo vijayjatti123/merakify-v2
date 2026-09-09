@@ -6,8 +6,23 @@ from sqlalchemy.orm import Session
 from app.models import AgentEvent, Job
 
 
-def create_job(db: Session, brief: str) -> Job:
-    job = Job(brief=brief, status="queued")
+def create_job(
+    db: Session,
+    brief: str,
+    *,
+    aspect_ratio: str = "16:9",
+    quality: str = "720p",
+    language: str = "English",
+    ai_model: str = "Seedance 2.5",
+) -> Job:
+    job = Job(
+        brief=brief,
+        aspect_ratio=aspect_ratio,
+        quality=quality,
+        language=language,
+        ai_model=ai_model,
+        status="queued",
+    )
     db.add(job)
     db.commit()
     db.refresh(job)

@@ -1,16 +1,19 @@
 import asyncio
 import json
+import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.agents.director import _attach_voice_refs, run_pipeline, validate_and_correct
 from app.db import SessionLocal, get_db
-from app.schemas import JobCreate, JobOut, JobRetry, JobRevise
-from app.services import job_service
+from app.schemas import AssetOut, JobCreate, JobOut, JobRetry, JobRevise
+from app.services import asset_service, job_service, storage_service
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+assets_router = APIRouter(prefix="/api/assets", tags=["assets"])
 
 RETRY_CONTEXT_MARKER = "\n\n--- Retry context ---\n"
 
@@ -29,6 +32,10 @@ def _job_out(job, result=None) -> JobOut:
     return JobOut(
         id=job.id,
         brief=job.brief,
+        aspect_ratio=job.aspect_ratio,
+        quality=job.quality,
+        language=job.language,
+        ai_model=job.ai_model,
         status=job.status,
         error_message=job.error_message,
         result=job_service.job_result(job) if result is None else result,
@@ -37,8 +44,24 @@ def _job_out(job, result=None) -> JobOut:
     )
 
 
-def _create_and_start_job(brief: str, background_tasks: BackgroundTasks, db: Session) -> JobOut:
-    job = job_service.create_job(db, brief)
+def _create_and_start_job(
+    brief: str,
+    background_tasks: BackgroundTasks,
+    db: Session,
+    *,
+    aspect_ratio: str = "16:9",
+    quality: str = "720p",
+    language: str = "English",
+    ai_model: str = "Seedance 2.5",
+) -> JobOut:
+    job = job_service.create_job(
+        db,
+        brief,
+        aspect_ratio=aspect_ratio,
+        quality=quality,
+        language=language,
+        ai_model=ai_model,
+    )
     background_tasks.add_task(_run_in_background, job.id)
     return _job_out(job)
 
@@ -78,7 +101,17 @@ def _retry_brief(job, change_request: str | None) -> str:
 def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     if not payload.brief.strip():
         raise HTTPException(status_code=400, detail="brief cannot be empty")
-    return _create_and_start_job(payload.brief.strip(), background_tasks, db)
+    if not payload.language.strip():
+        raise HTTPException(status_code=400, detail="language cannot be empty")
+    return _create_and_start_job(
+        payload.brief.strip(),
+        background_tasks,
+        db,
+        aspect_ratio=payload.aspect_ratio,
+        quality=payload.quality,
+        language=payload.language.strip(),
+        ai_model=payload.ai_model,
+    )
 
 
 @router.post("/{job_id}/revise", response_model=JobOut)
@@ -145,8 +178,51 @@ def retry_job(
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     enriched_brief = _retry_brief(job, payload.change_request if payload else None)
-    retried = _create_and_start_job(enriched_brief, background_tasks, db)
+    retried = _create_and_start_job(
+        enriched_brief,
+        background_tasks,
+        db,
+        aspect_ratio=job.aspect_ratio,
+        quality=job.quality,
+        language=job.language,
+        ai_model=job.ai_model,
+    )
     return {"id": retried.id}
+
+
+@assets_router.post("/upload", response_model=AssetOut)
+def upload_asset(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    filename = Path(file.filename or "asset").name.strip() or "asset"
+    object_key = f"assets/{uuid.uuid4()}/{filename}"
+    uploaded = storage_service.upload_file(
+        object_key,
+        file.file,
+        content_type=file.content_type,
+    )
+    try:
+        asset = asset_service.create_asset(
+            db,
+            filename=filename,
+            object_key=uploaded["key"],
+            url=uploaded["url"],
+        )
+    except Exception:
+        storage_service.delete_object(uploaded["key"])
+        raise
+    return AssetOut(id=asset.id, filename=asset.filename, url=uploaded["url"], created_at=asset.created_at)
+
+
+@assets_router.get("", response_model=list[AssetOut])
+def list_assets(db: Session = Depends(get_db)):
+    return [
+        AssetOut(
+            id=asset.id,
+            filename=asset.filename,
+            url=storage_service.asset_url(asset.object_key),
+            created_at=asset.created_at,
+        )
+        for asset in asset_service.list_assets(db)
+    ]
 
 
 @router.get("/{job_id}", response_model=JobOut)

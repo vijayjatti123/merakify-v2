@@ -153,6 +153,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
         job_service.set_status(db, job_id, "running")
         job = job_service.get_job(db, job_id)
         brief = job.brief
+        language = job.language or "English"
 
         # 1. Format Classifier — cheap/fast model, this step is pure classification.
         emit("format", "Reading the request, choosing format and structure...")
@@ -162,7 +163,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
         # 2. Script Architect
         emit("script", "Writing scene breakdown...")
         script = call_agent(
-            prompts.SCRIPT_ARCHITECT,
+            prompts.SCRIPT_ARCHITECT % language,
             f"Brief: {brief}\nFormat: {fmt['format']}\nStructure: {fmt['structure']}\nNumber of scenes: {fmt['num_scenes']}",
         )
         emit("script", f"Logline locked: \"{script['logline']}\"")
@@ -233,6 +234,10 @@ def run_pipeline(db: Session, job_id: str) -> None:
         # not to silently patch the disclaimer instead of the pipeline.
 
         result = {
+            "aspect_ratio": job.aspect_ratio,
+            "quality": job.quality,
+            "language": language,
+            "ai_model": job.ai_model,
             "format": fmt,
             "script": script,
             "continuity": continuity,

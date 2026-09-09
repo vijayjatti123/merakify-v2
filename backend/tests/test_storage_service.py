@@ -83,6 +83,16 @@ class StorageServiceTests(unittest.TestCase):
         self.assertEqual(kwargs["config"].signature_version, "s3v4")
         self.assertEqual(kwargs["config"].s3, {"addressing_style": "virtual"})
 
+    def test_upload_file_streams_through_the_shared_upload_path(self) -> None:
+        client = FakeS3Client()
+        file = BytesIO(b"image bytes")
+        with patch.object(storage_service, "_s3_client", return_value=client):
+            uploaded = storage_service.upload_file("assets/example.png", file, content_type="image/png")
+
+        self.assertEqual(uploaded["key"], "assets/example.png")
+        self.assertIs(client.calls[0][1]["Body"], file)
+        self.assertEqual(client.calls[0][1]["ContentType"], "image/png")
+
     def test_empty_object_key_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             storage_service.asset_url(" / ")

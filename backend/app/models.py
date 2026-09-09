@@ -16,6 +16,10 @@ class Job(Base):
 
     id = Column(String, primary_key=True, default=new_id)
     brief = Column(Text, nullable=False)
+    aspect_ratio = Column(String, nullable=False, default="16:9")
+    quality = Column(String, nullable=False, default="720p")
+    language = Column(String, nullable=False, default="English")
+    ai_model = Column(String, nullable=False, default="Seedance 2.5")
     status = Column(String, default="queued")  # queued | running | done | error
     error_message = Column(Text, nullable=True)
     result_json = Column(Text, nullable=True)  # full pipeline output, stored as JSON text
@@ -23,6 +27,16 @@ class Job(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     events = relationship("AgentEvent", back_populates="job", cascade="all, delete-orphan")
+
+
+class Asset(Base):
+    __tablename__ = "assets"
+
+    id = Column(String, primary_key=True, default=new_id)
+    filename = Column(String, nullable=False)
+    object_key = Column(String, nullable=False, unique=True)
+    url = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class AgentEvent(Base):

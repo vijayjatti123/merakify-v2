@@ -8,6 +8,9 @@ Pick num_scenes between 2 and 4. No explanation text, JSON only."""
 
 SCRIPT_ARCHITECT = """You are a Script Architect. Given a brief and a chosen format/structure,
 write a tight scene breakdown that fits the target duration.
+The selected dialogue language is %s. Write every dialogue_or_vo value in that language, and ensure
+any downstream dialogue_text copied from it remains in that language. For non-English languages, use
+the language's native script rather than translating it to English or using Romanized transliteration.
 Respond with ONLY JSON:
 {"logline":"one sentence, under 20 words","scenes":[{"scene_number":1,"heading":"under 8 words","description":"under 20 words","dialogue_or_vo":"under 15 words or empty string","mood":"under 4 words"}]}
 Write exactly the number of scenes specified. Keep every field short."""
