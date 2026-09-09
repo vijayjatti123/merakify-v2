@@ -46,8 +46,9 @@ Open the Vite dev server URL, type a brief, watch it run.
   changes, since `app/db.py` reads that env var directly.
 - Frontend: Railway (or Vercel) as a static build (`npm run build`), with
   `VITE_BACKEND_URL` pointing at the deployed backend.
-- Object storage (character/location reference images, rendered video) isn't
-  wired up yet — see below.
+- Object storage uses the private S3 integration in
+  `app/services/storage_service.py`. Reads use presigned S3 URLs until the
+  account's CloudFront distribution and Origin Access Control are active.
 
 ## What's deliberately not here
 
@@ -91,9 +92,10 @@ part of the skeleton:
   card. If real output review shows this drifting badly, the fix is adding a
   dedicated lip-sync step back in for dialogue shots specifically — not
   quietly dropping the disclaimer instead of fixing the pipeline.
-- **Object storage.** No S3 integration yet. Add it as its own service under
-  `app/services/` once asset generation is wired in — don't route it through
-  any third-party proxy.
+- **Object storage consumers.** Direct S3 upload/download/delete and private
+  URL generation now live in `app/services/storage_service.py`; the asset
+  generation milestone still needs to call that service when it starts
+  producing character, location, and rendered-video files.
 - **Auth.** There's no login on this skeleton at all. Add real Google OAuth
   (your own `client_id`/`client_secret`, not a managed proxy) before this
   goes anywhere near real users.
