@@ -74,6 +74,15 @@ class StorageServiceTests(unittest.TestCase):
         )
         self.assertEqual(client.calls[1][1]["ExpiresIn"], 900)
 
+    def test_s3_client_uses_regional_sigv4_virtual_host_urls(self) -> None:
+        with patch.object(storage_service.boto3, "client") as boto_client:
+            storage_service._s3_client()
+
+        kwargs = boto_client.call_args.kwargs
+        self.assertEqual(kwargs["region_name"], "ap-south-1")
+        self.assertEqual(kwargs["config"].signature_version, "s3v4")
+        self.assertEqual(kwargs["config"].s3, {"addressing_style": "virtual"})
+
     def test_empty_object_key_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             storage_service.asset_url(" / ")

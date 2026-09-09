@@ -3,6 +3,7 @@ from typing import BinaryIO, Optional, Union
 
 import boto3
 from botocore.client import BaseClient
+from botocore.config import Config
 
 from app.config import settings
 
@@ -42,6 +43,7 @@ def _s3_client() -> BaseClient:
         region_name=region,
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
+        config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
     )
 
 
