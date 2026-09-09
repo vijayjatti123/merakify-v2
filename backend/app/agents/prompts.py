@@ -18,8 +18,13 @@ across the whole video — same character look, same location, same key props th
 For each character, also note that a voice reference will be needed for audio continuity — set
 voice_sample_ref to null; it is filled in later by the asset-generation stage (either a user-uploaded
 sample or the character's first generated line, reused after that), never invented by you.
+Some dialogue_or_vo lines are narration or voiceover, not spoken by a visible character (no one is
+on-screen speaking them). Those lines still need one consistent voice across the whole video, the same
+way a character does — set narrator_voice_ref to null for the same reason: filled in later, not invented
+by you. If the scenes have no voiceover-style lines at all, still include narrator_voice_ref as null;
+it costs nothing to include and means later steps never have to guess whether it was considered.
 Respond with ONLY JSON:
-{"characters":[{"name":"...","description":"under 15 words, physical + wardrobe anchor","voice_sample_ref":null}],"locations":[{"name":"...","description":"under 12 words"}],"props":[{"name":"under 5 words"}]}
+{"characters":[{"name":"...","description":"under 15 words, physical + wardrobe anchor","voice_sample_ref":null}],"locations":[{"name":"...","description":"under 12 words"}],"props":[{"name":"under 5 words"}],"narrator_voice_ref":null}
 Max 4 characters, 3 locations, 4 props."""
 
 # Generation models cap out around 8-10 seconds per shot. Rather than

@@ -10,12 +10,21 @@ from app.services import job_service
 EventFn = Callable[[str, str], None]
 
 
-def _attach_voice_refs(shots: list[dict], characters: list[dict]) -> list[dict]:
+def _attach_voice_refs(shots: list[dict], characters: list[dict], narrator_voice_ref=None) -> list[dict]:
     """Attach each shot's character voice references deterministically, in code,
     rather than trusting the model to copy a reference string unchanged across
     several JSON round trips. The Cinematography Agent only has to name which
     characters are in a shot (characters_in_shot); this looks up the actual
     voice_sample_ref for each name from the continuity library.
+
+    A shot can carry dialogue with no character in it at all — voiceover or
+    narration, nobody visible on-screen speaking. That case surfaced for real
+    the first time this pipeline ran against a real ad brief: has_dialogue
+    true, characters_in_shot empty, voice_refs left as an empty dict with
+    nowhere for a real voice-generation call to look. Every such shot gets
+    the job's one narrator_voice_ref attached under the "Narrator" key here,
+    the same deterministic-attachment principle as character voices — never
+    left for a model to remember to fill in.
 
     Also flags every dialogue-carrying shot as experimental: by product
     decision, Indic dialogue audio (Sarvam/ElevenLabs) is passed straight into
@@ -30,6 +39,8 @@ def _attach_voice_refs(shots: list[dict], characters: list[dict]) -> list[dict]:
     for shot in shots:
         names = shot.get("characters_in_shot", [])
         shot["voice_refs"] = {name: by_name.get(name) for name in names if name in by_name}
+        if shot.get("has_dialogue") and not names:
+            shot["voice_refs"]["Narrator"] = narrator_voice_ref
         shot["experimental_audio_sync"] = bool(shot.get("has_dialogue"))
         if shot["experimental_audio_sync"]:
             shot["audio_sync_note"] = AUDIO_SYNC_DISCLAIMER
@@ -91,7 +102,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             f"\nTarget total duration: {fmt['duration_target_sec']} seconds",
             max_tokens=4096,
         )
-        cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"])
+        cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"], continuity.get("narrator_voice_ref"))
         dialogue_shots = sum(1 for s in cine["shots"] if s.get("has_dialogue"))
         cutaway_shots = len(cine["shots"]) - dialogue_shots
         emit(
@@ -122,7 +133,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
                 f"Current shots: {json.dumps(cine['shots'])}\nRequired fixes: {json.dumps(qa['issues'])}",
                 max_tokens=4096,
             )
-            cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"])
+            cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"], continuity.get("narrator_voice_ref"))
             emit("cinematography", "Revision complete.")
 
             emit("qa", "Re-checking the revised shot list...")
@@ -161,7 +172,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
                 f"Current total: {actual} seconds",
                 max_tokens=4096,
             )
-            cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"])
+            cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"], continuity.get("narrator_voice_ref"))
             emit("cinematography", "Trimmed to fit the target runtime.")
 
             emit("assembly", "Re-sequencing the trimmed shot list...")
