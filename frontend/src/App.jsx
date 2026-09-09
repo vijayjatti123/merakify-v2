@@ -12,7 +12,7 @@ export default function App() {
   }
 
   if (jobId) {
-    return <JobView jobId={jobId} onReset={() => setJobId(null)} />;
+    return <JobView key={jobId} jobId={jobId} onReset={() => setJobId(null)} onRetry={setJobId} />;
   }
   return <NewJob onSubmit={handleSubmit} />;
 }

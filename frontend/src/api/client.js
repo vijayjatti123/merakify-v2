@@ -10,6 +10,24 @@ export async function createJob(brief) {
   return res.json();
 }
 
+export async function retryJob(jobId) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/retry`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to retry job");
+  return res.json();
+}
+
+export async function reviseJob(jobId, shots) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/revise`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shots }),
+  });
+  if (!res.ok) throw new Error("Failed to revise job");
+  return res.json();
+}
+
 // Returns an EventSource-like object; caller attaches onEvent/onFinal/onError
 // and calls close() when done.
 export function streamJob(jobId, { onEvent, onFinal, onError }) {

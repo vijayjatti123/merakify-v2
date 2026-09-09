@@ -1,11 +1,25 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class JobCreate(BaseModel):
     brief: str
+
+
+class ShotEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shot_number: int
+    dialogue_text: str
+    description: str
+
+
+class JobRevise(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shots: list[ShotEdit]
 
 
 class JobOut(BaseModel):

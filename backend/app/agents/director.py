@@ -53,6 +53,92 @@ AUDIO_SYNC_DISCLAIMER = (
 )
 
 
+def validate_and_correct(
+    shots: list[dict],
+    characters: list[dict],
+    target_duration_sec: float,
+    *,
+    narrator_voice_ref=None,
+    emit: EventFn | None = None,
+) -> dict:
+    """Run the pipeline's single QA and duration self-correction sequence.
+
+    Both an initial pipeline run and a user revision pass through this function
+    so the retry limits and acceptance thresholds cannot drift between paths.
+    """
+
+    def notify(agent_key: str, note: str) -> None:
+        if emit:
+            emit(agent_key, note)
+
+    current_shots = shots
+
+    # Continuity QA Agent, with one autonomous self-correction pass.
+    notify("qa", "Checking the shot list for continuity and film-grammar violations...")
+    qa = call_agent(
+        prompts.QA_AGENT,
+        f"Shots: {json.dumps(current_shots)}\nCharacters: {json.dumps(characters)}",
+        max_tokens=3072,
+    )
+
+    if not qa.get("approved") and qa.get("issues"):
+        notify("qa", f"Found {len(qa['issues'])} issue(s) — sending back to Cinematography, no human needed.")
+        for issue in qa["issues"]:
+            notify("qa", f"Shot {issue['shot_number']}: {issue['problem']}")
+
+        notify("cinematography", "Revising flagged shots per QA feedback...")
+        cine = call_agent(
+            prompts.CINEMATOGRAPHY_FIX,
+            f"Current shots: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}",
+            max_tokens=4096,
+        )
+        current_shots = _attach_voice_refs(cine["shots"], characters, narrator_voice_ref)
+        notify("cinematography", "Revision complete.")
+
+        notify("qa", "Re-checking the revised shot list...")
+        qa = call_agent(
+            prompts.QA_AGENT,
+            f"Shots: {json.dumps(current_shots)}\nCharacters: {json.dumps(characters)}",
+            max_tokens=3072,
+        )
+        notify("qa", "Approved — continuity holds." if qa.get("approved") else "Residual notes remain; proceeding with best version.")
+    else:
+        notify("qa", "Approved on first pass — no continuity issues found.")
+
+    # Shot assembly and one autonomous duration-correction pass.
+    notify("assembly", "Sequencing shots and choosing transitions...")
+    assembly = call_agent(prompts.SHOT_ASSEMBLER, json.dumps(current_shots))
+    notify("assembly", f"Runtime locked at {assembly['total_duration_sec']}s.")
+
+    actual = assembly["total_duration_sec"]
+    if actual > target_duration_sec * 1.15:
+        notify(
+            "assembly",
+            f"{actual}s overshoots the {target_duration_sec}s target — sending back to Cinematography to trim, no human needed.",
+        )
+        cine = call_agent(
+            prompts.CINEMATOGRAPHY_TRIM,
+            f"Current shots: {json.dumps(current_shots)}\nTarget total duration: {target_duration_sec} seconds\n"
+            f"Current total: {actual} seconds",
+            max_tokens=4096,
+        )
+        current_shots = _attach_voice_refs(cine["shots"], characters, narrator_voice_ref)
+        notify("cinematography", "Trimmed to fit the target runtime.")
+
+        notify("assembly", "Re-sequencing the trimmed shot list...")
+        assembly = call_agent(prompts.SHOT_ASSEMBLER, json.dumps(current_shots))
+        notify(
+            "assembly",
+            f"Runtime now {assembly['total_duration_sec']}s (target {target_duration_sec}s)."
+            if assembly["total_duration_sec"] <= target_duration_sec * 1.15
+            else f"Still {assembly['total_duration_sec']}s after one trim pass; proceeding with best version.",
+        )
+    else:
+        notify("assembly", f"{actual}s is within range of the {target_duration_sec}s target — no trim needed.")
+
+    return {"shots": current_shots, "qa": qa, "assembly": assembly}
+
+
 def run_pipeline(db: Session, job_id: str) -> None:
     """Runs the full pipeline for one job, synchronously, writing an AgentEvent
     row (and a job status update) after every step so a live SSE stream reading
@@ -111,80 +197,20 @@ def run_pipeline(db: Session, job_id: str) -> None:
             f"{cutaway_shots} silent cutaway/reaction shot(s).",
         )
 
-        # 5. Continuity QA Agent, with one autonomous self-correction loop.
-        # This is the part that actually makes the system agentic rather than
-        # a single generative call: it inspects its own prior output and can
-        # send work back for revision with no human in the loop.
-        emit("qa", "Checking the shot list for continuity and film-grammar violations...")
-        qa = call_agent(
-            prompts.QA_AGENT,
-            f"Shots: {json.dumps(cine['shots'])}\nCharacters: {json.dumps(continuity['characters'])}",
-            max_tokens=3072,
+        # 5-7. Both initial runs and user revisions use this one QA/duration
+        # self-correction implementation so their behavior cannot diverge.
+        validated = validate_and_correct(
+            cine["shots"],
+            continuity["characters"],
+            fmt["duration_target_sec"],
+            narrator_voice_ref=continuity.get("narrator_voice_ref"),
+            emit=emit,
         )
-
-        if not qa.get("approved") and qa.get("issues"):
-            emit("qa", f"Found {len(qa['issues'])} issue(s) — sending back to Cinematography, no human needed.")
-            for issue in qa["issues"]:
-                emit("qa", f"Shot {issue['shot_number']}: {issue['problem']}")
-
-            emit("cinematography", "Revising flagged shots per QA feedback...")
-            cine = call_agent(
-                prompts.CINEMATOGRAPHY_FIX,
-                f"Current shots: {json.dumps(cine['shots'])}\nRequired fixes: {json.dumps(qa['issues'])}",
-                max_tokens=4096,
-            )
-            cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"], continuity.get("narrator_voice_ref"))
-            emit("cinematography", "Revision complete.")
-
-            emit("qa", "Re-checking the revised shot list...")
-            qa = call_agent(
-                prompts.QA_AGENT,
-                f"Shots: {json.dumps(cine['shots'])}\nCharacters: {json.dumps(continuity['characters'])}",
-                max_tokens=3072,
-            )
-            emit("qa", "Approved — continuity holds." if qa.get("approved") else "Residual notes remain; proceeding with best version.")
-        else:
-            emit("qa", "Approved on first pass — no continuity issues found.")
-
-        # 6. Shot Assembler
-        emit("assembly", "Sequencing shots and choosing transitions...")
-        assembly = call_agent(prompts.SHOT_ASSEMBLER, json.dumps(cine["shots"]))
-        emit("assembly", f"Runtime locked at {assembly['total_duration_sec']}s.")
-
-        # 7. Duration self-check — the same inspect-judge-act shape as the QA
-        # loop above, applied to total runtime. Without this, nothing ever
-        # verifies the assembled total against what was actually requested;
-        # real runs have overshot a 30s target by 33% and a 15s target by
-        # over 100% with no error raised, because summing durations correctly
-        # isn't the same as checking the sum against a target. One retry,
-        # same cap as the QA loop, for the same reason: bound the cost of an
-        # autonomous correction rather than looping indefinitely.
-        target = fmt["duration_target_sec"]
-        actual = assembly["total_duration_sec"]
-        if actual > target * 1.15:
-            emit(
-                "assembly",
-                f"{actual}s overshoots the {target}s target — sending back to Cinematography to trim, no human needed.",
-            )
-            cine = call_agent(
-                prompts.CINEMATOGRAPHY_TRIM,
-                f"Current shots: {json.dumps(cine['shots'])}\nTarget total duration: {target} seconds\n"
-                f"Current total: {actual} seconds",
-                max_tokens=4096,
-            )
-            cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"], continuity.get("narrator_voice_ref"))
-            emit("cinematography", "Trimmed to fit the target runtime.")
-
-            emit("assembly", "Re-sequencing the trimmed shot list...")
-            assembly = call_agent(prompts.SHOT_ASSEMBLER, json.dumps(cine["shots"]))
-            emit(
-                "assembly",
-                f"Runtime now {assembly['total_duration_sec']}s (target {target}s)."
-                if assembly["total_duration_sec"] <= target * 1.15
-                else f"Still {assembly['total_duration_sec']}s after one trim pass; proceeding with best version.",
-            )
-        else:
-            emit("assembly", f"{actual}s is within range of the {target}s target — no trim needed.")
+        cine["shots"] = _attach_voice_refs(
+            validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")
+        )
+        qa = validated["qa"]
+        assembly = validated["assembly"]
 
         # TODO (next milestone, not this skeleton): fan out here to real asset
         # generation — one call per character/location in continuity, run
