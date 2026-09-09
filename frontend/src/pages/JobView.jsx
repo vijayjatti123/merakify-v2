@@ -19,6 +19,8 @@ export default function JobView({ jobId, onReset, onRetry }) {
   const [editedShots, setEditedShots] = useState([]);
   const [isRetrying, setIsRetrying] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showRetryOptions, setShowRetryOptions] = useState(false);
+  const [changeRequest, setChangeRequest] = useState("");
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -68,7 +70,7 @@ export default function JobView({ jobId, onReset, onRetry }) {
   async function handleRetry() {
     setIsRetrying(true);
     try {
-      const job = await retryJob(jobId);
+      const job = await retryJob(jobId, changeRequest);
       onRetry(job.id);
     } catch (error) {
       console.error(error);
@@ -225,7 +227,7 @@ export default function JobView({ jobId, onReset, onRetry }) {
 
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={handleRetry}
+                onClick={() => setShowRetryOptions(true)}
                 disabled={isRetrying || isSaving}
                 className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium"
                 style={{ background: "#E8A33D", color: "#13141F" }}
@@ -254,6 +256,51 @@ export default function JobView({ jobId, onReset, onRetry }) {
                 </button>
               )}
             </div>
+
+            {showRetryOptions && (
+              <div
+                className="rounded-lg p-4 flex flex-col gap-3"
+                style={{ background: "#1B1D2B", border: "1px solid #2E3145" }}
+              >
+                <label className="text-sm" style={{ color: "#F3F0E8" }}>
+                  What would you like changed? <span style={{ color: "#9694A8" }}>(optional)</span>
+                  <textarea
+                    value={changeRequest}
+                    onChange={(event) => setChangeRequest(event.target.value)}
+                    disabled={isRetrying}
+                    placeholder="e.g. Make it funnier and use a nighttime setting"
+                    rows={3}
+                    className="w-full rounded-md p-3 mt-2 text-sm outline-none resize-none"
+                    style={{ background: "#0F1019", border: "1px solid #2E3145", color: "#F3F0E8" }}
+                  />
+                </label>
+                <p className="text-xs" style={{ color: "#9694A8" }}>
+                  Leave this blank for a more creative alternative based on your original requirements.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={handleRetry}
+                    disabled={isRetrying}
+                    className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium"
+                    style={{ background: "#E8A33D", color: "#13141F" }}
+                  >
+                    {isRetrying && <Loader2 size={14} className="animate-spin" />}
+                    {isRetrying ? "Starting..." : "Generate new version"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowRetryOptions(false);
+                      setChangeRequest("");
+                    }}
+                    disabled={isRetrying}
+                    className="px-4 py-2 rounded-md text-sm font-medium"
+                    style={{ background: "transparent", border: "1px solid #2E3145", color: "#F3F0E8" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             <p className="text-sm flex items-center gap-2" style={{ color: final.result.qa.approved ? "#7FA37A" : "#C1453B" }}>
               <Check size={14} />

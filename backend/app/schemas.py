@@ -22,6 +22,12 @@ class JobRevise(BaseModel):
     shots: list[ShotEdit]
 
 
+class JobRetry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change_request: Optional[str] = None
+
+
 class JobOut(BaseModel):
     id: str
     brief: str

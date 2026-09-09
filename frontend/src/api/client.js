@@ -10,9 +10,11 @@ export async function createJob(brief) {
   return res.json();
 }
 
-export async function retryJob(jobId) {
+export async function retryJob(jobId, changeRequest) {
   const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/retry`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ change_request: changeRequest.trim() || null }),
   });
   if (!res.ok) throw new Error("Failed to retry job");
   return res.json();

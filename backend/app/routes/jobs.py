@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.agents.director import _attach_voice_refs, run_pipeline, validate_and_correct
 from app.db import SessionLocal, get_db
-from app.schemas import JobCreate, JobOut, JobRevise
+from app.schemas import JobCreate, JobOut, JobRetry, JobRevise
 from app.services import job_service
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+
+RETRY_CONTEXT_MARKER = "\n\n--- Retry context ---\n"
 
 
 def _run_in_background(job_id: str) -> None:
@@ -39,6 +41,30 @@ def _create_and_start_job(brief: str, background_tasks: BackgroundTasks, db: Ses
     job = job_service.create_job(db, brief)
     background_tasks.add_task(_run_in_background, job.id)
     return _job_out(job)
+
+
+def _retry_brief(job, change_request: str | None) -> str:
+    """Build one retry prompt without carrying earlier retry context forward."""
+    original_brief = job.brief.split(RETRY_CONTEXT_MARKER, 1)[0].strip()
+    result = job_service.job_result(job) or {}
+    previous_script = result.get("script")
+
+    context = [
+        "Create a substantially different script and creative treatment from the previous version.",
+        "Preserve every hard requirement in the original brief, including product, duration, language, format, and any required dialogue.",
+        "Use a different hook, scene progression, visual actions, imagery, logline, and dialogue wording unless exact dialogue is required by the original brief.",
+    ]
+    if previous_script:
+        context.append(
+            "Use this immediately preceding script only as a do-not-repeat reference: "
+            f"{json.dumps(previous_script, ensure_ascii=False)}"
+        )
+    if change_request and change_request.strip():
+        context.append(f"The user specifically requested this change: {change_request.strip()}")
+    else:
+        context.append("The user gave no specific change request, so take a more imaginative creative direction.")
+
+    return f"{original_brief}{RETRY_CONTEXT_MARKER}{' '.join(context)}"
 
 
 @router.post("", response_model=JobOut)
@@ -102,11 +128,17 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
 
 
 @router.post("/{job_id}/retry")
-def retry_job(job_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def retry_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    payload: JobRetry | None = None,
+    db: Session = Depends(get_db),
+):
     job = job_service.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
-    retried = _create_and_start_job(job.brief, background_tasks, db)
+    enriched_brief = _retry_brief(job, payload.change_request if payload else None)
+    retried = _create_and_start_job(enriched_brief, background_tasks, db)
     return {"id": retried.id}
 
 
