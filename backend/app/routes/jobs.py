@@ -50,9 +50,8 @@ def _retry_brief(job, change_request: str | None) -> str:
     previous_script = result.get("script")
 
     context = [
-        "Create a substantially different script and creative treatment from the previous version.",
         "Preserve every hard requirement in the original brief, including product, duration, language, format, and any required dialogue.",
-        "Use a different hook, scene progression, visual actions, imagery, logline, and dialogue wording unless exact dialogue is required by the original brief.",
+        "Create an unmistakably different script and creative treatment from the previous version, not a paraphrase or a reshuffling of the same beats.",
     ]
     if previous_script:
         context.append(
@@ -61,8 +60,16 @@ def _retry_brief(job, change_request: str | None) -> str:
         )
     if change_request and change_request.strip():
         context.append(f"The user specifically requested this change: {change_request.strip()}")
+        context.append(
+            "Make that requested change the organizing idea of the new hook, setting, scene progression, visual actions, and ending."
+        )
     else:
-        context.append("The user gave no specific change request, so take a more imaginative creative direction.")
+        context.append(
+            "The user gave no specific change request. Silently choose a contrasting creative premise, then change at least four unconstrained axes among setting, time of day, mood, point of view, central metaphor, character action, narrative structure, and ending."
+        )
+    context.append(
+        "Do not reuse the previous logline, scene headings, scene descriptions, action sequence, visual hook, or closing beat."
+    )
 
     return f"{original_brief}{RETRY_CONTEXT_MARKER}{' '.join(context)}"
 
