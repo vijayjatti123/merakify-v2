@@ -1,4 +1,5 @@
 ﻿import json
+import unicodedata
 from typing import Callable
 
 from sqlalchemy.orm import Session
@@ -8,6 +9,23 @@ from app.agents.llm_client import call_agent
 from app.services import job_service
 
 EventFn = Callable[[str, str], None]
+
+
+def _normalize_character_name(name: str) -> str:
+    """Return the canonical key used to join names from separate model calls."""
+    return unicodedata.normalize("NFC", name)
+
+
+def _character_name_skeleton(name: str) -> str:
+    """Make a conservative fallback key for visually equivalent Indic names.
+
+    NFC cannot unify distinct nasal marks such as Devanagari candrabindu and
+    anusvara. Removing only non-spacing marks handles that model variation
+    while retaining spacing vowel signs. Callers must use this key only when
+    it identifies one unique Continuity character.
+    """
+    normalized = unicodedata.normalize("NFD", _normalize_character_name(name))
+    return "".join(char for char in normalized if unicodedata.category(char) != "Mn")
 
 
 def _attach_voice_refs(shots: list[dict], characters: list[dict], narrator_voice_ref=None) -> list[dict]:
@@ -35,10 +53,33 @@ def _attach_voice_refs(shots: list[dict], characters: list[dict], narrator_voice
     here, in code, on every shot with has_dialogue true, not left to the model
     to remember to mention.
     """
-    by_name = {c["name"]: c.get("voice_sample_ref") for c in characters}
+    by_name: dict[str, dict] = {}
+    by_skeleton: dict[str, list[dict]] = {}
+    for character in characters:
+        name = character.get("name")
+        if not isinstance(name, str):
+            continue
+        by_name[_normalize_character_name(name)] = character
+        by_skeleton.setdefault(_character_name_skeleton(name), []).append(character)
+
     for shot in shots:
         names = shot.get("characters_in_shot", [])
-        shot["voice_refs"] = {name: by_name.get(name) for name in names if name in by_name}
+        voice_refs = {}
+        for name in names:
+            if not isinstance(name, str):
+                continue
+
+            normalized_name = _normalize_character_name(name)
+            character = by_name.get(normalized_name)
+            if character is None:
+                candidates = by_skeleton.get(_character_name_skeleton(name), [])
+                if len(candidates) == 1:
+                    character = candidates[0]
+
+            if character is not None:
+                voice_refs[normalized_name] = character.get("voice_sample_ref")
+
+        shot["voice_refs"] = voice_refs
         if shot.get("has_dialogue") and not names:
             shot["voice_refs"]["Narrator"] = narrator_voice_ref
         shot["experimental_audio_sync"] = bool(shot.get("has_dialogue"))
