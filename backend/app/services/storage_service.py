@@ -1,6 +1,5 @@
 from functools import lru_cache
 from typing import BinaryIO, Optional, Union
-from urllib.parse import quote
 
 import boto3
 from botocore.client import BaseClient
@@ -47,15 +46,8 @@ def _s3_client() -> BaseClient:
 
 
 def asset_url(key: str, expires_in: Optional[int] = None) -> str:
-    """Return a CloudFront URL when configured, otherwise a presigned S3 URL."""
+    """Return a time-limited URL for an object in the private S3 bucket."""
     normalized_key = _object_key(key)
-    cloudfront_domain = settings.aws_cloudfront_domain.strip()
-    if cloudfront_domain:
-        # TODO(cloudfront): once AWS verifies the account and OAC is live, set
-        # AWS_CLOUDFRONT_DOMAIN. No storage code needs to change.
-        domain = cloudfront_domain.removeprefix("https://").removeprefix("http://").rstrip("/")
-        return f"https://{domain}/{quote(normalized_key, safe='/')}"
-
     ttl = expires_in if expires_in is not None else settings.aws_s3_presigned_url_ttl_sec
     if ttl <= 0:
         raise ValueError("Presigned URL expiry must be greater than zero")

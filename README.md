@@ -47,8 +47,8 @@ Open the Vite dev server URL, type a brief, watch it run.
 - Frontend: Railway (or Vercel) as a static build (`npm run build`), with
   `VITE_BACKEND_URL` pointing at the deployed backend.
 - Object storage uses the private S3 integration in
-  `app/services/storage_service.py`. Reads use presigned S3 URLs until the
-  account's CloudFront distribution and Origin Access Control are active.
+  `app/services/storage_service.py`. Reads use time-limited presigned S3 URLs,
+  so the bucket remains private.
 
 ## What's deliberately not here
 

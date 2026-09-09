@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
     aws_region: str = ""
     aws_s3_bucket: str = ""
-    aws_cloudfront_domain: str = ""
     aws_s3_presigned_url_ttl_sec: int = 3600
 
     class Config:

@@ -39,14 +39,12 @@ class StorageServiceTests(unittest.TestCase):
             "aws_region": settings.aws_region,
             "aws_access_key_id": settings.aws_access_key_id,
             "aws_secret_access_key": settings.aws_secret_access_key,
-            "aws_cloudfront_domain": settings.aws_cloudfront_domain,
             "aws_s3_presigned_url_ttl_sec": settings.aws_s3_presigned_url_ttl_sec,
         }
         settings.aws_s3_bucket = "test-bucket"
         settings.aws_region = "ap-south-1"
         settings.aws_access_key_id = "test-access-key"
         settings.aws_secret_access_key = "test-secret-key"
-        settings.aws_cloudfront_domain = ""
         settings.aws_s3_presigned_url_ttl_sec = 900
 
     def tearDown(self) -> None:
@@ -75,14 +73,6 @@ class StorageServiceTests(unittest.TestCase):
             ["put_object", "generate_presigned_url", "get_object", "delete_object"],
         )
         self.assertEqual(client.calls[1][1]["ExpiresIn"], 900)
-
-    def test_cloudfront_domain_switches_url_builder_without_s3_call(self) -> None:
-        settings.aws_cloudfront_domain = "https://d111111abcdef8.cloudfront.net/"
-
-        self.assertEqual(
-            storage_service.asset_url("renders/shot 1.mp4"),
-            "https://d111111abcdef8.cloudfront.net/renders/shot%201.mp4",
-        )
 
     def test_empty_object_key_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
