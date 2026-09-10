@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import Base, engine, ensure_asset_tagging_columns, ensure_job_intake_columns
-from app.routes import character_routes, jobs
+from app.routes import asset_routes, character_routes, jobs
 
 Base.metadata.create_all(bind=engine)
 ensure_job_intake_columns()
@@ -19,7 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(jobs.router)
-app.include_router(jobs.assets_router)
+app.include_router(asset_routes.router)
 app.include_router(character_routes.router)
 
 

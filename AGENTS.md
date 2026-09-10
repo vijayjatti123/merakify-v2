@@ -13,9 +13,12 @@ core surface.
 ## Architecture
 
 - `backend/app/main.py` — FastAPI entry point, all routes under `/api`.
-- `backend/app/routes/jobs.py` — the entire API surface: create a job, poll
-  it, or stream its progress over SSE. Keep it that way. New capability
-  extends the pipeline in `director.py`, not a new parallel route file.
+- `backend/app/routes/jobs.py` — job-specific endpoints: create, revise,
+  approve, retry, poll, or stream a job over SSE.
+- `backend/app/routes/character_routes.py` — Character Vault endpoints.
+- `backend/app/routes/asset_routes.py` — asset upload and library endpoints.
+  Keep route modules separated by resource type. New pipeline capability
+  extends the sequence in `director.py`; do not create a parallel orchestrator.
 - `backend/app/agents/director.py` — the orchestrator. There must only ever
   be ONE pipeline implementation. The old codebase had four competing
   ad-creation implementations (alpha/v3/cinematic/cinematic_v2) built up over

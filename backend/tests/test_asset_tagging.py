@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
-from app.routes.jobs import assets_router
+from app.routes.asset_routes import router as assets_router
 
 
 class AssetTaggingTests(unittest.TestCase):
@@ -32,8 +32,8 @@ class AssetTaggingTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.db.close()
 
-    @patch("app.routes.jobs.storage_service.asset_url")
-    @patch("app.routes.jobs.storage_service.upload_file")
+    @patch("app.routes.asset_routes.storage_service.asset_url")
+    @patch("app.routes.asset_routes.storage_service.upload_file")
     def test_upload_with_role_and_label_persists_in_library(self, upload_file, asset_url) -> None:
         upload_file.return_value = {
             "key": "assets/tagged/storefront.png",
@@ -56,7 +56,7 @@ class AssetTaggingTests(unittest.TestCase):
         self.assertEqual(listing.json()[0]["role"], "location")
         self.assertEqual(listing.json()[0]["label"], "the shop's storefront")
 
-    @patch("app.routes.jobs.storage_service.upload_file")
+    @patch("app.routes.asset_routes.storage_service.upload_file")
     def test_upload_without_tags_remains_backward_compatible(self, upload_file) -> None:
         upload_file.return_value = {
             "key": "assets/untagged/reference.png",
@@ -72,7 +72,7 @@ class AssetTaggingTests(unittest.TestCase):
         self.assertIsNone(uploaded.json()["role"])
         self.assertIsNone(uploaded.json()["label"])
 
-    @patch("app.routes.jobs.storage_service.upload_file")
+    @patch("app.routes.asset_routes.storage_service.upload_file")
     def test_upload_rejects_unknown_role(self, upload_file) -> None:
         response = self.client.post(
             "/api/assets/upload",
