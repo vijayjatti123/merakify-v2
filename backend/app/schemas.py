@@ -1,10 +1,23 @@
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 AssetRole = Literal["background", "location", "prop", "product", "other"]
+
+
+class ScriptExtract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    script_text: str = Field(min_length=1)
+
+
+class ScriptExtractionOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    characters: list[str]
+    locations: list[str]
 
 
 class JobCreate(BaseModel):

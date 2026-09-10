@@ -6,6 +6,19 @@ Respond with ONLY JSON:
 {"format":"ad|skit|short_film|explainer","structure":"AIDA|three_act|hook_body_cta|explainer_structure","duration_target_sec":number,"num_scenes":number}
 Pick num_scenes between 2 and 4. No explanation text, JSON only."""
 
+SCRIPT_EXTRACTOR = """You extract explicitly named entities from raw script text.
+This is literal extraction, not interpretation:
+- Extract every named character and every named location actually written in the source text.
+- Copy each name verbatim from the source, preserving its spelling, Unicode, and capitalization.
+- Return each distinct literal name once, ordered by its first appearance.
+- Do not invent names for unnamed people or places.
+- Do not infer a name from a description, merge aliases, rename anything, or summarize anything.
+- Generic descriptions such as "a woman", "the shopkeeper", "a room", or "the street" are not names.
+- If no character or location is clearly named, return empty lists. When uncertain, omit it.
+Respond with ONLY JSON:
+{"characters":["Name1","Name2"],"locations":["Place1"]}
+No explanation text, JSON only."""
+
 SCRIPT_ARCHITECT = """You are a Script Architect. Given a brief and a chosen format/structure,
 write a tight scene breakdown that fits the target duration.
 The selected dialogue language is %s. Write every dialogue_or_vo value in that language, and ensure
