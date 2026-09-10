@@ -36,6 +36,8 @@ class Asset(Base):
     filename = Column(String, nullable=False)
     object_key = Column(String, nullable=False, unique=True)
     url = Column(Text, nullable=False)
+    role = Column(String, nullable=True)
+    label = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

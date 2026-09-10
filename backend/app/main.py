@@ -2,11 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.db import Base, engine, ensure_job_intake_columns
+from app.db import Base, engine, ensure_asset_tagging_columns, ensure_job_intake_columns
 from app.routes import character_routes, jobs
 
 Base.metadata.create_all(bind=engine)
 ensure_job_intake_columns()
+ensure_asset_tagging_columns()
 
 app = FastAPI(title="Merakify Core")
 

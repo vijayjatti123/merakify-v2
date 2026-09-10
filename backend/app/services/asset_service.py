@@ -3,8 +3,16 @@ from sqlalchemy.orm import Session
 from app.models import Asset
 
 
-def create_asset(db: Session, *, filename: str, object_key: str, url: str) -> Asset:
-    asset = Asset(filename=filename, object_key=object_key, url=url)
+def create_asset(
+    db: Session,
+    *,
+    filename: str,
+    object_key: str,
+    url: str,
+    role: str | None = None,
+    label: str | None = None,
+) -> Asset:
+    asset = Asset(filename=filename, object_key=object_key, url=url, role=role, label=label)
     db.add(asset)
     db.commit()
     db.refresh(asset)

@@ -52,6 +52,8 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [assetRole, setAssetRole] = useState("");
+  const [assetLabel, setAssetLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -86,7 +88,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     setUploading(true);
     setError("");
     try {
-      const asset = await uploadAsset(file);
+      const asset = await uploadAsset(file, { role: assetRole, label: assetLabel });
       setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)]);
       setSelectedAsset(asset);
     } catch (uploadError) {
@@ -187,6 +189,23 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
 
             {assetPanelOpen && (
               <section className="rounded-xl p-4 flex flex-col gap-4" style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}` }}>
+                <div className="flex flex-wrap gap-3">
+                  <label className="flex flex-col gap-1 min-w-[160px]">
+                    <span className="text-xs" style={{ color: COLORS.muted }}>Role (optional)</span>
+                    <select value={assetRole} onChange={(event) => setAssetRole(event.target.value)} className="rounded-md px-3 py-2 text-sm outline-none" style={{ background: COLORS.field, border: `1px solid ${COLORS.border}`, color: COLORS.text }}>
+                      <option value="">No role</option>
+                      <option value="background">Background</option>
+                      <option value="location">Location</option>
+                      <option value="prop">Prop</option>
+                      <option value="product">Product</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 flex-1 min-w-[220px]">
+                    <span className="text-xs" style={{ color: COLORS.muted }}>Label (optional)</span>
+                    <input value={assetLabel} onChange={(event) => setAssetLabel(event.target.value)} maxLength={120} placeholder="e.g. the shop's storefront" className="rounded-md px-3 py-2 text-sm outline-none" style={{ background: COLORS.field, border: `1px solid ${COLORS.border}`, color: COLORS.text }} />
+                  </label>
+                </div>
                 <label className="rounded-md px-4 py-3 flex items-center justify-center gap-2 text-sm cursor-pointer" style={{ border: `1px dashed ${COLORS.marigold}`, color: COLORS.marigold }}>
                   {uploading ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
                   {uploading ? "Uploading..." : "Upload from your device"}

@@ -4,6 +4,9 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, model_validator
 
 
+AssetRole = Literal["background", "location", "prop", "product", "other"]
+
+
 class JobCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -63,6 +66,8 @@ class AssetOut(BaseModel):
     id: str
     filename: str
     url: str
+    role: Optional[AssetRole] = None
+    label: Optional[str] = None
     created_at: datetime
 
 

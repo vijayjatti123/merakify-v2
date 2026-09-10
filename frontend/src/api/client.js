@@ -16,9 +16,11 @@ export async function listAssets() {
   return res.json();
 }
 
-export async function uploadAsset(file) {
+export async function uploadAsset(file, { role = "", label = "" } = {}) {
   const body = new FormData();
   body.append("file", file);
+  if (role) body.append("role", role);
+  if (label.trim()) body.append("label", label.trim());
   const res = await fetch(`${BASE_URL}/api/assets/upload`, {
     method: "POST",
     body,

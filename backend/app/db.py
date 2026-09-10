@@ -34,6 +34,11 @@ JOB_COLUMN_DDL = {
     "ai_model": "VARCHAR NOT NULL DEFAULT 'Seedance 2.5'",
 }
 
+ASSET_COLUMN_DDL = {
+    "role": "VARCHAR",
+    "label": "VARCHAR",
+}
+
 
 def ensure_job_intake_columns() -> None:
     """Add intake columns for existing SQLite/Postgres deployments.
@@ -50,6 +55,18 @@ def ensure_job_intake_columns() -> None:
         for name, definition in JOB_COLUMN_DDL.items():
             if name not in existing:
                 connection.exec_driver_sql(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+
+
+def ensure_asset_tagging_columns() -> None:
+    """Add optional tagging columns to existing asset libraries."""
+    inspector = inspect(engine)
+    if "assets" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("assets")}
+    with engine.begin() as connection:
+        for name, definition in ASSET_COLUMN_DDL.items():
+            if name not in existing:
+                connection.exec_driver_sql(f"ALTER TABLE assets ADD COLUMN {name} {definition}")
 
 
 def get_db():
