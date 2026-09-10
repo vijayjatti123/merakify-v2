@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.agents import prompts
 from app.agents.llm_client import call_agent
-from app.services import job_service
+from app.services import character_service, job_service
 
 EventFn = Callable[[str, str], None]
 
@@ -39,6 +39,40 @@ def _character_name_skeleton(name: str) -> str:
     """
     normalized = unicodedata.normalize("NFD", _normalize_character_name(name))
     return "".join(char for char in normalized if unicodedata.category(char) != "Mn")
+
+
+def _apply_approved_vault_characters(db: Session, continuity: dict) -> int:
+    """Replace matching Continuity proposals with approved vault references.
+
+    Matching is intentionally limited to normalized, case-insensitive full names.
+    The Continuity Agent still proposes every character first; unmatched proposals
+    are not copied or rewritten so their generated descriptions remain unchanged.
+    """
+    approved_by_name = {}
+    for vault_character in character_service.list_approved_characters(db):
+        key = _normalize_character_name(vault_character.name).strip().casefold()
+        approved_by_name.setdefault(key, vault_character)
+
+    match_count = 0
+    characters = continuity.get("characters", [])
+    for index, proposed in enumerate(characters):
+        name = proposed.get("name")
+        if not isinstance(name, str):
+            continue
+        vault_character = approved_by_name.get(_normalize_character_name(name).strip().casefold())
+        if vault_character is None:
+            continue
+
+        characters[index] = {
+            **proposed,
+            "description": vault_character.description,
+            "image_url": vault_character.image_url,
+            "voice_id": vault_character.voice_id,
+            "voice_sample_ref": vault_character.voice_id,
+        }
+        match_count += 1
+
+    return match_count
 
 
 def _attach_voice_refs(
@@ -238,6 +272,12 @@ def run_pipeline(db: Session, job_id: str) -> None:
         # shot is planned, so every later step can be checked against it.
         emit("continuity_plan", "Building the reference asset library before any shot is planned...")
         continuity = call_agent(prompts.CONTINUITY_AGENT, json.dumps(script["scenes"]))
+        vault_matches = _apply_approved_vault_characters(db, continuity)
+        if vault_matches:
+            emit(
+                "continuity_plan",
+                f"Applied {vault_matches} approved Character Vault reference(s) by exact name.",
+            )
         emit(
             "continuity_plan",
             f"Locked {len(continuity['characters'])} character(s), {len(continuity['locations'])} location(s) as identity anchors.",
