@@ -112,8 +112,8 @@ def _attach_voice_refs(
         name = character.get("name")
         if not isinstance(name, str):
             continue
-        by_name[_normalize_character_name(name)] = character
-        by_skeleton.setdefault(_character_name_skeleton(name), []).append(character)
+        by_name[_normalize_character_name(name).casefold()] = character
+        by_skeleton.setdefault(_character_name_skeleton(name).casefold(), []).append(character)
 
     for shot in shots:
         names = shot.get("characters_in_shot", [])
@@ -123,9 +123,9 @@ def _attach_voice_refs(
                 continue
 
             normalized_name = _normalize_character_name(name)
-            character = by_name.get(normalized_name)
+            character = by_name.get(normalized_name.casefold())
             if character is None:
-                candidates = by_skeleton.get(_character_name_skeleton(name), [])
+                candidates = by_skeleton.get(_character_name_skeleton(name).casefold(), [])
                 if len(candidates) == 1:
                     character = candidates[0]
                 elif not candidates and emit:

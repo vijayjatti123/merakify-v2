@@ -12,6 +12,26 @@ class AttachVoiceRefsTests(unittest.TestCase):
 
         self.assertEqual(result[0]["voice_refs"], {"Caf\u00e9": "mother.wav"})
 
+    def test_matches_case_insensitively_without_warning(self) -> None:
+        characters = [{"name": "Ravi", "voice_sample_ref": "ravi.wav"}]
+        shots = [
+            {
+                "shot_number": 1,
+                "characters_in_shot": ["RAVI"],
+                "has_dialogue": True,
+            }
+        ]
+        events = []
+
+        result = _attach_voice_refs(
+            shots,
+            characters,
+            emit=lambda agent_key, note: events.append((agent_key, note)),
+        )
+
+        self.assertEqual(result[0]["voice_refs"], {"RAVI": "ravi.wav"})
+        self.assertEqual(events, [])
+
     def test_matches_devanagari_candrabindu_and_anusvara_variants(self) -> None:
         characters = [
             {"name": "\u092e\u093e\u0901", "voice_sample_ref": "mother.wav"},
