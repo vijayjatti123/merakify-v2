@@ -39,6 +39,19 @@ class Asset(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Character(Base):
+    __tablename__ = "characters"
+
+    id = Column(String, primary_key=True, default=new_id)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    image_url = Column(Text, nullable=False)
+    image_source = Column(String, nullable=False)  # generated | uploaded
+    voice_id = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="draft")  # draft | approved
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class AgentEvent(Base):
     __tablename__ = "agent_events"
 

@@ -17,6 +17,259 @@ input {
   font: inherit;
 }
 
+.app-view-switcher {
+  position: fixed;
+  z-index: 10;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.25rem;
+  border: 1px solid #2e3145;
+  border-radius: 0.65rem;
+  background: #171925;
+}
+
+.app-view-switcher button {
+  padding: 0.4rem 0.65rem;
+  border: 0;
+  border-radius: 0.45rem;
+  color: #9694a8;
+  background: transparent;
+  font-size: 0.72rem;
+}
+
+.app-view-switcher button[data-active="true"] {
+  color: #13141f;
+  background: #e8a33d;
+}
+
+.vault-shell {
+  width: min(1180px, calc(100% - 2rem));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+}
+
+.vault-header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.vault-header h1,
+.vault-editor h2,
+.vault-library h2 {
+  margin: 0.25rem 0;
+  font-family: "Fraunces", serif;
+}
+
+.vault-header h1 {
+  font-size: clamp(2rem, 4vw, 3.25rem);
+}
+
+.vault-header > div > p:last-child {
+  margin: 0.45rem 0 0;
+  color: #9694a8;
+  font-size: 0.82rem;
+}
+
+.vault-back,
+.vault-primary,
+.vault-secondary,
+.vault-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 0.5rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.vault-back,
+.vault-secondary,
+.vault-upload {
+  border: 1px solid #34374c;
+  color: #c7c4d3;
+  background: #171925;
+}
+
+.vault-primary {
+  border: 1px solid #e8a33d;
+  color: #13141f;
+  background: #e8a33d;
+  font-weight: 600;
+}
+
+.vault-primary:disabled,
+.vault-secondary:disabled,
+.vault-upload:has(input:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vault-workspace {
+  display: grid;
+  grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.vault-editor,
+.vault-library {
+  padding: 1.2rem;
+  border: 1px solid #2e3145;
+  border-radius: 1rem;
+  background: #1b1d2b;
+}
+
+.vault-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.vault-editor > label,
+.vault-draft-details label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: #9694a8;
+  font-size: 0.68rem;
+}
+
+.vault-editor input,
+.vault-editor textarea,
+.vault-editor select {
+  width: 100%;
+  padding: 0.65rem 0.7rem;
+  outline: none;
+  border: 1px solid #34374c;
+  border-radius: 0.5rem;
+  color: #f3f0e8;
+  background: #0f1019;
+}
+
+.vault-editor textarea {
+  resize: vertical;
+}
+
+.vault-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.vault-upload input {
+  display: none;
+}
+
+.vault-draft-card {
+  overflow: hidden;
+  border: 1px solid #34374c;
+  border-radius: 0.75rem;
+  background: #11121b;
+}
+
+.vault-draft-card > img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  display: block;
+  object-fit: cover;
+  background: #252738;
+}
+
+.vault-draft-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.8rem;
+}
+
+.vault-source {
+  width: fit-content;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  color: #e8a33d;
+  background: #2e2418;
+  font-size: 0.62rem;
+  text-transform: capitalize;
+}
+
+.vault-library {
+  min-height: 420px;
+}
+
+.vault-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.vault-character-card {
+  overflow: hidden;
+  border: 1px solid #2e3145;
+  border-radius: 0.75rem;
+  background: #11121b;
+}
+
+.vault-character-card > img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  display: block;
+  object-fit: cover;
+  background: #252738;
+}
+
+.vault-character-card > div {
+  padding: 0.7rem;
+}
+
+.vault-character-card h3 {
+  margin: 0;
+  font-family: "Fraunces", serif;
+}
+
+.vault-character-card p {
+  min-height: 3.6em;
+  margin: 0.35rem 0;
+  overflow: hidden;
+  color: #aaa8bb;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.vault-character-card span {
+  color: #e8a33d;
+  font-size: 0.64rem;
+  text-transform: capitalize;
+}
+
+.vault-empty {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: #6f6d7e;
+  font-size: 0.78rem;
+}
+
+.vault-error {
+  margin: 0;
+  color: #e49b8c;
+  font-size: 0.74rem;
+}
+
 .phase-one-shell {
   width: 100%;
   min-height: 100vh;
@@ -611,6 +864,10 @@ input {
 }
 
 @media (max-width: 900px) {
+  .vault-workspace {
+    grid-template-columns: 1fr;
+  }
+
   .phase-one-shell--active {
     grid-template-columns: 1fr;
     grid-template-areas:

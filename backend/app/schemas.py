@@ -66,6 +66,34 @@ class AssetOut(BaseModel):
     created_at: datetime
 
 
+class CharacterGenerate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str
+    character_id: Optional[str] = None
+
+
+class CharacterVoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    voice_id: str
+
+
+class CharacterOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    image_url: str
+    image_source: Literal["generated", "uploaded"]
+    voice_id: Optional[str] = None
+    status: Literal["draft", "approved"]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class AgentEventOut(BaseModel):
     agent_key: str
     note: str
