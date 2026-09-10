@@ -50,6 +50,8 @@ def _create_and_start_job(
     quality: str = "720p",
     language: str = "English",
     ai_model: str = "Seedance 2.5",
+    script_text: str | None = None,
+    resolutions: dict | None = None,
 ) -> JobOut:
     job = job_service.create_job(
         db,
@@ -58,6 +60,8 @@ def _create_and_start_job(
         quality=quality,
         language=language,
         ai_model=ai_model,
+        script_text=script_text,
+        resolutions=resolutions,
     )
     background_tasks.add_task(_run_in_background, job.id)
     return _job_out(job)
@@ -108,6 +112,8 @@ def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Sessio
         quality=payload.quality,
         language=payload.language.strip(),
         ai_model=payload.ai_model,
+        script_text=payload.script_text.strip() if payload.script_text is not None else None,
+        resolutions=payload.resolutions.model_dump() if payload.resolutions is not None else None,
     )
 
 

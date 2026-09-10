@@ -70,3 +70,20 @@ export function buildResolutionItems(source, names, type) {
     displayName: preferredDisplayName(source, name),
   }));
 }
+
+export function buildResolutionMap(characterItems, locationItems, resolutions) {
+  const resolutionMap = { characters: {}, locations: {} };
+  for (const item of characterItems) {
+    const resolution = resolutions[item.id];
+    resolutionMap.characters[item.displayName] = resolution.mode === "invent"
+      ? { mode: "invent" }
+      : { mode: "vault", character_id: resolution.character.id };
+  }
+  for (const item of locationItems) {
+    const resolution = resolutions[item.id];
+    resolutionMap.locations[item.displayName] = resolution.mode === "invent"
+      ? { mode: "invent" }
+      : { mode: "asset", asset_id: resolution.asset.id };
+  }
+  return resolutionMap;
+}

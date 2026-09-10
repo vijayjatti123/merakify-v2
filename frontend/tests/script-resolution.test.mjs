@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildResolutionItems,
+  buildResolutionMap,
   normalizeResolutionKey,
   preferredDisplayName,
 } from "../src/utils/scriptResolution.js";
@@ -33,4 +34,22 @@ test("groups NFC and full-casefold-equivalent extracted names", () => {
       displayName: "Weiß",
     },
   ]);
+});
+
+test("serializes D2 choices to IDs only for D3 job creation", () => {
+  const characters = [{ id: "character:ravi", displayName: "Ravi" }, { id: "character:omar", displayName: "Omar" }];
+  const locations = [{ id: "location:cafe", displayName: "Cafe" }];
+  const resolutions = {
+    "character:ravi": { mode: "vault", character: { id: "character-1", image_url: "not-sent" } },
+    "character:omar": { mode: "invent", name: "Omar" },
+    "location:cafe": { mode: "asset", asset: { id: "asset-1", url: "not-sent" } },
+  };
+
+  assert.deepEqual(buildResolutionMap(characters, locations, resolutions), {
+    characters: {
+      Ravi: { mode: "vault", character_id: "character-1" },
+      Omar: { mode: "invent" },
+    },
+    locations: { Cafe: { mode: "asset", asset_id: "asset-1" } },
+  });
 });

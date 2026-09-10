@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.agents import prompts
 from app.agents.llm_client import call_agent
-from app.services import character_service, job_service
+from app.services import asset_service, character_service, job_service, storage_service
 
 EventFn = Callable[[str, str], None]
 
@@ -41,28 +41,74 @@ def _character_name_skeleton(name: str) -> str:
     return "".join(char for char in normalized if unicodedata.category(char) != "Mn")
 
 
-def _apply_approved_vault_characters(db: Session, continuity: dict) -> int:
-    """Replace matching Continuity proposals with approved vault references.
+def _reference_name_key(name: str) -> str:
+    return _normalize_character_name(name).strip().casefold()
 
-    Matching is intentionally limited to normalized, case-insensitive full names.
-    The Continuity Agent still proposes every character first; unmatched proposals
-    are not copied or rewritten so their generated descriptions remain unchanged.
+
+def _apply_continuity_overrides(
+    db: Session,
+    continuity: dict,
+    resolutions: dict | None = None,
+) -> dict[str, int]:
+    """Apply automatic and explicit references in one post-Continuity pass.
+
+    An explicit D2 resolution wins over Module C's automatic name match. Explicit
+    ``invent`` choices deliberately suppress automatic matching so the Continuity
+    Agent's own proposal remains untouched. With no resolution map, this executes
+    the original Module C behavior only.
     """
-    approved_by_name = {}
-    for vault_character in character_service.list_approved_characters(db):
-        key = _normalize_character_name(vault_character.name).strip().casefold()
-        approved_by_name.setdefault(key, vault_character)
+    resolutions = resolutions or {}
+    explicit_characters = {
+        _reference_name_key(name): (name, resolution)
+        for name, resolution in resolutions.get("characters", {}).items()
+    }
+    explicit_locations = {
+        _reference_name_key(name): (name, resolution)
+        for name, resolution in resolutions.get("locations", {}).items()
+    }
 
-    match_count = 0
+    approved_characters = character_service.list_approved_characters(db)
+    approved_by_name = {}
+    approved_by_id = {}
+    for vault_character in approved_characters:
+        approved_by_name.setdefault(_reference_name_key(vault_character.name), vault_character)
+        approved_by_id[vault_character.id] = vault_character
+
+    stats = {
+        "automatic_characters": 0,
+        "explicit_characters": 0,
+        "explicit_locations": 0,
+    }
+    consumed_characters: set[str] = set()
     characters = continuity.get("characters", [])
     for index, proposed in enumerate(characters):
         name = proposed.get("name")
         if not isinstance(name, str):
             continue
-        vault_character = approved_by_name.get(_normalize_character_name(name).strip().casefold())
-        if vault_character is None:
+        key = _reference_name_key(name)
+        explicit = explicit_characters.get(key)
+        if explicit is not None:
+            resolved_name, resolution = explicit
+            consumed_characters.add(key)
+            if resolution.get("mode") == "invent":
+                continue
+            vault_character = approved_by_id.get(resolution.get("character_id"))
+            if vault_character is None:
+                raise ValueError(f'approved character resolution for "{resolved_name}" was not found')
+            characters[index] = {
+                **proposed,
+                "name": resolved_name,
+                "description": vault_character.description,
+                "image_url": vault_character.image_url,
+                "voice_id": vault_character.voice_id,
+                "voice_sample_ref": vault_character.voice_id,
+            }
+            stats["explicit_characters"] += 1
             continue
 
+        vault_character = approved_by_name.get(key)
+        if vault_character is None:
+            continue
         characters[index] = {
             **proposed,
             "description": vault_character.description,
@@ -70,9 +116,88 @@ def _apply_approved_vault_characters(db: Session, continuity: dict) -> int:
             "voice_id": vault_character.voice_id,
             "voice_sample_ref": vault_character.voice_id,
         }
-        match_count += 1
+        stats["automatic_characters"] += 1
 
-    return match_count
+    missing_characters = set(explicit_characters) - consumed_characters
+    for key in missing_characters:
+        resolved_name, resolution = explicit_characters[key]
+        if resolution.get("mode") == "invent":
+            raise ValueError(f'Continuity omitted AI-invented character "{resolved_name}" from the source script')
+        vault_character = approved_by_id.get(resolution.get("character_id"))
+        if vault_character is None:
+            raise ValueError(f'approved character resolution for "{resolved_name}" was not found')
+        characters.append(
+            {
+                "name": resolved_name,
+                "description": vault_character.description,
+                "image_url": vault_character.image_url,
+                "voice_id": vault_character.voice_id,
+                "voice_sample_ref": vault_character.voice_id,
+            }
+        )
+        stats["explicit_characters"] += 1
+
+    asset_resolutions = {
+        resolution.get("asset_id")
+        for _, resolution in explicit_locations.values()
+        if resolution.get("mode") == "asset"
+    }
+    assets_by_id = {
+        asset.id: asset for asset in asset_service.list_assets(db) if asset.id in asset_resolutions
+    } if asset_resolutions else {}
+    consumed_locations: set[str] = set()
+    locations = continuity.get("locations", [])
+    for index, proposed in enumerate(locations):
+        name = proposed.get("name")
+        if not isinstance(name, str):
+            continue
+        key = _reference_name_key(name)
+        explicit = explicit_locations.get(key)
+        if explicit is None:
+            continue
+        resolved_name, resolution = explicit
+        consumed_locations.add(key)
+        if resolution.get("mode") == "invent":
+            continue
+        asset = assets_by_id.get(resolution.get("asset_id"))
+        if asset is None or asset.role != "location":
+            raise ValueError(f'location asset resolution for "{resolved_name}" was not found')
+        asset_url = storage_service.asset_url(asset.object_key)
+        locations[index] = {
+            **proposed,
+            "name": resolved_name,
+            "description": asset.label or proposed.get("description") or asset.filename,
+            "asset_id": asset.id,
+            "image_url": asset_url,
+            "filename": asset.filename,
+            "role": asset.role,
+            "label": asset.label,
+        }
+        stats["explicit_locations"] += 1
+
+    missing_locations = set(explicit_locations) - consumed_locations
+    for key in missing_locations:
+        resolved_name, resolution = explicit_locations[key]
+        if resolution.get("mode") == "invent":
+            raise ValueError(f'Continuity omitted AI-invented location "{resolved_name}" from the source script')
+        asset = assets_by_id.get(resolution.get("asset_id"))
+        if asset is None or asset.role != "location":
+            raise ValueError(f'location asset resolution for "{resolved_name}" was not found')
+        asset_url = storage_service.asset_url(asset.object_key)
+        locations.append(
+            {
+                "name": resolved_name,
+                "description": asset.label or asset.filename,
+                "asset_id": asset.id,
+                "image_url": asset_url,
+                "filename": asset.filename,
+                "role": asset.role,
+                "label": asset.label,
+            }
+        )
+        stats["explicit_locations"] += 1
+
+    return stats
 
 
 def _attach_voice_refs(
@@ -254,29 +379,55 @@ def run_pipeline(db: Session, job_id: str) -> None:
         job = job_service.get_job(db, job_id)
         brief = job.brief
         language = job.language or "English"
+        source_script = job.script_text
+        resolutions = json.loads(job.resolutions_json) if job.resolutions_json else None
 
         # 1. Format Classifier — cheap/fast model, this step is pure classification.
         emit("format", "Reading the request, choosing format and structure...")
         fmt = call_agent(prompts.FORMAT_CLASSIFIER, brief, fast=True)
         emit("format", f"Classified as {fmt['format']}, {fmt['structure']} structure, {fmt['num_scenes']} scenes.")
 
-        # 2. Script Architect
-        emit("script", "Writing scene breakdown...")
-        script = call_agent(
-            prompts.SCRIPT_ARCHITECT % language,
-            f"Brief: {brief}\nFormat: {fmt['format']}\nStructure: {fmt['structure']}\nNumber of scenes: {fmt['num_scenes']}",
-        )
+        # 2. Script Architect — pasted scripts use a distinct preservation
+        # prompt; the original no-script call remains unchanged.
+        emit("script", "Structuring the pasted script without rewriting it..." if source_script else "Writing scene breakdown...")
+        if source_script:
+            resolved_names = resolutions or {"characters": {}, "locations": {}}
+            script = call_agent(
+                prompts.SCRIPT_ARCHITECT_FROM_SCRIPT,
+                f"Source script:\n{source_script}\n\nProduction format: {fmt['format']}\n"
+                f"Target duration: {fmt['duration_target_sec']} seconds\n"
+                f"Named characters: {json.dumps(list(resolved_names.get('characters', {})), ensure_ascii=False)}\n"
+                f"Named locations: {json.dumps(list(resolved_names.get('locations', {})), ensure_ascii=False)}",
+            )
+        else:
+            script = call_agent(
+                prompts.SCRIPT_ARCHITECT % language,
+                f"Brief: {brief}\nFormat: {fmt['format']}\nStructure: {fmt['structure']}\nNumber of scenes: {fmt['num_scenes']}",
+            )
         emit("script", f"Logline locked: \"{script['logline']}\"")
 
         # 3. Visual Continuity Agent — builds the reference library BEFORE any
         # shot is planned, so every later step can be checked against it.
         emit("continuity_plan", "Building the reference asset library before any shot is planned...")
-        continuity = call_agent(prompts.CONTINUITY_AGENT, json.dumps(script["scenes"]))
-        vault_matches = _apply_approved_vault_characters(db, continuity)
-        if vault_matches:
+        continuity_input = json.dumps(script["scenes"])
+        if source_script:
+            continuity_input += (
+                "\nEvery named script entity below must have one matching Continuity entry; preserve each name exactly:\n"
+                f"Characters: {json.dumps(list((resolutions or {}).get('characters', {})), ensure_ascii=False)}\n"
+                f"Locations: {json.dumps(list((resolutions or {}).get('locations', {})), ensure_ascii=False)}"
+            )
+        continuity = call_agent(prompts.CONTINUITY_AGENT, continuity_input)
+        override_stats = _apply_continuity_overrides(db, continuity, resolutions)
+        if override_stats["automatic_characters"]:
             emit(
                 "continuity_plan",
-                f"Applied {vault_matches} approved Character Vault reference(s) by exact name.",
+                f"Applied {override_stats['automatic_characters']} approved Character Vault reference(s) by exact name.",
+            )
+        if override_stats["explicit_characters"] or override_stats["explicit_locations"]:
+            emit(
+                "continuity_plan",
+                f"Applied {override_stats['explicit_characters']} explicit character and "
+                f"{override_stats['explicit_locations']} explicit location resolution(s).",
             )
         emit(
             "continuity_plan",
@@ -289,10 +440,15 @@ def run_pipeline(db: Session, job_id: str) -> None:
         # needs the target runtime explicitly — without it, there's nothing
         # stopping the total from drifting well past what was asked for.
         emit("cinematography", "Assigning camera, lens and lighting per shot...")
+        cinematography_input = (
+            f"Scenes: {json.dumps(script['scenes'])}\nCharacters: {json.dumps(continuity['characters'])}"
+        )
+        if source_script:
+            cinematography_input += f"\nLocations: {json.dumps(continuity['locations'])}"
+        cinematography_input += f"\nTarget total duration: {fmt['duration_target_sec']} seconds"
         cine = call_agent(
             prompts.CINEMATOGRAPHY_AGENT,
-            f"Scenes: {json.dumps(script['scenes'])}\nCharacters: {json.dumps(continuity['characters'])}"
-            f"\nTarget total duration: {fmt['duration_target_sec']} seconds",
+            cinematography_input,
             max_tokens=4096,
         )
         cine["shots"] = _attach_voice_refs(
@@ -359,6 +515,8 @@ def run_pipeline(db: Session, job_id: str) -> None:
             "assembly": assembly,
             "qa": qa,
         }
+        if source_script:
+            result["source_script_text"] = source_script
         job_service.set_result(db, job_id, result)
         job_service.set_status(db, job_id, "done")
 

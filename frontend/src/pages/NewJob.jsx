@@ -146,6 +146,21 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     }
   }
 
+  async function handleResolvedScriptSubmit(resolutions) {
+    const briefParts = [brief.trim(), `Target duration: ${effectiveDuration}. Content type: ${contentType}.`];
+    if (selectedAsset) briefParts.push(`Reference image: ${selectedAsset.url}`);
+    await onSubmit({
+      brief: briefParts.join("\n\n"),
+      aspect_ratio: aspectRatio,
+      quality,
+      language: effectiveLanguage,
+      ai_model: aiModel,
+      script_text: brief.trim(),
+      resolutions,
+    });
+    setExtraction(null);
+  }
+
   const visibleTiers = MODEL_TIERS.map((tier) => ({
     ...tier,
     models: language === "English" ? tier.models : tier.models.filter((model) => NON_ENGLISH_MODELS.has(model)),
@@ -159,6 +174,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
         initialCharacters={approvedCharacters}
         locationAssets={locationAssets}
         onBack={() => setExtraction(null)}
+        onContinue={handleResolvedScriptSubmit}
       />
     );
   }

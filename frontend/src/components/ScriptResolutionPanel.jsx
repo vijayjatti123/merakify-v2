@@ -7,7 +7,7 @@ import {
   setCharacterVoice,
   uploadCharacter,
 } from "../api/client";
-import { buildResolutionItems } from "../utils/scriptResolution";
+import { buildResolutionItems, buildResolutionMap } from "../utils/scriptResolution";
 
 const SARVAM_VOICES = [
   "shubh", "aditya", "rahul", "rohan", "amit", "dev", "ratan", "varun", "manan", "sumit",
@@ -225,10 +225,11 @@ function LocationResolutionRow({ item, assets, resolution, onResolve }) {
   );
 }
 
-export default function ScriptResolutionPanel({ scriptText, extraction, initialCharacters, locationAssets, onBack }) {
+export default function ScriptResolutionPanel({ scriptText, extraction, initialCharacters, locationAssets, onBack, onContinue }) {
   const [characters, setCharacters] = useState(initialCharacters);
   const [resolutions, setResolutions] = useState({});
-  const [readyAcknowledged, setReadyAcknowledged] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const characterItems = useMemo(
     () => buildResolutionItems(scriptText, extraction.characters, "character"),
     [scriptText, extraction.characters],
@@ -242,12 +243,27 @@ export default function ScriptResolutionPanel({ scriptText, extraction, initialC
   const allResolved = resolvedCount === items.length;
 
   function setResolution(id, resolution) {
-    setReadyAcknowledged(false);
+    setSubmitError("");
     setResolutions((current) => ({ ...current, [id]: resolution }));
   }
 
   function addApprovedCharacter(character) {
     setCharacters((current) => [character, ...current.filter(({ id }) => id !== character.id)]);
+  }
+
+  async function handleContinue() {
+    if (!allResolved || submitting) return;
+    const resolutionMap = buildResolutionMap(characterItems, locationItems, resolutions);
+
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      await onContinue(resolutionMap);
+    } catch (error) {
+      setSubmitError(error.message);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -287,11 +303,12 @@ export default function ScriptResolutionPanel({ scriptText, extraction, initialC
 
       <footer className="resolution-footer">
         <p>{resolvedCount} of {items.length} resolved</p>
-        <button type="button" disabled={!allResolved} onClick={() => setReadyAcknowledged(true)}>
-          Continue to create shot list
+        <button type="button" disabled={!allResolved || submitting} onClick={handleContinue}>
+          {submitting && <Loader2 size={14} className="animate-spin" />}
+          {submitting ? "Starting..." : "Continue to create shot list"}
         </button>
         {!allResolved && <span>Resolve every name before continuing.</span>}
-        {readyAcknowledged && <span className="resolution-ready">All resolutions are ready. D3 will connect them to job creation.</span>}
+        {submitError && <span className="resolution-error">{submitError}</span>}
       </footer>
     </section>
   );

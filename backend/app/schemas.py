@@ -20,6 +20,49 @@ class ScriptExtractionOut(BaseModel):
     locations: list[str]
 
 
+class CharacterResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["vault", "invent"]
+    character_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_character_id(self):
+        if self.mode == "vault" and not self.character_id:
+            raise ValueError("vault character resolutions require character_id")
+        if self.mode == "invent" and self.character_id is not None:
+            raise ValueError("invent character resolutions cannot include character_id")
+        return self
+
+
+class LocationResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["asset", "invent"]
+    asset_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_asset_id(self):
+        if self.mode == "asset" and not self.asset_id:
+            raise ValueError("asset location resolutions require asset_id")
+        if self.mode == "invent" and self.asset_id is not None:
+            raise ValueError("invent location resolutions cannot include asset_id")
+        return self
+
+
+class ScriptResolutionMap(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    characters: dict[str, CharacterResolution] = Field(default_factory=dict)
+    locations: dict[str, LocationResolution] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_names(self):
+        if any(not name.strip() for name in [*self.characters, *self.locations]):
+            raise ValueError("resolution names cannot be empty")
+        return self
+
+
 class JobCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -30,11 +73,17 @@ class JobCreate(BaseModel):
     ai_model: Literal["Wan 2.5", "Seedance 2.0", "Kling 3.0", "Seedance 2.5", "Veo 3.1", "Sora 2"] = (
         "Seedance 2.5"
     )
+    script_text: Optional[str] = None
+    resolutions: Optional[ScriptResolutionMap] = None
 
     @model_validator(mode="after")
-    def validate_language_model_compatibility(self):
+    def validate_request(self):
         if self.language.strip().lower() != "english" and self.ai_model not in {"Seedance 2.0", "Seedance 2.5"}:
             raise ValueError("non-English jobs require Seedance 2.0 or Seedance 2.5")
+        if (self.script_text is None) != (self.resolutions is None):
+            raise ValueError("script_text and resolutions must be provided together")
+        if self.script_text is not None and not self.script_text.strip():
+            raise ValueError("script_text cannot be empty")
         return self
 
 

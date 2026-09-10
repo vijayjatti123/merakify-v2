@@ -32,6 +32,8 @@ JOB_COLUMN_DDL = {
     "quality": "VARCHAR NOT NULL DEFAULT '720p'",
     "language": "VARCHAR NOT NULL DEFAULT 'English'",
     "ai_model": "VARCHAR NOT NULL DEFAULT 'Seedance 2.5'",
+    "script_text": "TEXT",
+    "resolutions_json": "TEXT",
 }
 
 ASSET_COLUMN_DDL = {

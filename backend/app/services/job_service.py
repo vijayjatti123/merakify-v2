@@ -14,6 +14,8 @@ def create_job(
     quality: str = "720p",
     language: str = "English",
     ai_model: str = "Seedance 2.5",
+    script_text: str | None = None,
+    resolutions: dict | None = None,
 ) -> Job:
     job = Job(
         brief=brief,
@@ -21,6 +23,8 @@ def create_job(
         quality=quality,
         language=language,
         ai_model=ai_model,
+        script_text=script_text,
+        resolutions_json=json.dumps(resolutions, ensure_ascii=False) if resolutions is not None else None,
         status="queued",
     )
     db.add(job)

@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.agents.director import _apply_approved_vault_characters
+from app.agents.director import _apply_continuity_overrides
 
 
 class ApprovedVaultContinuityTests(unittest.TestCase):
@@ -10,6 +10,7 @@ class ApprovedVaultContinuityTests(unittest.TestCase):
     def test_case_insensitive_match_uses_vault_fields_selectively(self, list_approved) -> None:
         list_approved.return_value = [
             SimpleNamespace(
+                id="ravi-1",
                 name="Ravi",
                 description="Vault-approved production coordinator",
                 image_url="https://example.test/ravi.png",
@@ -32,9 +33,9 @@ class ApprovedVaultContinuityTests(unittest.TestCase):
             ]
         }
 
-        match_count = _apply_approved_vault_characters(object(), continuity)
+        stats = _apply_continuity_overrides(object(), continuity)
 
-        self.assertEqual(match_count, 1)
+        self.assertEqual(stats["automatic_characters"], 1)
         self.assertEqual(
             continuity["characters"][0],
             {
@@ -60,6 +61,7 @@ class ApprovedVaultContinuityTests(unittest.TestCase):
     def test_no_match_leaves_continuity_output_unchanged(self, list_approved) -> None:
         list_approved.return_value = [
             SimpleNamespace(
+                id="ravi-1",
                 name="Ravi",
                 description="Vault description",
                 image_url="https://example.test/ravi.png",
@@ -86,9 +88,9 @@ class ApprovedVaultContinuityTests(unittest.TestCase):
             "narrator_voice_ref": None,
         }
 
-        match_count = _apply_approved_vault_characters(object(), continuity)
+        stats = _apply_continuity_overrides(object(), continuity)
 
-        self.assertEqual(match_count, 0)
+        self.assertEqual(stats["automatic_characters"], 0)
         self.assertEqual(continuity, original)
         self.assertIs(continuity["characters"][0], original_character)
         list_approved.assert_called_once()
