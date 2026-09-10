@@ -104,6 +104,13 @@ def _provider_error(provider: str, response: httpx.Response) -> RuntimeError:
     return RuntimeError(f"{provider} TTS returned HTTP {response.status_code}{suffix}")
 
 
+def _exception_detail(error: Exception) -> str:
+    """Keep provider failures useful even when an exception has no message."""
+    message = str(error).strip()
+    error_type = type(error).__name__
+    return f"{error_type}: {message}" if message else error_type
+
+
 async def _sarvam_tts(
     client: httpx.AsyncClient,
     text: str,
@@ -179,7 +186,8 @@ async def synthesize_dialogue(
             return await _elevenlabs_tts(client, text, voice_id)
         except Exception as elevenlabs_error:  # noqa: BLE001 - persist both provider failures
             raise VoiceGenerationError(
-                f"Sarvam failed ({sarvam_error}); ElevenLabs fallback failed ({elevenlabs_error})"
+                f"Sarvam failed ({_exception_detail(sarvam_error)}); "
+                f"ElevenLabs fallback failed ({_exception_detail(elevenlabs_error)})"
             ) from elevenlabs_error
 
 

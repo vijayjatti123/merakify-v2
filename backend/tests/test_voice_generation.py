@@ -52,6 +52,28 @@ class ProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
         sarvam.assert_awaited_once()
         elevenlabs.assert_awaited_once()
 
+    async def test_both_provider_failure_reasons_include_empty_message_exception_type(self) -> None:
+        with (
+            patch(
+                "app.services.voice_generation_service._sarvam_tts",
+                new=AsyncMock(side_effect=RuntimeError("request rejected")),
+            ),
+            patch(
+                "app.services.voice_generation_service._elevenlabs_tts",
+                new=AsyncMock(side_effect=TimeoutError()),
+            ),
+        ):
+            with self.assertRaises(voice_generation_service.VoiceGenerationError) as raised:
+                await voice_generation_service.synthesize_dialogue(
+                    Mock(), text="A line", voice_id="priya", language="English"
+                )
+
+        self.assertEqual(
+            str(raised.exception),
+            "Sarvam failed (RuntimeError: request rejected); "
+            "ElevenLabs fallback failed (TimeoutError)",
+        )
+
 
 class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
     async def test_dialogue_shots_start_concurrently_and_persist_real_results(self) -> None:
