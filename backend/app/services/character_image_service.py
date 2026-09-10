@@ -21,9 +21,9 @@ class GeneratedCharacterImage:
 
 def generate_character_image(name: str, description: str) -> GeneratedCharacterImage:
     """Generate one character reference image through Google AI Studio directly."""
-    api_key = settings.gemini_api_key.strip()
+    api_key = settings.google_ai_api_key.strip()
     if not api_key:
-        raise CharacterImageGenerationError("GEMINI_API_KEY is required for character image generation")
+        raise CharacterImageGenerationError("GOOGLE_AI_API_KEY is required for character image generation")
 
     model = settings.gemini_image_model.strip()
     if not model:
