@@ -1,326 +1,290 @@
-import { Aperture, Check, Eye, Layers, ListVideo, Loader2, Pencil, RotateCcw, Save, ScrollText } from "lucide-react";
+import { Check, Clapperboard, Clock3, Loader2, Pencil, RefreshCw, Save, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { retryJob, reviseJob, streamJob } from "../api/client";
 
-const AGENTS = [
-  { key: "format", label: "Format", icon: Layers },
-  { key: "script", label: "Script", icon: ScrollText },
-  { key: "continuity_plan", label: "Continuity", icon: Eye },
-  { key: "cinematography", label: "Cinematography", icon: Aperture },
-  { key: "qa", label: "QA", icon: Check },
-  { key: "assembly", label: "Assembly", icon: ListVideo },
-];
+import { approveJob, regenerateShot, reviseJob, streamJob } from "../api/client";
 
-export default function JobView({ jobId, onReset, onRetry }) {
+const COLORS = {
+  bg: "#13141F",
+  panel: "#1B1D2B",
+  field: "#0F1019",
+  border: "#2E3145",
+  text: "#F3F0E8",
+  muted: "#9694A8",
+  marigold: "#E8A33D",
+  green: "#7FA37A",
+  red: "#C1453B",
+};
+
+const STATUS_LABELS = {
+  draft: "Draft",
+  queued: "Queued",
+  generating: "Generating",
+  ready: "Ready",
+};
+
+function GenerationGrid({ shots, statuses }) {
+  return (
+    <section className="generation-stage" aria-label="Shot generation progress">
+      <div className="generation-heading">
+        <div>
+          <p className="eyebrow">Approved shot plan</p>
+          <h2>Generating your sequence</h2>
+        </div>
+        <span className="phase-badge">Phase 1 preview</span>
+      </div>
+      <div className="generation-grid">
+        {shots.map((shot) => {
+          const status = statuses[shot.shot_number] || shot.status || "queued";
+          return (
+            <article
+              key={shot.shot_number}
+              className={`generation-card generation-card--${status}`}
+              data-shot-number={shot.shot_number}
+              data-status={status}
+            >
+              <div className="generation-frame">
+                <Sparkles size={18} />
+                <span>Shot {shot.shot_number}</span>
+              </div>
+              <div className="generation-meta">
+                <span>{STATUS_LABELS[status] || status}</span>
+                <span>{shot.duration_sec}s</span>
+              </div>
+              <div className="generation-progress"><span /></div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+export default function JobView({ jobId, onReset }) {
   const [trace, setTrace] = useState([]);
-  const [activeAgent, setActiveAgent] = useState(null);
   const [final, setFinal] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedShots, setEditedShots] = useState([]);
-  const [isRetrying, setIsRetrying] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [showRetryOptions, setShowRetryOptions] = useState(false);
-  const [changeRequest, setChangeRequest] = useState("");
-  const bottomRef = useRef(null);
+  const [error, setError] = useState("");
+  const [approving, setApproving] = useState(false);
+  const [editingShot, setEditingShot] = useState(null);
+  const [editValues, setEditValues] = useState({ description: "", dialogue_text: "" });
+  const [savingShot, setSavingShot] = useState(null);
+  const [regeneratingShot, setRegeneratingShot] = useState(null);
+  const [shotStatuses, setShotStatuses] = useState({});
+  const timersRef = useRef(new Map());
+  const generationStartedRef = useRef(false);
 
   useEffect(() => {
     const source = streamJob(jobId, {
-      onEvent: (ev) => {
-        setActiveAgent(ev.agent_key);
-        setTrace((t) => [...t, ev]);
-      },
-      onFinal: (payload) => {
-        setActiveAgent(null);
-        setFinal(payload);
-      },
-      onError: () => {},
+      onEvent: (event) => setTrace((current) => [...current, event]),
+      onFinal: (payload) => setFinal(payload),
+      onError: () => setError("The live progress connection was interrupted."),
     });
     return () => source.close();
   }, [jobId]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [trace]);
+  useEffect(() => () => {
+    timersRef.current.forEach((timers) => timers.forEach(clearTimeout));
+    timersRef.current.clear();
+  }, []);
 
   const done = final?.status === "done";
   const errored = final?.status === "error";
+  const result = final?.result;
+  const shots = result?.shots || [];
+  const approved = Boolean(result?.generation_approved);
+  const latestTrace = trace[trace.length - 1];
 
-  function toggleEditing() {
-    if (isEditing) {
-      setIsEditing(false);
-      setEditedShots([]);
-      return;
-    }
-    setEditedShots(
-      final.result.shots.map((shot) => ({
-        shot_number: shot.shot_number,
-        dialogue_text: shot.dialogue_text || "",
-        description: shot.description || "",
-      })),
-    );
-    setIsEditing(true);
+  function clearShotTimers(shotNumber) {
+    const timers = timersRef.current.get(shotNumber) || [];
+    timers.forEach(clearTimeout);
+    timersRef.current.delete(shotNumber);
   }
 
-  function updateEditedShot(shotNumber, field, value) {
-    setEditedShots((shots) =>
-      shots.map((shot) => (shot.shot_number === shotNumber ? { ...shot, [field]: value } : shot)),
-    );
+  function queueFakeProgress(shotNumber, delay = 0) {
+    clearShotTimers(shotNumber);
+    setShotStatuses((current) => ({ ...current, [shotNumber]: "queued" }));
+    const startTimer = setTimeout(() => {
+      setShotStatuses((current) => ({ ...current, [shotNumber]: "generating" }));
+    }, delay + 80);
+    const finishTimer = setTimeout(() => {
+      setShotStatuses((current) => ({ ...current, [shotNumber]: "ready" }));
+      timersRef.current.delete(shotNumber);
+    }, delay + 1880);
+    timersRef.current.set(shotNumber, [startTimer, finishTimer]);
   }
 
-  async function handleRetry() {
-    setIsRetrying(true);
+  useEffect(() => {
+    if (!approved || !shots.length || generationStartedRef.current) return;
+    generationStartedRef.current = true;
+    shots.forEach((shot, index) => queueFakeProgress(shot.shot_number, index * 760));
+  }, [approved, shots.length]);
+
+  function beginEdit(shot) {
+    setEditingShot(shot.shot_number);
+    setEditValues({ description: shot.description || "", dialogue_text: shot.dialogue_text || "" });
+    setError("");
+  }
+
+  async function saveEdit(shotNumber) {
+    setSavingShot(shotNumber);
+    setError("");
     try {
-      const job = await retryJob(jobId, changeRequest);
-      onRetry(job.id);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsRetrying(false);
-    }
-  }
-
-  async function handleSave() {
-    setIsSaving(true);
-    try {
-      const job = await reviseJob(jobId, editedShots);
+      const job = await reviseJob(jobId, [{ shot_number: shotNumber, ...editValues }]);
+      timersRef.current.forEach((timers) => timers.forEach(clearTimeout));
+      timersRef.current.clear();
+      generationStartedRef.current = false;
+      setShotStatuses({});
       setFinal({ status: job.status, error_message: job.error_message, result: job.result });
-      setIsEditing(false);
-      setEditedShots([]);
-    } catch (error) {
-      console.error(error);
+      setEditingShot(null);
+    } catch (saveError) {
+      setError(saveError.message);
     } finally {
-      setIsSaving(false);
+      setSavingShot(null);
+    }
+  }
+
+  async function handleApprove() {
+    setApproving(true);
+    setError("");
+    try {
+      const job = await approveJob(jobId);
+      generationStartedRef.current = false;
+      setFinal({ status: job.status, error_message: job.error_message, result: job.result });
+    } catch (approveError) {
+      setError(approveError.message);
+    } finally {
+      setApproving(false);
+    }
+  }
+
+  async function handleRegenerate(shotNumber) {
+    setRegeneratingShot(shotNumber);
+    setError("");
+    try {
+      await regenerateShot(jobId, shotNumber);
+      queueFakeProgress(shotNumber);
+    } catch (regenerateError) {
+      setError(regenerateError.message);
+    } finally {
+      setRegeneratingShot(null);
     }
   }
 
   return (
-    <div className="w-full min-h-screen flex flex-col items-center px-4 py-10">
-      <div className="w-full max-w-3xl flex flex-col gap-6">
-        <div className="flex flex-wrap gap-2">
-          {AGENTS.map((a) => {
-            const Icon = a.icon;
-            const isActive = activeAgent === a.key;
-            const touched = trace.some((t) => t.agent_key === a.key);
-            return (
-              <div
-                key={a.key}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs"
-                style={{
-                  background: isActive ? "#E8A33D" : touched ? "#1B1D2B" : "transparent",
-                  border: `1px solid ${isActive ? "#E8A33D" : "#2E3145"}`,
-                  color: isActive ? "#13141F" : touched ? "#F3F0E8" : "#9694A8",
-                }}
-              >
-                {isActive ? <Loader2 size={12} className="animate-spin" /> : <Icon size={12} />}
-                {a.label}
-              </div>
-            );
-          })}
-        </div>
-
-        <div
-          className="rounded-lg p-5 flex flex-col gap-2 max-h-64 overflow-y-auto"
-          style={{ background: "#1B1D2B", border: "1px solid #2E3145" }}
-        >
-          {trace.map((t, i) => {
-            const agent = AGENTS.find((a) => a.key === t.agent_key);
-            return (
-              <div key={i} className="text-sm flex gap-2">
-                <span style={{ color: "#E8A33D", minWidth: "120px" }}>{agent ? agent.label : t.agent_key}</span>
-                <span style={{ color: "#9694A8" }}>{t.note}</span>
-              </div>
-            );
-          })}
-          <div ref={bottomRef} />
-        </div>
-
-        {errored && (
-          <p className="text-sm" style={{ color: "#C1453B" }}>
-            {final.error_message || "Something went wrong."}
-          </p>
+    <>
+      <section className="generation-area">
+        {approved ? (
+          <GenerationGrid shots={shots} statuses={shotStatuses} />
+        ) : (
+          <div className="director-progress-card">
+            <div className="director-progress-icon">
+              {done ? <Check size={19} /> : <Loader2 size={19} className="animate-spin" />}
+            </div>
+            <div>
+              <p className="eyebrow">{done ? "Ready for review" : "Director pipeline"}</p>
+              <h2>{done ? "Your shot plan is ready" : "Building your shot plan"}</h2>
+              <p>{latestTrace?.note || "Preparing the creative direction…"}</p>
+            </div>
+          </div>
         )}
+      </section>
 
-        {done && final.result && (
-          <div className="flex flex-col gap-6">
-            <div>
-              <h3 className="text-sm mb-2" style={{ color: "#9694A8" }}>
-                Logline
-              </h3>
-              <p className="text-base" style={{ fontFamily: "'Fraunces', serif" }}>
-                {final.result.script.logline}
-              </p>
-            </div>
+      <aside className="shot-panel" aria-label="Shot plan">
+        <div className="shot-panel-header">
+          <div>
+            <p className="eyebrow">Shot plan</p>
+            <h2>{done ? `${shots.length} shots` : "In progress"}</h2>
+          </div>
+          <button type="button" onClick={onReset} className="icon-button" aria-label="Start over"><X size={17} /></button>
+        </div>
 
-            <div>
-              <h3 className="text-sm mb-3" style={{ color: "#9694A8" }}>
-                Shot list
-              </h3>
-              <div className="flex gap-3 overflow-x-auto pb-2">
-                {final.result.shots.map((sh) => {
-                  const edited = editedShots.find((shot) => shot.shot_number === sh.shot_number);
-                  return (
-                    <div
-                      key={sh.shot_number}
-                      className="rounded-lg p-4 shrink-0"
-                      style={{ width: "220px", background: "#1B1D2B", border: "1px solid #2E3145" }}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs" style={{ color: "#9694A8" }}>
-                          Shot {sh.shot_number}
-                          {sh.has_dialogue ? " · dialogue" : " · silent"}
-                        </span>
-                        <span className="text-xs" style={{ color: "#E8A33D" }}>
-                          {sh.duration_sec}s
-                        </span>
-                      </div>
-                      {isEditing ? (
-                        <div className="flex flex-col gap-2 mb-2">
-                          <label className="text-xs" style={{ color: "#9694A8" }}>
-                            Description
-                            <input
-                              value={edited?.description || ""}
-                              onChange={(event) => updateEditedShot(sh.shot_number, "description", event.target.value)}
-                              className="w-full rounded p-2 mt-1 text-sm outline-none"
-                              style={{ background: "#0F1019", border: "1px solid #2E3145", color: "#F3F0E8" }}
-                            />
-                          </label>
-                          <label className="text-xs" style={{ color: "#9694A8" }}>
-                            Dialogue
-                            <input
-                              value={edited?.dialogue_text || ""}
-                              onChange={(event) => updateEditedShot(sh.shot_number, "dialogue_text", event.target.value)}
-                              className="w-full rounded p-2 mt-1 text-xs outline-none"
-                              style={{ background: "#0F1019", border: "1px solid #2E3145", color: "#E8A33D" }}
-                            />
-                          </label>
-                        </div>
-                      ) : (
-                        <>
-                          <p className="text-sm mb-2">{sh.description}</p>
-                          {sh.has_dialogue && sh.dialogue_text && (
-                            <p className="text-xs mb-2 italic" style={{ color: "#E8A33D" }}>
-                              "{sh.dialogue_text}"
-                            </p>
-                          )}
-                        </>
-                      )}
-                      {sh.experimental_audio_sync && (
-                        <div
-                          className="text-xs mb-2 px-2 py-1 rounded"
-                          style={{ background: "#2E2418", color: "#E8A33D", border: "1px solid #4A3A20" }}
-                        >
-                          ⚠ Experimental — audio sync accuracy not assured
-                        </div>
-                      )}
-                      <div className="text-xs flex flex-col gap-1" style={{ color: "#9694A8" }}>
-                        <span>
-                          {sh.camera_angle} · {sh.camera_movement}
-                        </span>
-                        <span>{sh.lighting}</span>
-                        {sh.characters_in_shot?.length > 0 && <span>{sh.characters_in_shot.join(", ")}</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setShowRetryOptions(true)}
-                disabled={isRetrying || isSaving}
-                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium"
-                style={{ background: "#E8A33D", color: "#13141F" }}
-              >
-                {isRetrying ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                {isRetrying ? "Starting..." : "Try again"}
-              </button>
-              <button
-                onClick={toggleEditing}
-                disabled={isSaving}
-                className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium"
-                style={{ background: "transparent", border: "1px solid #2E3145", color: "#F3F0E8" }}
-              >
-                <Pencil size={14} />
-                Edit script
-              </button>
-              {isEditing && (
-                <button
-                  onClick={handleSave}
-                  disabled={isSaving}
-                  className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium"
-                  style={{ background: "#7FA37A", color: "#13141F" }}
-                >
-                  {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  {isSaving ? "Rechecking..." : "Save & recheck"}
-                </button>
-              )}
-            </div>
-
-            {showRetryOptions && (
-              <div
-                className="rounded-lg p-4 flex flex-col gap-3"
-                style={{ background: "#1B1D2B", border: "1px solid #2E3145" }}
-              >
-                <label className="text-sm" style={{ color: "#F3F0E8" }}>
-                  What would you like changed? <span style={{ color: "#9694A8" }}>(optional)</span>
-                  <textarea
-                    value={changeRequest}
-                    onChange={(event) => setChangeRequest(event.target.value)}
-                    disabled={isRetrying}
-                    placeholder="e.g. Make it funnier and use a nighttime setting"
-                    rows={3}
-                    className="w-full rounded-md p-3 mt-2 text-sm outline-none resize-none"
-                    style={{ background: "#0F1019", border: "1px solid #2E3145", color: "#F3F0E8" }}
-                  />
-                </label>
-                <p className="text-xs" style={{ color: "#9694A8" }}>
-                  Leave this blank for a more creative alternative based on your original requirements.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={handleRetry}
-                    disabled={isRetrying}
-                    className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium"
-                    style={{ background: "#E8A33D", color: "#13141F" }}
-                  >
-                    {isRetrying && <Loader2 size={14} className="animate-spin" />}
-                    {isRetrying ? "Starting..." : "Generate new version"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowRetryOptions(false);
-                      setChangeRequest("");
-                    }}
-                    disabled={isRetrying}
-                    className="px-4 py-2 rounded-md text-sm font-medium"
-                    style={{ background: "transparent", border: "1px solid #2E3145", color: "#F3F0E8" }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <p className="text-sm flex items-center gap-2" style={{ color: final.result.qa.approved ? "#7FA37A" : "#C1453B" }}>
-              <Check size={14} />
-              {final.result.qa.approved ? "Continuity approved" : "Proceeded with residual notes"} · total runtime{" "}
-              {final.result.assembly.total_duration_sec}s
-            </p>
+        {!done && !errored && (
+          <div className="panel-waiting">
+            <Loader2 size={22} className="animate-spin" />
+            <p>{latestTrace?.note || "The first shots will appear here when the plan is complete."}</p>
           </div>
         )}
 
-        {(done || errored) && (
-          <button
-            onClick={onReset}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-md text-sm font-medium self-start"
-            style={{ background: "transparent", border: "1px solid #2E3145", color: "#F3F0E8" }}
-          >
-            <RotateCcw size={15} />
-            Start over
-          </button>
+        {errored && <p className="panel-error">{final.error_message || "Something went wrong."}</p>}
+
+        {done && result && (
+          <>
+            <div className="panel-logline">
+              <span>Logline</span>
+              <p>{result.script.logline}</p>
+            </div>
+
+            <div className="qa-banner" data-approved={result.qa.approved}>
+              <Check size={14} />
+              <span>{result.qa.approved ? "Continuity approved" : "Residual QA notes"} · {result.assembly.total_duration_sec}s</span>
+            </div>
+
+            <div className="shot-card-list">
+              {shots.map((shot) => {
+                const isEditing = editingShot === shot.shot_number;
+                const visualStatus = shotStatuses[shot.shot_number] || shot.status || "draft";
+                return (
+                  <article className="shot-card" key={shot.shot_number} data-shot-number={shot.shot_number}>
+                    <div className="shot-card-title">
+                      <span>Shot {shot.shot_number} · {shot.has_dialogue ? "dialogue" : "silent"}</span>
+                      <span className={`shot-status shot-status--${visualStatus}`}>{STATUS_LABELS[visualStatus] || visualStatus}</span>
+                    </div>
+
+                    {isEditing ? (
+                      <div className="shot-edit-fields">
+                        <label>Description<textarea value={editValues.description} onChange={(event) => setEditValues((current) => ({ ...current, description: event.target.value }))} /></label>
+                        <label>Dialogue<textarea value={editValues.dialogue_text} onChange={(event) => setEditValues((current) => ({ ...current, dialogue_text: event.target.value }))} /></label>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="shot-description">{shot.description}</p>
+                        {shot.dialogue_text && <p className="shot-dialogue">“{shot.dialogue_text}”</p>}
+                      </>
+                    )}
+
+                    {shot.experimental_audio_sync && <p className="audio-warning">Experimental audio sync</p>}
+                    <div className="shot-technical">
+                      <span><Clapperboard size={12} /> {shot.camera_angle} · {shot.camera_movement}</span>
+                      <span><Clock3 size={12} /> {shot.duration_sec}s · {shot.lighting}</span>
+                    </div>
+
+                    <div className="shot-card-actions">
+                      {isEditing ? (
+                        <>
+                          <button type="button" onClick={() => saveEdit(shot.shot_number)} disabled={savingShot === shot.shot_number} className="card-action card-action--primary">
+                            {savingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Save & recheck
+                          </button>
+                          <button type="button" onClick={() => setEditingShot(null)} className="card-action">Cancel</button>
+                        </>
+                      ) : (
+                        <>
+                          <button type="button" onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot ${shot.shot_number}`}><Pencil size={13} /> Edit</button>
+                          <button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={!approved || regeneratingShot === shot.shot_number} className="card-action" aria-label={`Regenerate shot ${shot.shot_number}`} title={approved ? "Restart this shot only" : "Approve the plan first"}>
+                            {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            {!approved && (
+              <div className="approve-footer">
+                <p>Approve the plan to start the Phase 1 generation preview.</p>
+                <button type="button" onClick={handleApprove} disabled={approving} className="approve-button">
+                  {approving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                  {approving ? "Approving…" : "Approve shot plan"}
+                </button>
+              </div>
+            )}
+
+            {approved && <p className="approved-note"><Check size={14} /> Plan approved · generation preview active</p>}
+          </>
         )}
-      </div>
-    </div>
+
+        {error && <p className="panel-error">{error}</p>}
+      </aside>
+    </>
   );
 }

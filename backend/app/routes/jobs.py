@@ -155,13 +155,68 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
     validated_shots = _attach_voice_refs(
         validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")
     )
+    for shot in validated_shots:
+        shot["status"] = "draft"
 
     updated_result = dict(result)
     updated_result.update(
         shots=validated_shots,
+        generation_approved=False,
         qa=validated["qa"],
         assembly=validated["assembly"],
     )
+    job_service.set_result(db, job_id, updated_result)
+    db.refresh(job)
+    return _job_out(job, updated_result)
+
+
+@router.post("/{job_id}/approve", response_model=JobOut)
+def approve_job(job_id: str, db: Session = Depends(get_db)):
+    job = job_service.get_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status != "done":
+        raise HTTPException(status_code=409, detail="only completed jobs can be approved")
+
+    result = job_service.job_result(job)
+    if not result:
+        raise HTTPException(status_code=409, detail="completed job has no stored result")
+
+    updated_result = dict(result)
+    updated_result["generation_approved"] = True
+    updated_result["shots"] = [{**shot, "status": "queued"} for shot in result.get("shots", [])]
+    job_service.set_result(db, job_id, updated_result)
+    db.refresh(job)
+    return _job_out(job, updated_result)
+
+
+@router.post("/{job_id}/shots/{shot_number}/regenerate", response_model=JobOut)
+def regenerate_shot(job_id: str, shot_number: int, db: Session = Depends(get_db)):
+    job = job_service.get_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status != "done":
+        raise HTTPException(status_code=409, detail="only completed jobs can regenerate shots")
+
+    result = job_service.job_result(job)
+    if not result:
+        raise HTTPException(status_code=409, detail="completed job has no stored result")
+    if not result.get("generation_approved"):
+        raise HTTPException(status_code=409, detail="approve the shot list before regenerating a shot")
+
+    found = False
+    updated_shots = []
+    for shot in result.get("shots", []):
+        if shot.get("shot_number") == shot_number:
+            updated_shots.append({**shot, "status": "queued"})
+            found = True
+        else:
+            updated_shots.append(dict(shot))
+    if not found:
+        raise HTTPException(status_code=404, detail="shot not found")
+
+    updated_result = dict(result)
+    updated_result["shots"] = updated_shots
     job_service.set_result(db, job_id, updated_result)
     db.refresh(job)
     return _job_out(job, updated_result)

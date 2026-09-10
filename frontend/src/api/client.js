@@ -47,6 +47,22 @@ export async function reviseJob(jobId, shots) {
   return res.json();
 }
 
+export async function approveJob(jobId) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/approve`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to approve shot list");
+  return res.json();
+}
+
+export async function regenerateShot(jobId, shotNumber) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shotNumber}/regenerate`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to regenerate shot");
+  return res.json();
+}
+
 // Returns an EventSource-like object; caller attaches onEvent/onFinal/onError
 // and calls close() when done.
 export function streamJob(jobId, { onEvent, onFinal, onError }) {

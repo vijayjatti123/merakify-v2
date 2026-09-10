@@ -268,6 +268,8 @@ def run_pipeline(db: Session, job_id: str) -> None:
         cine["shots"] = _attach_voice_refs(
             validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")
         )
+        for shot in cine["shots"]:
+            shot["status"] = "draft"
         qa = validated["qa"]
         assembly = validated["assembly"]
 
@@ -300,6 +302,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             "script": script,
             "continuity": continuity,
             "shots": cine["shots"],
+            "generation_approved": False,
             "assembly": assembly,
             "qa": qa,
         }
