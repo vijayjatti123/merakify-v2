@@ -10,6 +10,19 @@ export async function createJob(payload) {
   return res.json();
 }
 
+export async function extractScript(scriptText) {
+  const res = await fetch(`${BASE_URL}/api/scripts/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ script_text: scriptText }),
+  });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    throw new Error(payload.detail || "Failed to extract script references");
+  }
+  return res.json();
+}
+
 export async function listAssets() {
   const res = await fetch(`${BASE_URL}/api/assets`);
   if (!res.ok) throw new Error("Failed to load assets");

@@ -1,7 +1,8 @@
 import { ChevronUp, ImagePlus, Loader2, Plus, X } from "lucide-react";
 import { useState } from "react";
 
-import { listAssets, uploadAsset } from "../api/client";
+import { extractScript, listAssets, listCharacters, uploadAsset } from "../api/client";
+import ScriptResolutionPanel from "../components/ScriptResolutionPanel";
 
 const COLORS = {
   bg: "#13141F",
@@ -39,6 +40,10 @@ function SelectField({ label, note, value, onChange, children }) {
 
 export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "" }) {
   const [brief, setBrief] = useState("");
+  const [scriptMode, setScriptMode] = useState(false);
+  const [extraction, setExtraction] = useState(null);
+  const [approvedCharacters, setApprovedCharacters] = useState([]);
+  const [locationAssets, setLocationAssets] = useState([]);
   const [duration, setDuration] = useState("30 seconds");
   const [customDuration, setCustomDuration] = useState("");
   const [aspectRatio, setAspectRatio] = useState("16:9");
@@ -102,6 +107,25 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   async function handleSubmit(event) {
     event.preventDefault();
     if (!canSubmit) return;
+    if (scriptMode) {
+      setSubmitting(true);
+      setError("");
+      try {
+        const [extracted, characters, availableAssets] = await Promise.all([
+          extractScript(brief.trim()),
+          listCharacters(),
+          listAssets(),
+        ]);
+        setExtraction(extracted);
+        setApprovedCharacters(characters);
+        setLocationAssets(availableAssets.filter((asset) => asset.role === "location"));
+      } catch (extractError) {
+        setError(extractError.message);
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
     const briefParts = [brief.trim(), `Target duration: ${effectiveDuration}. Content type: ${contentType}.`];
     if (selectedAsset) briefParts.push(`Reference image: ${selectedAsset.url}`);
 
@@ -127,6 +151,18 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     models: language === "English" ? tier.models : tier.models.filter((model) => NON_ENGLISH_MODELS.has(model)),
   })).filter((tier) => tier.models.length);
 
+  if (scriptMode && extraction) {
+    return (
+      <ScriptResolutionPanel
+        scriptText={brief}
+        extraction={extraction}
+        initialCharacters={approvedCharacters}
+        locationAssets={locationAssets}
+        onBack={() => setExtraction(null)}
+      />
+    );
+  }
+
   return (
     <section className={`intake-card ${collapsed ? "intake-card--collapsed" : ""}`} aria-label="Creative brief input">
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -148,12 +184,24 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
             <textarea
               value={brief}
               onChange={(event) => setBrief(event.target.value)}
-              placeholder="A joyful jewellery ad about a daughter surprising her mother"
+              placeholder={scriptMode ? "Paste your full script or scene breakdown here" : "A joyful jewellery ad about a daughter surprising her mother"}
               rows={7}
               autoFocus
               className="w-full rounded-xl p-5 text-lg outline-none resize-none"
               style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, color: COLORS.text }}
             />
+            <button
+              type="button"
+              className="script-mode-toggle"
+              aria-pressed={scriptMode}
+              onClick={() => {
+                setScriptMode((current) => !current);
+                setExtraction(null);
+                setError("");
+              }}
+            >
+              {scriptMode ? "Use an idea instead" : "Paste a script instead"}
+            </button>
 
             <div className="flex flex-wrap items-start gap-3">
               <SelectField label="Duration" value={duration} onChange={(event) => setDuration(event.target.value)}>
@@ -238,7 +286,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
             {error && <p className="text-sm" style={{ color: "#C1453B" }}>{error}</p>}
             <button type="submit" disabled={!canSubmit} className="self-start px-6 py-3 rounded-md text-sm font-semibold flex items-center gap-2" style={{ background: canSubmit ? COLORS.marigold : COLORS.border, color: canSubmit ? COLORS.bg : COLORS.muted, cursor: canSubmit ? "pointer" : "not-allowed" }}>
               {submitting && <Loader2 size={15} className="animate-spin" />}
-              {submitting ? "Starting..." : "Create shot list"}
+              {submitting ? (scriptMode ? "Extracting..." : "Starting...") : (scriptMode ? "Continue to resolve names" : "Create shot list")}
             </button>
           </fieldset>
         </div>
