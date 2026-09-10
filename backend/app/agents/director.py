@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.agents import prompts
 from app.agents.llm_client import call_agent
-from app.services import asset_service, character_service, job_service, storage_service
+from app.services import asset_service, character_service, job_service, storage_service, voice_generation_service
 
 EventFn = Callable[[str, str], None]
 
@@ -211,7 +211,8 @@ def _attach_voice_refs(
     rather than trusting the model to copy a reference string unchanged across
     several JSON round trips. The Cinematography Agent only has to name which
     characters are in a shot (characters_in_shot); this looks up the actual
-    voice_sample_ref for each name from the continuity library.
+    fixed Sarvam catalog voice_sample_ref ID for each name from the continuity
+    library. These references are catalog identifiers, never cloned samples.
 
     A shot can carry dialogue with no character in it at all — voiceover or
     narration, nobody visible on-screen speaking. That case surfaced for real
@@ -418,6 +419,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             )
         continuity = call_agent(prompts.CONTINUITY_AGENT, continuity_input)
         override_stats = _apply_continuity_overrides(db, continuity, resolutions)
+        assigned_voice_count = voice_generation_service.assign_missing_voice_ids(continuity)
         if override_stats["automatic_characters"]:
             emit(
                 "continuity_plan",
@@ -451,6 +453,12 @@ def run_pipeline(db: Session, job_id: str) -> None:
             cinematography_input,
             max_tokens=4096,
         )
+        assigned_voice_count += voice_generation_service.assign_missing_voice_ids(continuity, cine["shots"])
+        if assigned_voice_count:
+            emit(
+                "continuity_plan",
+                f"Assigned {assigned_voice_count} fixed Sarvam catalog voice reference(s) for this job.",
+            )
         cine["shots"] = _attach_voice_refs(
             cine["shots"],
             continuity["characters"],

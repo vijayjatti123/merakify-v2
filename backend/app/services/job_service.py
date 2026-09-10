@@ -63,6 +63,35 @@ def append_event(db: Session, job_id: str, agent_key: str, note: str) -> AgentEv
     return event
 
 
+def append_shot_status_event(
+    db: Session,
+    job_id: str,
+    shot_number: int,
+    status: str,
+    *,
+    message: str,
+    **fields,
+) -> AgentEvent:
+    payload = {"shot_number": shot_number, "status": status, "message": message, **fields}
+    return append_event(db, job_id, "shot_status", json.dumps(payload))
+
+
+def update_shot_fields(db: Session, job_id: str, shot_number: int, **fields) -> dict:
+    """Update one shot inside the existing persisted job result."""
+    job = get_job(db, job_id)
+    if not job:
+        raise LookupError("job not found")
+    result = job_result(job)
+    if not result:
+        raise ValueError("job has no stored result")
+    for shot in result.get("shots", []):
+        if shot.get("shot_number") == shot_number:
+            shot.update(fields)
+            set_result(db, job_id, result)
+            return shot
+    raise LookupError("shot not found")
+
+
 def get_events_since(db: Session, job_id: str, after_id: Optional[str] = None) -> list[AgentEvent]:
     q = db.query(AgentEvent).filter(AgentEvent.job_id == job_id).order_by(AgentEvent.created_at)
     events = q.all()

@@ -78,8 +78,6 @@ class JobCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_request(self):
-        if self.language.strip().lower() != "english" and self.ai_model not in {"Seedance 2.0", "Seedance 2.5"}:
-            raise ValueError("non-English jobs require Seedance 2.0 or Seedance 2.5")
         if (self.script_text is None) != (self.resolutions is None):
             raise ValueError("script_text and resolutions must be provided together")
         if self.script_text is not None and not self.script_text.strip():

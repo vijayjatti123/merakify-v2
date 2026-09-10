@@ -1,7 +1,5 @@
 import unittest
 
-from pydantic import ValidationError
-
 from app.agents import prompts
 from app.schemas import JobCreate
 
@@ -15,9 +13,10 @@ class JobIntakeTests(unittest.TestCase):
         self.assertEqual(payload.language, "English")
         self.assertEqual(payload.ai_model, "Seedance 2.5")
 
-    def test_non_english_rejects_models_without_audio_reference_support(self) -> None:
-        with self.assertRaises(ValidationError):
-            JobCreate(brief="एक विज्ञापन", language="Hindi", ai_model="Veo 3.1")
+    def test_non_english_accepts_every_model_tier(self) -> None:
+        payload = JobCreate(brief="एक विज्ञापन", language="Hindi", ai_model="Veo 3.1")
+
+        self.assertEqual(payload.ai_model, "Veo 3.1")
 
     def test_non_english_accepts_seedance_models(self) -> None:
         payload = JobCreate(brief="एक विज्ञापन", language="Hindi", ai_model="Seedance 2.0")

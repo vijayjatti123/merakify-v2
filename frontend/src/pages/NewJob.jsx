@@ -19,7 +19,6 @@ const MODEL_TIERS = [
   { label: "Better", models: ["Kling 3.0", "Seedance 2.5"] },
   { label: "Best", models: ["Veo 3.1", "Sora 2"] },
 ];
-const NON_ENGLISH_MODELS = new Set(["Seedance 2.0", "Seedance 2.5"]);
 
 function SelectField({ label, note, value, onChange, children }) {
   return (
@@ -67,9 +66,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const canSubmit = Boolean(brief.trim() && effectiveDuration && effectiveLanguage && !submitting);
 
   function handleLanguageChange(event) {
-    const nextLanguage = event.target.value;
-    setLanguage(nextLanguage);
-    if (nextLanguage !== "English" && !NON_ENGLISH_MODELS.has(aiModel)) setAiModel("Seedance 2.5");
+    setLanguage(event.target.value);
   }
 
   async function toggleAssetPanel() {
@@ -161,11 +158,6 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     setExtraction(null);
   }
 
-  const visibleTiers = MODEL_TIERS.map((tier) => ({
-    ...tier,
-    models: language === "English" ? tier.models : tier.models.filter((model) => NON_ENGLISH_MODELS.has(model)),
-  })).filter((tier) => tier.models.length);
-
   if (scriptMode && extraction) {
     return (
       <ScriptResolutionPanel
@@ -237,7 +229,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
                 <option>English</option><option>Hindi</option><option>Tamil</option><option>Telugu</option><option>Bengali</option><option>Other</option>
               </SelectField>
               <SelectField label="AI model" value={aiModel} onChange={(event) => setAiModel(event.target.value)}>
-                {visibleTiers.map((tier) => (
+                {MODEL_TIERS.map((tier) => (
                   <optgroup key={tier.label} label={tier.label}>
                     {tier.models.map((model) => <option key={model}>{model}</option>)}
                   </optgroup>

@@ -5,10 +5,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.agents.director import SHOT_STATUS_PENDING, _attach_voice_refs, run_pipeline, validate_and_correct
+from app.agents.director import (
+    SHOT_STATUS_GENERATING,
+    SHOT_STATUS_PENDING,
+    _attach_voice_refs,
+    run_pipeline,
+    validate_and_correct,
+)
 from app.db import SessionLocal, get_db
 from app.schemas import JobCreate, JobOut, JobRetry, JobRevise
-from app.services import job_service
+from app.services import job_service, voice_generation_service
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -21,6 +27,27 @@ def _run_in_background(job_id: str) -> None:
     db = SessionLocal()
     try:
         run_pipeline(db, job_id)
+    finally:
+        db.close()
+
+
+def _run_voice_generation_in_background(job_id: str, shot_numbers: set[int] | None = None) -> None:
+    db = SessionLocal()
+    try:
+        asyncio.run(
+            voice_generation_service.generate_job_dialogue_audio(
+                db,
+                job_id,
+                shot_numbers=shot_numbers,
+            )
+        )
+    except Exception as error:  # noqa: BLE001 - persist task-level failures on affected shots
+        voice_generation_service.fail_unfinished_shots(
+            db,
+            job_id,
+            error,
+            shot_numbers=shot_numbers,
+        )
     finally:
         db.close()
 
@@ -174,7 +201,7 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
 
 
 @router.post("/{job_id}/approve", response_model=JobOut)
-def approve_job(job_id: str, db: Session = Depends(get_db)):
+def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     job = job_service.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
@@ -188,15 +215,37 @@ def approve_job(job_id: str, db: Session = Depends(get_db)):
     updated_result = dict(result)
     updated_result["generation_approved"] = True
     updated_result["shots"] = [
-        {**shot, "status": SHOT_STATUS_PENDING} for shot in result.get("shots", [])
+        {
+            **shot,
+            "status": SHOT_STATUS_PENDING,
+            "error_message": None,
+            "dialogue_audio_url": None,
+            "dialogue_audio_provider": None,
+        }
+        for shot in result.get("shots", [])
     ]
     job_service.set_result(db, job_id, updated_result)
+    job_service.append_event(db, job_id, "voice_generation", "Approved; starting real dialogue voice generation.")
+    for shot in updated_result["shots"]:
+        job_service.append_shot_status_event(
+            db,
+            job_id,
+            shot["shot_number"],
+            SHOT_STATUS_PENDING,
+            message=f"Shot {shot['shot_number']} queued for voice generation.",
+        )
+    background_tasks.add_task(_run_voice_generation_in_background, job_id)
     db.refresh(job)
     return _job_out(job, updated_result)
 
 
 @router.post("/{job_id}/shots/{shot_number}/regenerate", response_model=JobOut)
-def regenerate_shot(job_id: str, shot_number: int, db: Session = Depends(get_db)):
+def regenerate_shot(
+    job_id: str,
+    shot_number: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     job = job_service.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
@@ -213,7 +262,15 @@ def regenerate_shot(job_id: str, shot_number: int, db: Session = Depends(get_db)
     updated_shots = []
     for shot in result.get("shots", []):
         if shot.get("shot_number") == shot_number:
-            updated_shots.append({**shot, "status": SHOT_STATUS_PENDING})
+            updated_shots.append(
+                {
+                    **shot,
+                    "status": SHOT_STATUS_PENDING,
+                    "error_message": None,
+                    "dialogue_audio_url": None,
+                    "dialogue_audio_provider": None,
+                }
+            )
             found = True
         else:
             updated_shots.append(dict(shot))
@@ -223,6 +280,14 @@ def regenerate_shot(job_id: str, shot_number: int, db: Session = Depends(get_db)
     updated_result = dict(result)
     updated_result["shots"] = updated_shots
     job_service.set_result(db, job_id, updated_result)
+    job_service.append_shot_status_event(
+        db,
+        job_id,
+        shot_number,
+        SHOT_STATUS_PENDING,
+        message=f"Shot {shot_number} queued for regeneration.",
+    )
+    background_tasks.add_task(_run_voice_generation_in_background, job_id, {shot_number})
     db.refresh(job)
     return _job_out(job, updated_result)
 
@@ -279,14 +344,35 @@ async def stream_job(job_id: str):
                 new_events = job_service.get_events_since(db, job_id, last_event_id)
                 for ev in new_events:
                     last_event_id = ev.id
-                    payload = {"agent_key": ev.agent_key, "note": ev.note}
+                    payload = {
+                        "agent_key": ev.agent_key,
+                        "note": ev.note,
+                        "created_at": ev.created_at.isoformat(),
+                    }
+                    if ev.agent_key == "shot_status":
+                        try:
+                            shot_event = json.loads(ev.note)
+                        except json.JSONDecodeError:
+                            shot_event = {}
+                        payload.update(shot_event)
+                        payload["note"] = shot_event.get("message", ev.note)
                     yield f"data: {json.dumps(payload)}\n\n"
 
-                if job.status in ("done", "error"):
+                result = job_service.job_result(job)
+                generation_running = bool(
+                    job.status == "done"
+                    and result
+                    and result.get("generation_approved")
+                    and any(
+                        shot.get("status") in {SHOT_STATUS_PENDING, SHOT_STATUS_GENERATING}
+                        for shot in result.get("shots", [])
+                    )
+                )
+                if job.status == "error" or (job.status == "done" and not generation_running):
                     final_payload = {
                         "status": job.status,
                         "error_message": job.error_message,
-                        "result": job_service.job_result(job),
+                        "result": result,
                     }
                     yield f"event: final\ndata: {json.dumps(final_payload)}\n\n"
                     return

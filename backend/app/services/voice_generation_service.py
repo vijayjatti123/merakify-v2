@@ -1,0 +1,363 @@
+import asyncio
+import base64
+import uuid
+from dataclasses import dataclass
+
+import httpx
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.services import job_service, storage_service
+
+
+SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech"
+ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech"
+TTS_TIMEOUT_SECONDS = 35.0
+
+LANGUAGE_CODES = {
+    "english": "en-IN",
+    "hindi": "hi-IN",
+    "bengali": "bn-IN",
+    "tamil": "ta-IN",
+    "telugu": "te-IN",
+    "kannada": "kn-IN",
+    "malayalam": "ml-IN",
+    "marathi": "mr-IN",
+    "gujarati": "gu-IN",
+    "punjabi": "pa-IN",
+    "odia": "od-IN",
+}
+
+FEMALE_VOICE_IDS = frozenset(
+    {"ritu", "priya", "neha", "pooja", "simran", "kavya", "ishita", "shreya", "roopa", "tanya", "shruti", "suhani", "kavitha", "rupali"}
+)
+OLDER_TERMS = ("elderly", "older", "old woman", "old man", "grandmother", "grandfather", "senior")
+YOUNGER_TERMS = ("child", "young girl", "young boy", "teen", "teenage", "daughter", "son")
+FEMALE_TERMS = ("woman", "female", "girl", "mother", "daughter", "grandmother", "wife", "sister")
+MALE_TERMS = ("man", "male", "boy", "father", "son", "grandfather", "husband", "brother")
+
+# Public ElevenLabs catalog IDs used only as a technical fallback. Character
+# identity remains the Sarvam catalog voice_id selected for the job.
+ELEVENLABS_FEMALE_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel
+ELEVENLABS_MALE_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # Adam
+
+
+class VoiceGenerationError(RuntimeError):
+    """Raised when both the primary and fallback voice providers fail."""
+
+
+@dataclass(frozen=True)
+class GeneratedAudio:
+    data: bytes
+    content_type: str
+    extension: str
+    provider: str
+
+
+def heuristic_voice_id(description: str) -> str:
+    """Choose one fixed Sarvam catalog voice from simple age/gender words."""
+    text = description.casefold()
+    is_female = any(term in text for term in FEMALE_TERMS)
+    is_male = any(term in text for term in MALE_TERMS)
+    is_older = any(term in text for term in OLDER_TERMS)
+    is_younger = any(term in text for term in YOUNGER_TERMS)
+
+    if is_female:
+        return "roopa" if is_older else "kavya" if is_younger else "priya"
+    if is_male:
+        return "ratan" if is_older else "kabir" if is_younger else "rahul"
+    return "shubh"
+
+
+def assign_missing_voice_ids(continuity: dict, shots: list[dict] | None = None) -> int:
+    """Assign stable catalog IDs once without replacing vault-selected voices."""
+    assigned = 0
+    for character in continuity.get("characters", []):
+        voice_id = character.get("voice_id")
+        if not voice_id:
+            voice_id = heuristic_voice_id(character.get("description") or "")
+            character["voice_id"] = voice_id
+            assigned += 1
+        # voice_sample_ref is a Sarvam catalog ID, never a cloned voice sample.
+        character["voice_sample_ref"] = voice_id
+
+    narrator_used = bool(
+        shots
+        and any(shot.get("has_dialogue") and not shot.get("characters_in_shot") for shot in shots)
+    )
+    if narrator_used and not continuity.get("narrator_voice_ref"):
+        continuity["narrator_voice_ref"] = heuristic_voice_id("neutral narrator")
+        assigned += 1
+    return assigned
+
+
+def _language_code(language: str) -> str:
+    code = LANGUAGE_CODES.get(language.strip().casefold())
+    if not code:
+        raise RuntimeError(f'Sarvam does not support configured language "{language}"')
+    return code
+
+
+def _provider_error(provider: str, response: httpx.Response) -> RuntimeError:
+    detail = response.text.strip().replace("\n", " ")[:400]
+    suffix = f": {detail}" if detail else ""
+    return RuntimeError(f"{provider} TTS returned HTTP {response.status_code}{suffix}")
+
+
+async def _sarvam_tts(
+    client: httpx.AsyncClient,
+    text: str,
+    voice_id: str,
+    language: str,
+) -> GeneratedAudio:
+    if not settings.sarvam_api_key.strip():
+        raise RuntimeError("SARVAM_API_KEY is not configured")
+    response = await client.post(
+        SARVAM_TTS_URL,
+        headers={"api-subscription-key": settings.sarvam_api_key},
+        json={
+            "text": text,
+            "language_code": _language_code(language),
+            "speaker": voice_id,
+            "model": "bulbul:v3",
+            "output_audio_codec": "mp3",
+            "speech_sample_rate": 24000,
+        },
+    )
+    if not response.is_success:
+        raise _provider_error("Sarvam", response)
+    payload = response.json()
+    audios = payload.get("audios") or []
+    if not audios:
+        raise RuntimeError("Sarvam TTS returned no audio")
+    try:
+        audio = base64.b64decode(audios[0], validate=True)
+    except (ValueError, TypeError) as error:
+        raise RuntimeError("Sarvam TTS returned invalid base64 audio") from error
+    if not audio:
+        raise RuntimeError("Sarvam TTS returned empty audio")
+    return GeneratedAudio(audio, "audio/mpeg", ".mp3", "sarvam")
+
+
+def _elevenlabs_voice_id(sarvam_voice_id: str) -> str:
+    return ELEVENLABS_FEMALE_VOICE_ID if sarvam_voice_id in FEMALE_VOICE_IDS else ELEVENLABS_MALE_VOICE_ID
+
+
+async def _elevenlabs_tts(
+    client: httpx.AsyncClient,
+    text: str,
+    sarvam_voice_id: str,
+) -> GeneratedAudio:
+    if not settings.elevenlabs_api_key.strip():
+        raise RuntimeError("ELEVENLABS_API_KEY is not configured")
+    voice_id = _elevenlabs_voice_id(sarvam_voice_id)
+    response = await client.post(
+        f"{ELEVENLABS_TTS_URL}/{voice_id}",
+        params={"output_format": "mp3_44100_128"},
+        headers={"xi-api-key": settings.elevenlabs_api_key},
+        json={"text": text, "model_id": "eleven_multilingual_v2"},
+    )
+    if not response.is_success:
+        raise _provider_error("ElevenLabs", response)
+    if not response.content:
+        raise RuntimeError("ElevenLabs TTS returned empty audio")
+    return GeneratedAudio(response.content, "audio/mpeg", ".mp3", "elevenlabs")
+
+
+async def synthesize_dialogue(
+    client: httpx.AsyncClient,
+    *,
+    text: str,
+    voice_id: str,
+    language: str,
+) -> GeneratedAudio:
+    """Use Sarvam for every language; fall back only after its call fails."""
+    try:
+        return await _sarvam_tts(client, text, voice_id, language)
+    except Exception as sarvam_error:  # noqa: BLE001 - provider failure activates fallback
+        try:
+            return await _elevenlabs_tts(client, text, voice_id)
+        except Exception as elevenlabs_error:  # noqa: BLE001 - persist both provider failures
+            raise VoiceGenerationError(
+                f"Sarvam failed ({sarvam_error}); ElevenLabs fallback failed ({elevenlabs_error})"
+            ) from elevenlabs_error
+
+
+def _shot_voice_id(shot: dict) -> str:
+    voice_refs = shot.get("voice_refs") or {}
+    for voice_id in voice_refs.values():
+        if isinstance(voice_id, str) and voice_id.strip():
+            return voice_id.strip()
+    raise VoiceGenerationError("dialogue shot has no assigned character or narrator voice_id")
+
+
+async def _generate_dialogue_shot(
+    db: Session,
+    job_id: str,
+    shot: dict,
+    language: str,
+    client: httpx.AsyncClient,
+) -> None:
+    shot_number = shot["shot_number"]
+    voice_id = None
+    try:
+        # Contain the entire per-shot task so one malformed or failed shot
+        # cannot cancel successful siblings awaited by asyncio.gather below.
+        voice_id = _shot_voice_id(shot)
+        job_service.update_shot_fields(
+            db,
+            job_id,
+            shot_number,
+            status="generating",
+            error_message=None,
+            dialogue_audio_url=None,
+            dialogue_audio_provider=None,
+            dialogue_voice_id=voice_id,
+        )
+        job_service.append_shot_status_event(
+            db,
+            job_id,
+            shot_number,
+            "generating",
+            message=f"Generating dialogue audio for shot {shot_number} with voice {voice_id}.",
+            dialogue_voice_id=voice_id,
+        )
+        generated = await synthesize_dialogue(
+            client,
+            text=shot.get("dialogue_text") or "",
+            voice_id=voice_id,
+            language=language,
+        )
+        object_key = f"jobs/{job_id}/shots/{shot_number}/dialogue-{uuid.uuid4()}{generated.extension}"
+        uploaded = await asyncio.to_thread(
+            storage_service.upload_bytes,
+            object_key,
+            generated.data,
+            content_type=generated.content_type,
+            cache_control="private, max-age=3600",
+        )
+        fields = {
+            "status": "done",
+            "error_message": None,
+            "dialogue_audio_url": uploaded["url"],
+            "dialogue_audio_provider": generated.provider,
+            "dialogue_voice_id": voice_id,
+        }
+        job_service.update_shot_fields(db, job_id, shot_number, **fields)
+        job_service.append_shot_status_event(
+            db,
+            job_id,
+            shot_number,
+            "done",
+            message=f"Dialogue audio for shot {shot_number} completed via {generated.provider}.",
+            **{key: value for key, value in fields.items() if key != "status"},
+        )
+    except Exception as error:  # noqa: BLE001 - persist the real provider failure on the shot
+        error_message = str(error)[:1200]
+        error_fields = {
+            "status": "error",
+            "error_message": error_message,
+            "dialogue_audio_url": None,
+            "dialogue_audio_provider": None,
+        }
+        if voice_id:
+            error_fields["dialogue_voice_id"] = voice_id
+        job_service.update_shot_fields(db, job_id, shot_number, **error_fields)
+        job_service.append_shot_status_event(
+            db,
+            job_id,
+            shot_number,
+            "error",
+            message=f"Dialogue audio for shot {shot_number} failed: {error_message}",
+            error_message=error_message,
+            **({"dialogue_voice_id": voice_id} if voice_id else {}),
+        )
+
+
+async def generate_job_dialogue_audio(
+    db: Session,
+    job_id: str,
+    *,
+    shot_numbers: set[int] | None = None,
+) -> None:
+    """Generate selected dialogue shots concurrently and persist real progress."""
+    job = job_service.get_job(db, job_id)
+    if not job:
+        raise LookupError("job not found")
+    result = job_service.job_result(job)
+    if not result:
+        raise ValueError("job has no stored result")
+
+    selected = [
+        shot
+        for shot in result.get("shots", [])
+        if shot_numbers is None or shot.get("shot_number") in shot_numbers
+    ]
+    dialogue_shots = []
+    for shot in selected:
+        if shot.get("has_dialogue"):
+            dialogue_shots.append(shot)
+            continue
+        shot_number = shot["shot_number"]
+        job_service.update_shot_fields(db, job_id, shot_number, status="done", error_message=None)
+        job_service.append_shot_status_event(
+            db,
+            job_id,
+            shot_number,
+            "done",
+            message=f"Shot {shot_number} has no dialogue audio to generate.",
+        )
+
+    timeout = httpx.Timeout(TTS_TIMEOUT_SECONDS)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        await asyncio.gather(
+            *(
+                _generate_dialogue_shot(db, job_id, shot, job.language or "English", client)
+                for shot in dialogue_shots
+            )
+        )
+
+    job_service.append_event(
+        db,
+        job_id,
+        "voice_generation",
+        f"Voice generation finished for {len(dialogue_shots)} dialogue shot(s).",
+    )
+
+
+def fail_unfinished_shots(
+    db: Session,
+    job_id: str,
+    error: Exception,
+    *,
+    shot_numbers: set[int] | None = None,
+) -> None:
+    """Surface a task-level failure instead of leaving real progress pending."""
+    job = job_service.get_job(db, job_id)
+    result = job_service.job_result(job) if job else None
+    if not result:
+        return
+    error_message = str(error)[:1200]
+    for shot in result.get("shots", []):
+        shot_number = shot.get("shot_number")
+        if shot_numbers is not None and shot_number not in shot_numbers:
+            continue
+        if shot.get("status") not in {"pending", "generating"}:
+            continue
+        job_service.update_shot_fields(
+            db,
+            job_id,
+            shot_number,
+            status="error",
+            error_message=error_message,
+            dialogue_audio_url=None,
+            dialogue_audio_provider=None,
+        )
+        job_service.append_shot_status_event(
+            db,
+            job_id,
+            shot_number,
+            "error",
+            message=f"Voice generation task failed for shot {shot_number}: {error_message}",
+            error_message=error_message,
+        )

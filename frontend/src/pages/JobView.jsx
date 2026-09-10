@@ -30,7 +30,7 @@ function GenerationGrid({ shots, statuses }) {
           <p className="eyebrow">Approved shot plan</p>
           <h2>Generating your sequence</h2>
         </div>
-        <span className="phase-badge">Phase 1 preview</span>
+        <span className="phase-badge">Voice generation</span>
       </div>
       <div className="generation-grid">
         {shots.map((shot) => {
@@ -92,22 +92,46 @@ export default function JobView({ jobId, onReset }) {
   const [regeneratingShot, setRegeneratingShot] = useState(null);
   const [shotStatuses, setShotStatuses] = useState({});
   const [generationStage, setGenerationStage] = useState("shots");
-  const timersRef = useRef(new Map());
   const stitchingTimerRef = useRef(null);
-  const generationStartedRef = useRef(false);
+  const [streamCycle, setStreamCycle] = useState(0);
 
   useEffect(() => {
     const source = streamJob(jobId, {
-      onEvent: (event) => setTrace((current) => [...current, event]),
-      onFinal: (payload) => setFinal(payload),
+      onEvent: (event) => {
+        setTrace((current) => [...current, event]);
+        if (event.agent_key === "shot_status" && event.shot_number) {
+          setShotStatuses((current) => ({ ...current, [event.shot_number]: event.status }));
+          setFinal((current) => {
+            if (!current?.result?.shots) return current;
+            const eventFields = Object.fromEntries(
+              ["status", "error_message", "dialogue_audio_url", "dialogue_audio_provider", "dialogue_voice_id"]
+                .filter((field) => event[field] !== undefined)
+                .map((field) => [field, event[field]]),
+            );
+            return {
+              ...current,
+              result: {
+                ...current.result,
+                shots: current.result.shots.map((shot) => (
+                  shot.shot_number === event.shot_number ? { ...shot, ...eventFields } : shot
+                )),
+              },
+            };
+          });
+        }
+      },
+      onFinal: (payload) => {
+        setFinal(payload);
+        if (payload.result?.shots) {
+          setShotStatuses(Object.fromEntries(payload.result.shots.map((shot) => [shot.shot_number, shot.status])));
+        }
+      },
       onError: () => setError("The live progress connection was interrupted."),
     });
     return () => source.close();
-  }, [jobId]);
+  }, [jobId, streamCycle]);
 
   useEffect(() => () => {
-    timersRef.current.forEach((timers) => timers.forEach(clearTimeout));
-    timersRef.current.clear();
     clearTimeout(stitchingTimerRef.current);
   }, []);
 
@@ -117,33 +141,6 @@ export default function JobView({ jobId, onReset }) {
   const shots = result?.shots || [];
   const approved = Boolean(result?.generation_approved);
   const latestTrace = trace[trace.length - 1];
-
-  function clearShotTimers(shotNumber) {
-    const timers = timersRef.current.get(shotNumber) || [];
-    timers.forEach(clearTimeout);
-    timersRef.current.delete(shotNumber);
-  }
-
-  function queueFakeProgress(shotNumber, delay = 0) {
-    clearShotTimers(shotNumber);
-    setShotStatuses((current) => ({ ...current, [shotNumber]: "pending" }));
-    const startTimer = setTimeout(() => {
-      setShotStatuses((current) => ({ ...current, [shotNumber]: "generating" }));
-    }, delay + 80);
-    const finishTimer = setTimeout(() => {
-      setShotStatuses((current) => ({ ...current, [shotNumber]: "done" }));
-      timersRef.current.delete(shotNumber);
-    }, delay + 1880);
-    timersRef.current.set(shotNumber, [startTimer, finishTimer]);
-  }
-
-  useEffect(() => {
-    if (!approved || !shots.length || generationStartedRef.current) return;
-    generationStartedRef.current = true;
-    shots
-      .filter((shot) => !["done", "error"].includes(shot.status))
-      .forEach((shot, index) => queueFakeProgress(shot.shot_number, index * 760));
-  }, [approved, shots.length]);
 
   useEffect(() => {
     if (!approved || !shots.length || generationStage !== "shots") return;
@@ -171,9 +168,6 @@ export default function JobView({ jobId, onReset }) {
     setError("");
     try {
       const job = await reviseJob(jobId, [{ shot_number: shotNumber, ...editValues }]);
-      timersRef.current.forEach((timers) => timers.forEach(clearTimeout));
-      timersRef.current.clear();
-      generationStartedRef.current = false;
       setShotStatuses({});
       setGenerationStage("shots");
       setFinal({ status: job.status, error_message: job.error_message, result: job.result });
@@ -190,10 +184,11 @@ export default function JobView({ jobId, onReset }) {
     setError("");
     try {
       const job = await approveJob(jobId);
-      generationStartedRef.current = false;
-      setShotStatuses({});
+      setTrace([]);
+      setShotStatuses(Object.fromEntries(job.result.shots.map((shot) => [shot.shot_number, shot.status])));
       setGenerationStage("shots");
       setFinal({ status: job.status, error_message: job.error_message, result: job.result });
+      setStreamCycle((current) => current + 1);
     } catch (approveError) {
       setError(approveError.message);
     } finally {
@@ -205,11 +200,14 @@ export default function JobView({ jobId, onReset }) {
     setRegeneratingShot(shotNumber);
     setError("");
     try {
-      await regenerateShot(jobId, shotNumber);
+      const job = await regenerateShot(jobId, shotNumber);
       clearTimeout(stitchingTimerRef.current);
       stitchingTimerRef.current = null;
       setGenerationStage("shots");
-      queueFakeProgress(shotNumber);
+      setTrace([]);
+      setShotStatuses(Object.fromEntries(job.result.shots.map((shot) => [shot.shot_number, shot.status])));
+      setFinal({ status: job.status, error_message: job.error_message, result: job.result });
+      setStreamCycle((current) => current + 1);
     } catch (regenerateError) {
       setError(regenerateError.message);
     } finally {
@@ -296,6 +294,7 @@ export default function JobView({ jobId, onReset }) {
                     )}
 
                     {shot.experimental_audio_sync && <p className="audio-warning">Experimental audio sync</p>}
+                    {visualStatus === "error" && shot.error_message && <p className="panel-error">{shot.error_message}</p>}
                     <div className="shot-characters">
                       <span>Characters present</span>
                       <p>{shot.characters_in_shot?.length ? shot.characters_in_shot.join(", ") : "None"}</p>
@@ -334,7 +333,7 @@ export default function JobView({ jobId, onReset }) {
 
             {!approved && (
               <div className="approve-footer">
-                <p>Approve the plan to start the Phase 1 generation preview.</p>
+                <p>Approve the plan to generate real dialogue audio.</p>
                 <button type="button" onClick={handleApprove} disabled={approving} className="approve-button">
                   {approving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
                   {approving ? "Approving…" : "Approve shot plan"}
@@ -342,7 +341,7 @@ export default function JobView({ jobId, onReset }) {
               </div>
             )}
 
-            {approved && <p className="approved-note"><Check size={14} /> Plan approved · generation preview active</p>}
+            {approved && <p className="approved-note"><Check size={14} /> Plan approved · voice generation active</p>}
           </>
         )}
 

@@ -54,13 +54,14 @@ class PhaseOneRouteTests(unittest.TestCase):
         }
         job = completed_job(result)
         db = Mock()
+        background_tasks = Mock()
 
         with (
             patch("app.routes.jobs.job_service.get_job", return_value=job),
             patch("app.routes.jobs.job_service.job_result", return_value=result),
             patch("app.routes.jobs.job_service.set_result") as set_result,
         ):
-            response = approve_job(job.id, db)
+            response = approve_job(job.id, background_tasks, db)
 
         self.assertEqual(response.id, job.id)
         self.assertTrue(response.result["generation_approved"])
@@ -69,6 +70,7 @@ class PhaseOneRouteTests(unittest.TestCase):
             [SHOT_STATUS_PENDING, SHOT_STATUS_PENDING],
         )
         set_result.assert_called_once_with(db, job.id, response.result)
+        background_tasks.add_task.assert_called_once()
 
     def test_regenerate_resets_only_the_requested_shot(self) -> None:
         result = {
@@ -81,19 +83,21 @@ class PhaseOneRouteTests(unittest.TestCase):
         }
         job = completed_job(result)
         db = Mock()
+        background_tasks = Mock()
 
         with (
             patch("app.routes.jobs.job_service.get_job", return_value=job),
             patch("app.routes.jobs.job_service.job_result", return_value=result),
             patch("app.routes.jobs.job_service.set_result") as set_result,
         ):
-            response = regenerate_shot(job.id, 2, db)
+            response = regenerate_shot(job.id, 2, background_tasks, db)
 
         self.assertEqual(
             [shot["status"] for shot in response.result["shots"]],
             [SHOT_STATUS_DONE, SHOT_STATUS_PENDING, SHOT_STATUS_DONE],
         )
         set_result.assert_called_once_with(db, job.id, response.result)
+        background_tasks.add_task.assert_called_once()
 
     def test_regenerate_requires_approval(self) -> None:
         result = {
@@ -101,13 +105,14 @@ class PhaseOneRouteTests(unittest.TestCase):
             "shots": [{"shot_number": 1, "status": SHOT_STATUS_PENDING}],
         }
         job = completed_job(result)
+        background_tasks = Mock()
 
         with (
             patch("app.routes.jobs.job_service.get_job", return_value=job),
             patch("app.routes.jobs.job_service.job_result", return_value=result),
         ):
             with self.assertRaises(HTTPException) as raised:
-                regenerate_shot(job.id, 1, Mock())
+                regenerate_shot(job.id, 1, background_tasks, Mock())
 
         self.assertEqual(raised.exception.status_code, 409)
 
