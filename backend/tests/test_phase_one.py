@@ -5,6 +5,13 @@ from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 
+from app.agents.director import (
+    SHOT_STATUS_DONE,
+    SHOT_STATUS_ERROR,
+    SHOT_STATUS_GENERATING,
+    SHOT_STATUS_PENDING,
+    SHOT_STATUSES,
+)
 from app.routes.jobs import approve_job, regenerate_shot
 
 
@@ -27,11 +34,22 @@ def completed_job(result: dict):
 
 
 class PhaseOneRouteTests(unittest.TestCase):
-    def test_approve_queues_every_shot_on_the_same_job(self) -> None:
+    def test_shot_status_contract_contains_all_four_phase_one_states(self) -> None:
+        self.assertEqual(
+            SHOT_STATUSES,
+            {
+                SHOT_STATUS_PENDING,
+                SHOT_STATUS_GENERATING,
+                SHOT_STATUS_DONE,
+                SHOT_STATUS_ERROR,
+            },
+        )
+
+    def test_approve_marks_every_shot_pending_on_the_same_job(self) -> None:
         result = {
             "shots": [
-                {"shot_number": 1, "status": "draft"},
-                {"shot_number": 2, "status": "draft"},
+                {"shot_number": 1, "status": SHOT_STATUS_PENDING},
+                {"shot_number": 2, "status": SHOT_STATUS_PENDING},
             ]
         }
         job = completed_job(result)
@@ -46,16 +64,19 @@ class PhaseOneRouteTests(unittest.TestCase):
 
         self.assertEqual(response.id, job.id)
         self.assertTrue(response.result["generation_approved"])
-        self.assertEqual([shot["status"] for shot in response.result["shots"]], ["queued", "queued"])
+        self.assertEqual(
+            [shot["status"] for shot in response.result["shots"]],
+            [SHOT_STATUS_PENDING, SHOT_STATUS_PENDING],
+        )
         set_result.assert_called_once_with(db, job.id, response.result)
 
     def test_regenerate_resets_only_the_requested_shot(self) -> None:
         result = {
             "generation_approved": True,
             "shots": [
-                {"shot_number": 1, "status": "ready"},
-                {"shot_number": 2, "status": "ready"},
-                {"shot_number": 3, "status": "ready"},
+                {"shot_number": 1, "status": SHOT_STATUS_DONE},
+                {"shot_number": 2, "status": SHOT_STATUS_DONE},
+                {"shot_number": 3, "status": SHOT_STATUS_DONE},
             ],
         }
         job = completed_job(result)
@@ -70,12 +91,15 @@ class PhaseOneRouteTests(unittest.TestCase):
 
         self.assertEqual(
             [shot["status"] for shot in response.result["shots"]],
-            ["ready", "queued", "ready"],
+            [SHOT_STATUS_DONE, SHOT_STATUS_PENDING, SHOT_STATUS_DONE],
         )
         set_result.assert_called_once_with(db, job.id, response.result)
 
     def test_regenerate_requires_approval(self) -> None:
-        result = {"generation_approved": False, "shots": [{"shot_number": 1, "status": "draft"}]}
+        result = {
+            "generation_approved": False,
+            "shots": [{"shot_number": 1, "status": SHOT_STATUS_PENDING}],
+        }
         job = completed_job(result)
 
         with (

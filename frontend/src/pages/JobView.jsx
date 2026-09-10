@@ -1,4 +1,4 @@
-import { Check, Clapperboard, Clock3, Loader2, Pencil, RefreshCw, Save, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Check, Clapperboard, Clock3, ImageIcon, Loader2, Pencil, RefreshCw, Save, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { approveJob, regenerateShot, reviseJob, streamJob } from "../api/client";
@@ -16,10 +16,10 @@ const COLORS = {
 };
 
 const STATUS_LABELS = {
-  draft: "Draft",
-  queued: "Queued",
+  pending: "Pending",
   generating: "Generating",
-  ready: "Ready",
+  done: "Done",
+  error: "Error",
 };
 
 function GenerationGrid({ shots, statuses }) {
@@ -34,7 +34,7 @@ function GenerationGrid({ shots, statuses }) {
       </div>
       <div className="generation-grid">
         {shots.map((shot) => {
-          const status = statuses[shot.shot_number] || shot.status || "queued";
+          const status = statuses[shot.shot_number] || shot.status || "pending";
           return (
             <article
               key={shot.shot_number}
@@ -43,7 +43,7 @@ function GenerationGrid({ shots, statuses }) {
               data-status={status}
             >
               <div className="generation-frame">
-                <Sparkles size={18} />
+                {status === "error" ? <AlertTriangle size={18} /> : <Sparkles size={18} />}
                 <span>Shot {shot.shot_number}</span>
               </div>
               <div className="generation-meta">
@@ -59,6 +59,28 @@ function GenerationGrid({ shots, statuses }) {
   );
 }
 
+function StitchingPlaceholder() {
+  return (
+    <section className="generation-stage generation-placeholder" aria-live="polite">
+      <Loader2 size={30} className="animate-spin" />
+      <p className="eyebrow">All shots generated</p>
+      <h2>Stitching...</h2>
+      <p>Assembling the finished shots into one sequence.</p>
+    </section>
+  );
+}
+
+function FinalVideoPlaceholder() {
+  return (
+    <section className="generation-stage generation-placeholder generation-placeholder--final" aria-label="Final video placeholder">
+      <Clapperboard size={32} />
+      <p className="eyebrow">Sequence complete</p>
+      <h2>Final video will appear here</h2>
+      <p>Video rendering is not connected in Phase 1.</p>
+    </section>
+  );
+}
+
 export default function JobView({ jobId, onReset }) {
   const [trace, setTrace] = useState([]);
   const [final, setFinal] = useState(null);
@@ -69,7 +91,9 @@ export default function JobView({ jobId, onReset }) {
   const [savingShot, setSavingShot] = useState(null);
   const [regeneratingShot, setRegeneratingShot] = useState(null);
   const [shotStatuses, setShotStatuses] = useState({});
+  const [generationStage, setGenerationStage] = useState("shots");
   const timersRef = useRef(new Map());
+  const stitchingTimerRef = useRef(null);
   const generationStartedRef = useRef(false);
 
   useEffect(() => {
@@ -84,6 +108,7 @@ export default function JobView({ jobId, onReset }) {
   useEffect(() => () => {
     timersRef.current.forEach((timers) => timers.forEach(clearTimeout));
     timersRef.current.clear();
+    clearTimeout(stitchingTimerRef.current);
   }, []);
 
   const done = final?.status === "done";
@@ -101,12 +126,12 @@ export default function JobView({ jobId, onReset }) {
 
   function queueFakeProgress(shotNumber, delay = 0) {
     clearShotTimers(shotNumber);
-    setShotStatuses((current) => ({ ...current, [shotNumber]: "queued" }));
+    setShotStatuses((current) => ({ ...current, [shotNumber]: "pending" }));
     const startTimer = setTimeout(() => {
       setShotStatuses((current) => ({ ...current, [shotNumber]: "generating" }));
     }, delay + 80);
     const finishTimer = setTimeout(() => {
-      setShotStatuses((current) => ({ ...current, [shotNumber]: "ready" }));
+      setShotStatuses((current) => ({ ...current, [shotNumber]: "done" }));
       timersRef.current.delete(shotNumber);
     }, delay + 1880);
     timersRef.current.set(shotNumber, [startTimer, finishTimer]);
@@ -115,8 +140,25 @@ export default function JobView({ jobId, onReset }) {
   useEffect(() => {
     if (!approved || !shots.length || generationStartedRef.current) return;
     generationStartedRef.current = true;
-    shots.forEach((shot, index) => queueFakeProgress(shot.shot_number, index * 760));
+    shots
+      .filter((shot) => !["done", "error"].includes(shot.status))
+      .forEach((shot, index) => queueFakeProgress(shot.shot_number, index * 760));
   }, [approved, shots.length]);
+
+  useEffect(() => {
+    if (!approved || !shots.length || generationStage !== "shots") return;
+    const everyShotDone = shots.every(
+      (shot) => (shotStatuses[shot.shot_number] || shot.status || "pending") === "done",
+    );
+    if (!everyShotDone) return;
+
+    setGenerationStage("stitching");
+    clearTimeout(stitchingTimerRef.current);
+    stitchingTimerRef.current = setTimeout(() => {
+      setGenerationStage("final");
+      stitchingTimerRef.current = null;
+    }, 1600);
+  }, [approved, generationStage, shotStatuses, shots]);
 
   function beginEdit(shot) {
     setEditingShot(shot.shot_number);
@@ -133,6 +175,7 @@ export default function JobView({ jobId, onReset }) {
       timersRef.current.clear();
       generationStartedRef.current = false;
       setShotStatuses({});
+      setGenerationStage("shots");
       setFinal({ status: job.status, error_message: job.error_message, result: job.result });
       setEditingShot(null);
     } catch (saveError) {
@@ -148,6 +191,8 @@ export default function JobView({ jobId, onReset }) {
     try {
       const job = await approveJob(jobId);
       generationStartedRef.current = false;
+      setShotStatuses({});
+      setGenerationStage("shots");
       setFinal({ status: job.status, error_message: job.error_message, result: job.result });
     } catch (approveError) {
       setError(approveError.message);
@@ -161,6 +206,9 @@ export default function JobView({ jobId, onReset }) {
     setError("");
     try {
       await regenerateShot(jobId, shotNumber);
+      clearTimeout(stitchingTimerRef.current);
+      stitchingTimerRef.current = null;
+      setGenerationStage("shots");
       queueFakeProgress(shotNumber);
     } catch (regenerateError) {
       setError(regenerateError.message);
@@ -173,7 +221,13 @@ export default function JobView({ jobId, onReset }) {
     <>
       <section className="generation-area">
         {approved ? (
-          <GenerationGrid shots={shots} statuses={shotStatuses} />
+          generationStage === "stitching" ? (
+            <StitchingPlaceholder />
+          ) : generationStage === "final" ? (
+            <FinalVideoPlaceholder />
+          ) : (
+            <GenerationGrid shots={shots} statuses={shotStatuses} />
+          )
         ) : (
           <div className="director-progress-card">
             <div className="director-progress-icon">
@@ -221,7 +275,7 @@ export default function JobView({ jobId, onReset }) {
             <div className="shot-card-list">
               {shots.map((shot) => {
                 const isEditing = editingShot === shot.shot_number;
-                const visualStatus = shotStatuses[shot.shot_number] || shot.status || "draft";
+                const visualStatus = shotStatuses[shot.shot_number] || shot.status || "pending";
                 return (
                   <article className="shot-card" key={shot.shot_number} data-shot-number={shot.shot_number}>
                     <div className="shot-card-title">
@@ -242,6 +296,15 @@ export default function JobView({ jobId, onReset }) {
                     )}
 
                     {shot.experimental_audio_sync && <p className="audio-warning">Experimental audio sync</p>}
+                    <div className="shot-characters">
+                      <span>Characters present</span>
+                      <p>{shot.characters_in_shot?.length ? shot.characters_in_shot.join(", ") : "None"}</p>
+                    </div>
+                    <div className="reference-image-slot" aria-label={`Reference image for shot ${shot.shot_number}`}>
+                      <ImageIcon size={18} />
+                      <span>Reference image</span>
+                      <small>Not attached</small>
+                    </div>
                     <div className="shot-technical">
                       <span><Clapperboard size={12} /> {shot.camera_angle} · {shot.camera_movement}</span>
                       <span><Clock3 size={12} /> {shot.duration_sec}s · {shot.lighting}</span>

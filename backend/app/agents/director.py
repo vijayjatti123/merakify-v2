@@ -10,6 +10,19 @@ from app.services import job_service
 
 EventFn = Callable[[str, str], None]
 
+SHOT_STATUS_PENDING = "pending"
+SHOT_STATUS_GENERATING = "generating"
+SHOT_STATUS_DONE = "done"
+SHOT_STATUS_ERROR = "error"
+SHOT_STATUSES = frozenset(
+    {
+        SHOT_STATUS_PENDING,
+        SHOT_STATUS_GENERATING,
+        SHOT_STATUS_DONE,
+        SHOT_STATUS_ERROR,
+    }
+)
+
 
 def _normalize_character_name(name: str) -> str:
     """Return the canonical key used to join names from separate model calls."""
@@ -269,7 +282,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")
         )
         for shot in cine["shots"]:
-            shot["status"] = "draft"
+            shot["status"] = SHOT_STATUS_PENDING
         qa = validated["qa"]
         assembly = validated["assembly"]
 

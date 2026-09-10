@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.agents.director import _attach_voice_refs, run_pipeline, validate_and_correct
+from app.agents.director import SHOT_STATUS_PENDING, _attach_voice_refs, run_pipeline, validate_and_correct
 from app.db import SessionLocal, get_db
 from app.schemas import AssetOut, JobCreate, JobOut, JobRetry, JobRevise
 from app.services import asset_service, job_service, storage_service
@@ -156,7 +156,7 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
         validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")
     )
     for shot in validated_shots:
-        shot["status"] = "draft"
+        shot["status"] = SHOT_STATUS_PENDING
 
     updated_result = dict(result)
     updated_result.update(
@@ -184,7 +184,9 @@ def approve_job(job_id: str, db: Session = Depends(get_db)):
 
     updated_result = dict(result)
     updated_result["generation_approved"] = True
-    updated_result["shots"] = [{**shot, "status": "queued"} for shot in result.get("shots", [])]
+    updated_result["shots"] = [
+        {**shot, "status": SHOT_STATUS_PENDING} for shot in result.get("shots", [])
+    ]
     job_service.set_result(db, job_id, updated_result)
     db.refresh(job)
     return _job_out(job, updated_result)
@@ -208,7 +210,7 @@ def regenerate_shot(job_id: str, shot_number: int, db: Session = Depends(get_db)
     updated_shots = []
     for shot in result.get("shots", []):
         if shot.get("shot_number") == shot_number:
-            updated_shots.append({**shot, "status": "queued"})
+            updated_shots.append({**shot, "status": SHOT_STATUS_PENDING})
             found = True
         else:
             updated_shots.append(dict(shot))
