@@ -16,6 +16,14 @@ const SARVAM_VOICES = [
   "shreya", "roopa", "tanya", "shruti", "suhani", "kavitha", "rupali",
 ];
 
+function voiceLabel(voiceId) {
+  return `${voiceId.charAt(0).toUpperCase()}${voiceId.slice(1)} (Sarvam)`;
+}
+
+export function isVoiceSelectionSaved(voiceId, savedVoiceId) {
+  return Boolean(voiceId && savedVoiceId && voiceId === savedVoiceId);
+}
+
 export default function CharacterVault({ onBack }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -118,6 +126,7 @@ export default function CharacterVault({ onBack }) {
   }
 
   const busy = Boolean(busyAction);
+  const voiceSelectionSaved = isVoiceSelectionSaved(voiceId, draft?.voice_id);
 
   return (
     <main className="vault-shell">
@@ -167,7 +176,31 @@ export default function CharacterVault({ onBack }) {
                 <button type="button" onClick={handleSaveVoice} disabled={busy || !voiceId} className="vault-secondary">
                   {busyAction === "voice" && <Loader2 size={14} className="animate-spin" />} Save voice
                 </button>
-                <button type="button" onClick={handleApprove} disabled={busy || !draft.voice_id} className="vault-primary">
+                {draft.voice_id && (
+                  <section
+                    aria-label="Character review before approval"
+                    style={{ padding: "0.75rem", border: "1px solid #34374c", borderRadius: "0.65rem", background: "#181a27" }}
+                  >
+                    <p className="eyebrow" style={{ marginBottom: "0.55rem" }}>Review before approval</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "64px minmax(0, 1fr)", gap: "0.7rem", alignItems: "center" }}>
+                      <img
+                        src={draft.image_url}
+                        alt={`${draft.name} character review`}
+                        style={{ width: "64px", height: "80px", borderRadius: "0.45rem", objectFit: "cover", background: "#252738" }}
+                      />
+                      <div>
+                        <strong style={{ display: "block", color: "#f3f0e8" }}>{draft.name}</strong>
+                        <span style={{ color: "#aaa8bb", fontSize: "0.72rem" }}>
+                          Selected voice: {voiceLabel(draft.voice_id)}
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+                )}
+                {draft.voice_id && !voiceSelectionSaved && (
+                  <p role="status" className="vault-error">Save your voice selection before approving.</p>
+                )}
+                <button type="button" onClick={handleApprove} disabled={busy || !voiceSelectionSaved} className="vault-primary">
                   {busyAction === "approve" ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Approve character
                 </button>
               </div>
