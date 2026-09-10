@@ -42,6 +42,35 @@ class AttachVoiceRefsTests(unittest.TestCase):
 
         self.assertEqual(result[0]["voice_refs"], {})
 
+    def test_emits_warning_when_character_has_zero_matches(self) -> None:
+        characters = [{"name": "बेटी", "voice_sample_ref": "daughter.wav"}]
+        shots = [
+            {
+                "shot_number": 7,
+                "characters_in_shot": ["माँ"],
+                "has_dialogue": True,
+            }
+        ]
+        events = []
+
+        result = _attach_voice_refs(
+            shots,
+            characters,
+            emit=lambda agent_key, note: events.append((agent_key, note)),
+        )
+
+        self.assertEqual(result[0]["voice_refs"], {})
+        self.assertEqual(
+            events,
+            [
+                (
+                    "cinematography",
+                    'Warning: Shot 7 names character "माँ", but no matching character exists in the '
+                    "Continuity plan; no voice reference was attached.",
+                )
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

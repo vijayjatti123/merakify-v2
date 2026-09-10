@@ -28,7 +28,13 @@ def _character_name_skeleton(name: str) -> str:
     return "".join(char for char in normalized if unicodedata.category(char) != "Mn")
 
 
-def _attach_voice_refs(shots: list[dict], characters: list[dict], narrator_voice_ref=None) -> list[dict]:
+def _attach_voice_refs(
+    shots: list[dict],
+    characters: list[dict],
+    narrator_voice_ref=None,
+    *,
+    emit: EventFn | None = None,
+) -> list[dict]:
     """Attach each shot's character voice references deterministically, in code,
     rather than trusting the model to copy a reference string unchanged across
     several JSON round trips. The Cinematography Agent only has to name which
@@ -75,6 +81,12 @@ def _attach_voice_refs(shots: list[dict], characters: list[dict], narrator_voice
                 candidates = by_skeleton.get(_character_name_skeleton(name), [])
                 if len(candidates) == 1:
                     character = candidates[0]
+                elif not candidates and emit:
+                    emit(
+                        "cinematography",
+                        f'Warning: Shot {shot.get("shot_number", "?")} names character "{name}", '
+                        "but no matching character exists in the Continuity plan; no voice reference was attached.",
+                    )
 
             if character is not None:
                 voice_refs[normalized_name] = character.get("voice_sample_ref")
@@ -133,7 +145,7 @@ def validate_and_correct(
             f"Current shots: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}",
             max_tokens=4096,
         )
-        current_shots = _attach_voice_refs(cine["shots"], characters, narrator_voice_ref)
+        current_shots = _attach_voice_refs(cine["shots"], characters, narrator_voice_ref, emit=emit)
         notify("cinematography", "Revision complete.")
 
         notify("qa", "Re-checking the revised shot list...")
@@ -163,7 +175,7 @@ def validate_and_correct(
             f"Current total: {actual} seconds",
             max_tokens=4096,
         )
-        current_shots = _attach_voice_refs(cine["shots"], characters, narrator_voice_ref)
+        current_shots = _attach_voice_refs(cine["shots"], characters, narrator_voice_ref, emit=emit)
         notify("cinematography", "Trimmed to fit the target runtime.")
 
         notify("assembly", "Re-sequencing the trimmed shot list...")
@@ -230,7 +242,12 @@ def run_pipeline(db: Session, job_id: str) -> None:
             f"\nTarget total duration: {fmt['duration_target_sec']} seconds",
             max_tokens=4096,
         )
-        cine["shots"] = _attach_voice_refs(cine["shots"], continuity["characters"], continuity.get("narrator_voice_ref"))
+        cine["shots"] = _attach_voice_refs(
+            cine["shots"],
+            continuity["characters"],
+            continuity.get("narrator_voice_ref"),
+            emit=emit,
+        )
         dialogue_shots = sum(1 for s in cine["shots"] if s.get("has_dialogue"))
         cutaway_shots = len(cine["shots"]) - dialogue_shots
         emit(
