@@ -34,7 +34,11 @@ def call_agent(system: str, user_content: str, fast: bool = False, max_tokens: i
     response = client.messages.create(
         model=model,
         max_tokens=max_tokens,
-        system=system,
+        # Cache only the unchanged system prefix; job-specific content stays in
+        # the user message. Language-specific Architect prompts cache separately.
+        # Anthropic ignores this marker below the model's minimum token length;
+        # do not pad or rewrite agent instructions just to reach that threshold.
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user_content}],
     )
     if response.stop_reason == "max_tokens":
