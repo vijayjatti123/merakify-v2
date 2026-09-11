@@ -10,6 +10,7 @@ SCRIPT_EXTRACTOR = """You extract explicitly named entities from raw script text
 This is literal extraction, not interpretation:
 - Extract every named character and every named location actually written in the source text.
 - Copy each name verbatim from the source, preserving its spelling, Unicode, and capitalization.
+- A location in an all-caps screenplay heading must remain all caps; never normalize it to title case.
 - Return each distinct literal name once, ordered by its first appearance.
 - Do not invent names for unnamed people or places.
 - Do not infer a name from a description, merge aliases, rename anything, or summarize anything.

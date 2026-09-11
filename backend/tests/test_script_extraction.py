@@ -64,6 +64,16 @@ class ScriptExtractionTests(unittest.TestCase):
         self.assertEqual(response.json(), {"characters": ["Leela"], "locations": []})
 
     @patch("app.routes.script_routes.call_agent")
+    def test_restores_all_caps_location_spelling_from_source(self, call_agent) -> None:
+        script_text = "INT. GRACE - DAY\nA woman crosses the empty lobby."
+        call_agent.return_value = {"characters": [], "locations": ["Grace"]}
+
+        response = self.client.post("/api/scripts/extract", json={"script_text": script_text})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"characters": [], "locations": ["GRACE"]})
+
+    @patch("app.routes.script_routes.call_agent")
     def test_rejects_entity_not_copied_from_source(self, call_agent) -> None:
         call_agent.return_value = {"characters": ["Invented Name"], "locations": []}
 
