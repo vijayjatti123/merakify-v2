@@ -114,6 +114,8 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
             id="job-1",
             brief="A source request",
             aspect_ratio="16:9",
+            visual_style="Cartoon / Anime",
+            color_grade="Warm",
             quality="720p",
             language="English",
             ai_model="Seedance 2.5",
@@ -137,6 +139,7 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
                     "locations": [{"name": "CAFE", "description": "AI cafe"}],
                     "props": [],
                     "narrator_voice_ref": None,
+                    "visual_style": {"rendering": "cel shading", "palette": "ochre and cream", "lighting_motif": "warm window light", "texture_grain": "ink outlines"},
                 }
             if system_prompt == prompts.CINEMATOGRAPHY_AGENT:
                 return {
@@ -181,6 +184,10 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
         self.assertEqual(calls[1][0], prompts.SCRIPT_ARCHITECT_FROM_SCRIPT)
         self.assertIn(source, calls[1][1])
         self.assertEqual(result["source_script_text"], source)
+        continuity_call = next(c for c in calls if c[0] == prompts.CONTINUITY_AGENT)
+        self.assertIn('"visual_style": "Cartoon / Anime", "color_grade": "Warm"', continuity_call[1])
+        cine_call = next(c for c in calls if c[0] == prompts.CINEMATOGRAPHY_AGENT)
+        self.assertIn('"palette": "ochre and cream"', cine_call[1])
 
     def test_no_script_keeps_original_architect_prompt_and_result_shape(self) -> None:
         calls, result = self._run(None)

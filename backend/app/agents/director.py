@@ -525,6 +525,9 @@ def run_pipeline(db: Session, job_id: str) -> None:
         # shot is planned, so every later step can be checked against it.
         emit("continuity_plan", "Building the reference asset library before any shot is planned...")
         continuity_input = json.dumps(script["scenes"])
+        continuity_input += "\nAuthoritative job style settings: " + json.dumps({
+            "visual_style": job.visual_style, "color_grade": job.color_grade,
+        })
         if source_script:
             continuity_input += (
                 "\nEvery named script entity below must have one matching Continuity entry; preserve each name exactly:\n"
@@ -558,6 +561,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
         emit("cinematography", "Assigning camera, lens and lighting per shot...")
         cinematography_input = (
             f"Scenes: {json.dumps(script['scenes'])}\nCharacters: {json.dumps(continuity['characters'])}"
+            f"\ncontinuity.visual_style: {json.dumps(continuity['visual_style'])}"
         )
         if source_script:
             cinematography_input += f"\nLocations: {json.dumps(continuity['locations'])}"

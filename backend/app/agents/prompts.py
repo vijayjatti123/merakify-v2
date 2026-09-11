@@ -19,8 +19,12 @@ If any check fails, set approved false and explain the correction needed. Judge 
 
 FORMAT_CLASSIFIER = """You classify a video request into a production format.
 Respond with ONLY JSON:
-{"format":"ad|skit|short_film|explainer","structure":"AIDA|three_act|hook_body_cta|explainer_structure","duration_target_sec":number,"num_scenes":number}
-Pick num_scenes between 2 and 4. No explanation text, JSON only."""
+{"format":"ad|skit|short_film|explainer|documentary|ugc","structure":"AIDA|three_act|hook_body_cta|explainer_structure","duration_target_sec":number,"num_scenes":number}
+Honor an explicit Content type selection: Documentary -> documentary, UGC -> ugc, Short story -> short_film,
+Ad or Product hero -> ad. For Other or no explicit type, infer the best fit from the brief.
+Documentary uses a grounded observational structure; ugc uses hook_body_cta.
+Pick num_scenes between 2 and 4. For ugc, choose 4 scenes so short speech beats fit the per-shot limit;
+target 15-30 seconds unless the brief explicitly requests otherwise. No explanation text, JSON only."""
 
 SCRIPT_EXTRACTOR = """You extract explicitly named entities from raw script text.
 This is literal extraction, not interpretation:
@@ -41,6 +45,28 @@ write a tight scene breakdown that fits the target duration.
 The selected dialogue language is %s. Write every dialogue_or_vo value in that language, and ensure
 any downstream dialogue_text copied from it remains in that language. For non-English languages, use
 the language's native script rather than translating it to English or using Romanized transliteration.
+Apply ONLY the creative rule for the supplied Format:
+- ad / short_film / skit: seek a metaphor, transformation, or unexpected point of view instead of the
+  most literal treatment. For example, explore a coffee cherry's journey rather than a static cup.
+  Respect the brief's hard requirements; never invent factual product claims to support the concept.
+- explainer: use a clever concrete analogy or framing device to make the idea easier to understand.
+  Clarity wins over novelty; avoid confusing abstraction and distinguish analogy from literal fact.
+- documentary: suppress invented drama, metaphor and fictional events. Find the most compelling TRUE
+  angle or human moment supported by the supplied facts. Do not invent testimony, quotes, named people,
+  dates, incidents, personal histories or outcomes. If facts are sparse, propose observational footage
+  of the stated subject without asserting an unverified event occurred. Do not dramatize a crisis or
+  resolve one merely to satisfy a story arc. These truth constraints override a requested dramatic structure.
+- ugc: write one speaker's casual, unscripted-SOUNDING testimonial monologue, not polished ad copy.
+  In order: hook in the first roughly 3 seconds, relatable problem, product reveal, proof, CTA.
+  Across 4 scenes, combine hook + problem in scene 1, then reveal, proof, CTA. Aim for 15-30 seconds
+  of speech total (roughly 40-60 words) with contractions, natural phrasing and light conversational
+  hesitations, not slogans or theatrical stage directions. Each scene is a short complete speech beat
+  that can fit one 9-second dialogue shot. Ground proof in supplied facts or a demonstrable feature;
+  do not fabricate a customer's actual experience, results, endorsements or product capabilities.
+  Open with a short hook of at most 6 words before the problem (for example, "Water break, anyone?").
+  Keep the logline and CTA as grounded as the proof: a visible water level does not establish that
+  someone drinks more, meets a hydration target, or changes a habit. Never promise such an outcome.
+  Invite an observable action or consideration instead (for example, "Take a look at the water level").
 Respond with ONLY JSON:
 {"logline":"one sentence, under 20 words","scenes":[{"scene_number":1,"heading":"under 8 words","description":"under 20 words","dialogue_or_vo":"under 15 words or empty string","mood":"under 4 words"}]}
 Write exactly the number of scenes specified. Keep every field short."""
@@ -70,8 +96,16 @@ on-screen speaking them). Those lines still need one consistent voice across the
 way a character does — set narrator_voice_ref to null for the same reason: it is filled later with a fixed
 Sarvam catalog voice ID, not invented by you. If the scenes have no voiceover-style lines at all, still include narrator_voice_ref as null;
 it costs nothing to include and means later steps never have to guess whether it was considered.
+The input includes authoritative job visual_style and color_grade fields. Expand them into a concrete
+whole-video style bible in visual_style: rendering, palette, lighting_motif and texture_grain.
+Name actual colors, a repeatable motivated lighting treatment, and specific surface/line/grain qualities.
+Preserve the selected rendering and apply the grade independently: Cartoon / Anime with Warm, for
+example, retains drawn/cel-shaded forms while using warm colors; a grade must not replace the rendering.
+Natural and None mean a restrained natural rendering and neutral grade, not a missing style bible.
+These typed job settings override conflicting style prose. Keep characters and locations faithful to
+the scenes; the style bible changes rendering, not story facts, identity, wardrobe or source dialogue.
 Respond with ONLY JSON:
-{"characters":[{"name":"...","description":"under 15 words, physical + wardrobe anchor","voice_sample_ref":null}],"locations":[{"name":"...","description":"under 12 words"}],"props":[{"name":"under 5 words"}],"narrator_voice_ref":null}
+{"characters":[{"name":"...","description":"under 15 words, physical + wardrobe anchor","voice_sample_ref":null}],"locations":[{"name":"...","description":"under 12 words"}],"props":[{"name":"under 5 words"}],"narrator_voice_ref":null,"visual_style":{"rendering":"concrete rendering treatment","palette":"specific colors and grade","lighting_motif":"repeatable motivated lighting","texture_grain":"specific texture, linework or grain"}}
 Max 4 characters, 3 locations, 4 props."""
 
 # Generation models cap out around 8-10 seconds per shot. Rather than
@@ -93,6 +127,13 @@ real cinematic craft:
   Sarvam's Bulbul documentation confirms Romanized/transliterated Indic input significantly degrades
   output quality (https://docs.sarvam.ai/api/getting-started/models/bulbul). English code-mixed words may
   remain Latin. If a supplied script is Romanized, preserve it and let the pre-flight guard request correction.
+- Honor continuity.visual_style as the whole-video style bible in EVERY shot's lighting and
+  composition_note: carry its palette, lighting motif, rendering and texture/grain consistently.
+  Let the bible guide the mood-lighting choices below; do not default to photorealistic lighting or
+  composition when the bible specifies drawn/cel-shaded or another rendering. Express the motif in
+  concrete shot-level terms while preserving story action, identity and all film-grammar rules.
+  For a stylized bible, include a concise rendering cue in lighting or composition_note for each
+  shot (such as cel-shadow bands, inked silhouettes, or paper grain), not just a generic warm/cool label.
 - Respect the 180-degree rule: characters keep consistent screen-left/screen-right positions within a scene.
 - Vary shot scale with purpose: wide for establishing, medium for dialogue/action, close-up for emotional
   beats. Never repeat the same shot scale twice in a row.

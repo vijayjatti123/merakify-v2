@@ -17,6 +17,8 @@ class Job(Base):
     id = Column(String, primary_key=True, default=new_id)
     brief = Column(Text, nullable=False)
     aspect_ratio = Column(String, nullable=False, default="16:9")
+    visual_style = Column(String, nullable=False, default="Natural")
+    color_grade = Column(String, nullable=False, default="None")
     quality = Column(String, nullable=False, default="720p")
     language = Column(String, nullable=False, default="English")
     ai_model = Column(String, nullable=False, default="Seedance 2.5")

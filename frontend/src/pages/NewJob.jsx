@@ -126,8 +126,6 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
       return;
     }
     const briefParts = [brief.trim(), `Target duration: ${effectiveDuration}. Content type: ${contentType}.`];
-    if (colorGrade !== "None") briefParts.push(`Whole-video color grade: ${colorGrade}.`);
-    if (visualStyle !== "Natural") briefParts.push(`Visual style: ${visualStyle}.`);
     if (selectedAsset) briefParts.push(`Reference image: ${selectedAsset.url}`);
 
     setSubmitting(true);
@@ -136,6 +134,8 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
       await onSubmit({
         brief: briefParts.join("\n\n"),
         aspect_ratio: aspectRatio,
+        visual_style: visualStyle,
+        color_grade: colorGrade,
         quality,
         language: effectiveLanguage,
         ai_model: aiModel,
@@ -149,12 +149,12 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
 
   async function handleResolvedScriptSubmit(resolutions) {
     const briefParts = [brief.trim(), `Target duration: ${effectiveDuration}. Content type: ${contentType}.`];
-    if (colorGrade !== "None") briefParts.push(`Whole-video color grade: ${colorGrade}.`);
-    if (visualStyle !== "Natural") briefParts.push(`Visual style: ${visualStyle}.`);
     if (selectedAsset) briefParts.push(`Reference image: ${selectedAsset.url}`);
     await onSubmit({
       brief: briefParts.join("\n\n"),
       aspect_ratio: aspectRatio,
+      visual_style: visualStyle,
+      color_grade: colorGrade,
       quality,
       language: effectiveLanguage,
       ai_model: aiModel,

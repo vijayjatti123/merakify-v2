@@ -21,6 +21,8 @@ def completed_job(result: dict):
         id="job-1",
         brief="A test ad",
         aspect_ratio="16:9",
+        visual_style="Natural",
+        color_grade="None",
         quality="720p",
         language="English",
         ai_model="Seedance 2.5",

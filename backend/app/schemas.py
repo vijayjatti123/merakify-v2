@@ -1,10 +1,22 @@
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 AssetRole = Literal["background", "location", "prop", "product", "other"]
+VisualStyle = Literal["Natural", "Cinematic", "Realistic", "Cartoon / Anime", "3D / CGI", "Hyper-realistic", "Vintage / retro film"]
+ColorGrade = Literal["None", "Warm", "Cool", "Vintage", "Neon", "Black & white", "Vibrant"]
+
+
+def style_from_brief(brief: str, field: str) -> str:
+    """Read exact legacy toolbar lines for old clients and existing jobs."""
+    label, values = ("Visual style", get_args(VisualStyle)) if field == "visual_style" else ("Whole-video color grade", get_args(ColorGrade))
+    for line in reversed(brief.splitlines()):
+        for value in values:
+            if line.strip() == f"{label}: {value}.":
+                return value
+    return values[0]
 
 
 class ScriptExtract(BaseModel):
@@ -68,6 +80,8 @@ class JobCreate(BaseModel):
 
     brief: str
     aspect_ratio: Literal["9:16", "16:9"] = "16:9"
+    visual_style: VisualStyle = "Natural"
+    color_grade: ColorGrade = "None"
     quality: Literal["480p", "720p"] = "720p"
     language: str = "English"
     ai_model: Literal["Wan 2.5", "Seedance 2.0", "Kling 3.0", "Seedance 2.5", "Veo 3.1", "Sora 2"] = (
@@ -118,6 +132,8 @@ class JobOut(BaseModel):
     id: str
     brief: str
     aspect_ratio: str
+    visual_style: str = "Natural"
+    color_grade: str = "None"
     quality: str
     language: str
     ai_model: str

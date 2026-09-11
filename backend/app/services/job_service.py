@@ -1,9 +1,10 @@
 import json
-from typing import Any, Optional
+from typing import Any, Optional, get_args
 
 from sqlalchemy.orm import Session
 
 from app.models import AgentEvent, Job
+from app.schemas import ColorGrade, VisualStyle, style_from_brief
 
 
 def create_job(
@@ -11,15 +12,33 @@ def create_job(
     brief: str,
     *,
     aspect_ratio: str = "16:9",
+    visual_style: str | None = None,
+    color_grade: str | None = None,
     quality: str = "720p",
     language: str = "English",
     ai_model: str = "Seedance 2.5",
     script_text: str | None = None,
     resolutions: dict | None = None,
 ) -> Job:
+    visual_style = visual_style if visual_style is not None else style_from_brief(brief, "visual_style")
+    color_grade = color_grade if color_grade is not None else style_from_brief(brief, "color_grade")
+    if visual_style not in get_args(VisualStyle) or color_grade not in get_args(ColorGrade):
+        raise ValueError("Invalid job style settings")
+    # Stored fields are authoritative. Keep a canonical prose mirror for Module H
+    # and existing brief consumers, including callers that only send typed fields.
+    for label, values, selected in (
+        ("Visual style", get_args(VisualStyle), visual_style),
+        ("Whole-video color grade", get_args(ColorGrade), color_grade),
+    ):
+        metadata_lines = {f"{label}: {value}." for value in values}
+        brief = "\n".join(line for line in brief.split("\n") if line.strip() not in metadata_lines).rstrip()
+        if selected != values[0]:
+            brief += f"\n\n{label}: {selected}."
     job = Job(
         brief=brief,
         aspect_ratio=aspect_ratio,
+        visual_style=visual_style,
+        color_grade=color_grade,
         quality=quality,
         language=language,
         ai_model=ai_model,

@@ -1,5 +1,5 @@
 ﻿from sqlalchemy import create_engine
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
@@ -29,6 +29,8 @@ Base = declarative_base()
 
 JOB_COLUMN_DDL = {
     "aspect_ratio": "VARCHAR NOT NULL DEFAULT '16:9'",
+    "visual_style": "VARCHAR NOT NULL DEFAULT 'Natural'",
+    "color_grade": "VARCHAR NOT NULL DEFAULT 'None'",
     "quality": "VARCHAR NOT NULL DEFAULT '720p'",
     "language": "VARCHAR NOT NULL DEFAULT 'English'",
     "ai_model": "VARCHAR NOT NULL DEFAULT 'Seedance 2.5'",
@@ -61,6 +63,15 @@ def ensure_job_intake_columns() -> None:
         for name, definition in JOB_COLUMN_DDL.items():
             if name not in existing:
                 connection.exec_driver_sql(f"ALTER TABLE jobs ADD COLUMN {name} {definition}")
+                if name in ("visual_style", "color_grade"):
+                    from app.schemas import style_from_brief
+
+                    # Preserve Module F/H selections on pre-existing jobs, once only.
+                    for row in connection.execute(text("SELECT id, brief FROM jobs")).mappings().all():
+                        connection.execute(
+                            text(f"UPDATE jobs SET {name} = :value WHERE id = :id"),
+                            {"value": style_from_brief(row["brief"], name), "id": row["id"]},
+                        )
 
 
 def ensure_asset_tagging_columns() -> None:
