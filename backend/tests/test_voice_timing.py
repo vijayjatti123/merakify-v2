@@ -207,8 +207,14 @@ class CorrectionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(system, prompts.SHOT_ASSEMBLER)
                 seen.extend(json.loads(user))
                 return {"total_duration_sec": 4, "transitions": []}
-            with patch.object(voice, "synthesize_dialogue", new=AsyncMock(return_value=voice.GeneratedAudio(pcm(4), "audio/wav", ".wav", "sarvam"))), patch.object(voice.storage_service, "upload_bytes", return_value={"url": "saved.wav"}), patch.object(director, "call_agent", side_effect=assemble):
+            def compile_after_assembly(result, **kwargs):
+                self.assertEqual(result["assembly"]["total_duration_sec"], 4)
+                self.assertFalse(result["assembly"]["provisional"])
+                self.assertEqual(result["shots"][0]["dialogue_audio_duration_sec"], 4)
+                return [{**s, "compiled_prompt": "Audited compiler boundary"} for s in result["shots"]]
+            with patch.object(voice, "synthesize_dialogue", new=AsyncMock(return_value=voice.GeneratedAudio(pcm(4), "audio/wav", ".wav", "sarvam"))), patch.object(voice.storage_service, "upload_bytes", return_value={"url": "saved.wav"}), patch.object(director, "call_agent", side_effect=assemble), patch.object(director, "compile_shot_prompts", side_effect=compile_after_assembly) as compiler:
                 await voice.generate_job_dialogue_audio(db, job.id)
+            compiler.assert_called_once()
             self.assertEqual(seen[0]["duration_sec"], 4)
             self.assertEqual(seen[0]["dialogue_audio_duration_sec"], 4)
             self.assertEqual(seen[0]["status"], "done")

@@ -171,6 +171,7 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
             patch("app.agents.director.job_service.get_job", return_value=job),
             patch("app.agents.director.job_service.set_status"),
             patch("app.agents.director.job_service.append_event"),
+            patch("app.agents.director.compile_shot_prompts", side_effect=lambda result, **kwargs: result["shots"]),
             patch("app.agents.director.job_service.set_result") as set_result,
         ):
             run_pipeline(object(), job.id)

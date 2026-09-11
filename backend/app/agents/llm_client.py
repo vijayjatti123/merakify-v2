@@ -25,9 +25,13 @@ def _extract_json(text: str) -> dict:
         ) from exc
 
 
-def call_agent(system: str, user_content: str, fast: bool = False, max_tokens: int = 2048) -> dict:
+def call_agent(system: str, user_content: str, fast: bool = False, max_tokens: int = 2048,
+               request_timeout: float | None = None) -> dict:
     model = FAST_MODEL if fast else REASONING_MODEL
-    response = _client.messages.create(
+    # Compiler-only opt-in: one transport attempt using its remaining wall-clock
+    # budget. All existing agents retain the shared 90s timeout / two SDK retries.
+    client = _client if request_timeout is None else _client.with_options(timeout=request_timeout, max_retries=0)
+    response = client.messages.create(
         model=model,
         max_tokens=max_tokens,
         system=system,

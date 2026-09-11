@@ -8,6 +8,7 @@ from app.agents import prompts
 from app.agents.dialogue_integrity import protected_dialogue, restore_protected, screen_issues, warn_dialogue_loss
 from app.agents.llm_client import call_agent
 from app.services import asset_service, character_service, job_service, storage_service, voice_generation_service
+from app.services.shot_prompt_compiler import compile_shot_prompts
 
 EventFn = Callable[[str, str], None]
 
@@ -475,6 +476,18 @@ def finalize_audio_assembly(db, job_id):
         result["assembly"] = {**result.get("assembly", {}), "provisional": True, "error": str(error)}
         emit("assembly", f"Final audio assembly failed: {type(error).__name__}: {error}")
     finally:
+        # Dialogue compilation waits for REAL post-audio Assembly transitions.
+        # Compiler failure is distinct from Assembly failure; do not mark an
+        # already successful audio/assembly pass provisional or discard its data.
+        if not result.get("assembly", {}).get("provisional", True):
+            try:
+                result["ai_model"] = result.get("ai_model") or job.ai_model
+                result["shots"] = compile_shot_prompts(result, brief=job.brief, emit=emit, call_agent=call_agent)
+            except Exception as error:
+                for shot in result["shots"]:
+                    shot.pop("compiled_prompt", None)  # Never retain stale text after a failed recompile.
+                emit("shot_prompt_compiler", f"Shot Prompt Compiler failed: {type(error).__name__}: {error}")
+                job_service.set_status(db, job_id, "error", error_message=f"Shot Prompt Compiler failed: {error}")
         result["audio_assembly_pending"] = False
         job_service.set_result(db, job_id, result)
 
@@ -648,6 +661,10 @@ def run_pipeline(db: Session, job_id: str) -> None:
         }
         if source_script:
             result["source_script_text"] = source_script
+        # Silent jobs already have real Assembly; dialogue jobs compile only in
+        # finalize_audio_assembly after approval, never from provisional boundaries.
+        if not assembly.get("provisional", False):
+            result["shots"] = compile_shot_prompts(result, brief=brief, emit=emit, call_agent=call_agent)
         job_service.set_result(db, job_id, result)
         job_service.set_status(db, job_id, "done")
 
