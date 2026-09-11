@@ -573,6 +573,8 @@ def run_pipeline(db: Session, job_id: str) -> None:
             cinematography_input,
             max_tokens=4096,
         )
+        from app.services.dialogue_duration import preflight_dialogue_durations
+        preflight_dialogue_durations(cine["shots"], emit=emit)
         assigned_voice_count += voice_generation_service.assign_missing_voice_ids(continuity, cine["shots"], emit=emit)
         if assigned_voice_count:
             emit(
