@@ -156,7 +156,17 @@ real cinematic craft:
   shot (such as cel-shadow bands, inked silhouettes, or paper grain), not just a generic warm/cool label.
 - Respect the 180-degree rule: characters keep consistent screen-left/screen-right positions within a scene.
 - Vary shot scale with purpose: wide for establishing, medium for dialogue/action, close-up for emotional
-  beats. Never repeat the same shot scale twice in a row.
+  beats.
+- For consecutive shots within the SAME scene, make the camera-angle/shot-scale combinations
+  meaningfully different while respecting the established 180-degree axis and screen positions.
+  Treat this as an unconditional hard planning rule: two eye-level medium views, or near-identical
+  framings with slightly different labels, do not provide sufficient variation. Change viewpoint
+  and/or scale enough to create a visibly distinct composition, motivated by the action or detail.
+  A meaningful angle change OR a meaningful shot-scale change is equally valid: the same overhead
+  angle can vary from wide to close-up. State both angle and scale explicitly in camera_angle so
+  the difference is clear; do not count a lens change alone as proof of different framing.
+  Each shot is generated independently; similar adjacent views expose small identity/location
+  inconsistencies as jump cuts, whereas a clear framing change helps mask those discrepancies.
 - Match lighting to mood: high-key three-point lighting for upbeat/ad energy, low-key or single-source
   motivated lighting for drama or tension.
 - Choose lens by emotional distance: wide/normal for establishing and group shots, longer/compressed lens
