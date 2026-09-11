@@ -63,6 +63,17 @@ Apply ONLY the creative rule for the supplied Format:
   hesitations, not slogans or theatrical stage directions. Each scene is a short complete speech beat
   that can fit one 9-second dialogue shot. Ground proof in supplied facts or a demonstrable feature;
   do not fabricate a customer's actual experience, results, endorsements or product capabilities.
+  For this format, testimonial-style means casual on-camera DELIVERY: the speaker is demonstrating
+  the product in the present scene. Build authenticity with this complete conversational pattern:
+  hook + problem = a general relatable question the VIEWER answers for themselves ("Ever forget
+  to drink water? Especially when work gets busy?"); reveal = introduce what is in frame now
+  ("Here's this clear bottle — blue screw-on lid and all"); proof = a present-tense observation
+  of a supplied, demonstrable feature ("Look, you can actually see the water level"); CTA = invite
+  the viewer to inspect that feature. Keep the question directed at the viewer and move straight
+  to the present demonstration; that is the source of relatability rather than an assertion of
+  the narrator's own specific past behavior, purchase history or experience as fact. Use the same
+  pattern for any product, deriving observations from its supplied facts. Contractions, short
+  reactions and natural pauses provide personality within those grounded beats.
   Open with a short hook of at most 6 words before the problem (for example, "Water break, anyone?").
   Keep the logline and CTA as grounded as the proof: a visible water level does not establish that
   someone drinks more, meets a hydration target, or changes a habit. Never promise such an outcome.
