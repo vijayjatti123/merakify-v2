@@ -218,6 +218,7 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
 
     updated_result = dict(result)
     updated_result["generation_approved"] = True
+    updated_result["audio_assembly_pending"] = any(shot.get("has_dialogue") for shot in result.get("shots", []))
     updated_result["shots"] = [
         {
             **shot,
@@ -333,6 +334,7 @@ def regenerate_shot(
             # Do not expose provider errors containing raw briefs or leave a partial change stored.
             raise HTTPException(status_code=502, detail="Style hint could not be applied safely; shot unchanged. Retry or clear the hints.") from error
     updated_result["shots"] = updated_shots
+    updated_result["audio_assembly_pending"] = any(shot.get("has_dialogue") for shot in updated_shots)
     job_service.set_result(db, job_id, updated_result)
     job_service.append_shot_status_event(
         db,
@@ -417,10 +419,10 @@ async def stream_job(job_id: str):
                     job.status == "done"
                     and result
                     and result.get("generation_approved")
-                    and any(
+                    and (result.get("audio_assembly_pending") or any(
                         shot.get("status") in {SHOT_STATUS_PENDING, SHOT_STATUS_GENERATING}
                         for shot in result.get("shots", [])
-                    )
+                    ))
                 )
                 if job.status == "error" or (job.status == "done" and not generation_running):
                     final_payload = {

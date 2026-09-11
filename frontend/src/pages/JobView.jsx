@@ -149,7 +149,7 @@ export default function JobView({ jobId, onReset }) {
     const everyShotDone = shots.every(
       (shot) => (shotStatuses[shot.shot_number] || shot.status || "pending") === "done",
     );
-    if (!everyShotDone) return;
+    if (!everyShotDone || result?.audio_assembly_pending || result?.assembly?.provisional) return;
 
     setGenerationStage("stitching");
     clearTimeout(stitchingTimerRef.current);
@@ -157,7 +157,7 @@ export default function JobView({ jobId, onReset }) {
       setGenerationStage("final");
       stitchingTimerRef.current = null;
     }, 1600);
-  }, [approved, generationStage, shotStatuses, shots]);
+  }, [approved, generationStage, shotStatuses, shots, result]);
 
   function beginEdit(shot) {
     setEditingShot(shot.shot_number);
@@ -283,7 +283,7 @@ export default function JobView({ jobId, onReset }) {
 
             <div className="qa-banner" data-approved={result.qa.approved}>
               <Check size={14} />
-              <span>{result.qa.approved ? "Continuity approved" : "Residual QA notes"} · {result.assembly.total_duration_sec}s</span>
+              <span>{result.qa.approved ? "Continuity approved" : "Residual QA notes"} · {result.assembly.total_duration_sec}s{result.assembly.provisional ? " · Provisional timing — finalized after audio" : ""}</span>
             </div>
 
             <div className="shot-card-list">

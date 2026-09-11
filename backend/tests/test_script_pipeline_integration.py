@@ -163,6 +163,7 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
 
         with (
             patch("app.agents.director.call_agent", side_effect=fake_call),
+            patch("app.services.voice_timing.measured_budget", return_value={"measured_mean_chars_per_second": 18.4}),
             patch("app.agents.director.character_service.list_approved_characters", return_value=[]),
             patch("app.agents.director.job_service.get_job", return_value=job),
             patch("app.agents.director.job_service.set_status"),

@@ -1,6 +1,9 @@
 import asyncio
 import base64
 import uuid
+import io
+import json
+import wave
 from dataclasses import dataclass
 
 import httpx
@@ -54,6 +57,21 @@ class GeneratedAudio:
     provider: str
 
 
+def decoded_audio_duration(data: bytes) -> float:
+    """Measure actual decoded samples, never a provider duration field or text estimate."""
+    try:
+        with wave.open(io.BytesIO(data), "rb") as audio:
+            samples = audio.readframes(audio.getnframes())
+            duration = len(samples) / (audio.getsampwidth() * audio.getnchannels() * audio.getframerate())
+    except (wave.Error, EOFError):
+        import soundfile
+        samples, rate = soundfile.read(io.BytesIO(data), dtype="float32", always_2d=True)
+        duration = len(samples) / rate
+    if duration <= 0:
+        raise VoiceGenerationError("Decoded audio has no duration")
+    return duration
+
+
 def heuristic_voice_id(description: str) -> str:
     """Choose one fixed Sarvam catalog voice from simple age/gender words."""
     text = description.casefold()
@@ -77,6 +95,7 @@ def assign_missing_voice_ids(continuity: dict, shots: list[dict] | None = None) 
         if not voice_id:
             voice_id = heuristic_voice_id(character.get("description") or "")
             character["voice_id"] = voice_id
+            character["voice_assignment"] = "heuristic"
             assigned += 1
         # voice_sample_ref is a Sarvam catalog ID, never a cloned voice sample.
         character["voice_sample_ref"] = voice_id
@@ -116,7 +135,10 @@ async def _sarvam_tts(
     text: str,
     voice_id: str,
     language: str,
+    pace: float = 1.0,
 ) -> GeneratedAudio:
+    if len(text) > 2500:
+        raise VoiceGenerationError("Dialogue exceeds Sarvam's 2,500-character limit")
     if not settings.sarvam_api_key.strip():
         raise RuntimeError("SARVAM_API_KEY is not configured")
     response = await client.post(
@@ -127,7 +149,8 @@ async def _sarvam_tts(
             "language_code": _language_code(language),
             "speaker": voice_id,
             "model": "bulbul:v3",
-            "output_audio_codec": "mp3",
+            "output_audio_codec": "wav",
+            "pace": pace,
             "speech_sample_rate": 24000,
         },
     )
@@ -143,7 +166,7 @@ async def _sarvam_tts(
         raise RuntimeError("Sarvam TTS returned invalid base64 audio") from error
     if not audio:
         raise RuntimeError("Sarvam TTS returned empty audio")
-    return GeneratedAudio(audio, "audio/mpeg", ".mp3", "sarvam")
+    return GeneratedAudio(audio, "audio/wav", ".wav", "sarvam")
 
 
 def _elevenlabs_voice_id(sarvam_voice_id: str) -> str:
@@ -177,10 +200,13 @@ async def synthesize_dialogue(
     text: str,
     voice_id: str,
     language: str,
+    pace: float = 1.0,
 ) -> GeneratedAudio:
     """Use Sarvam for every language; fall back only after its call fails."""
+    from app.services.voice_timing import native_script_guard
+    native_script_guard(text, language)
     try:
-        return await _sarvam_tts(client, text, voice_id, language)
+        return await _sarvam_tts(client, text, voice_id, language, pace=pace)
     except Exception as sarvam_error:  # noqa: BLE001 - provider failure activates fallback
         try:
             return await _elevenlabs_tts(client, text, voice_id)
@@ -205,6 +231,7 @@ async def _generate_dialogue_shot(
     shot: dict,
     language: str,
     client: httpx.AsyncClient,
+    mood: str = "",
 ) -> None:
     shot_number = shot["shot_number"]
     voice_id = None
@@ -230,12 +257,41 @@ async def _generate_dialogue_shot(
             message=f"Generating dialogue audio for shot {shot_number} with voice {voice_id}.",
             dialogue_voice_id=voice_id,
         )
+        from app.services.voice_timing import mood_pace
+        text = shot.get("dialogue_text") or ""
+        target = float(shot["duration_sec"])
+        if target <= 0:
+            raise VoiceGenerationError("Dialogue shot duration must be positive")
+        # By design, expressive mood pace takes precedence over the fit-based
+        # pace estimate used only to select a voice. That estimate is not a
+        # synthesis setting; timing correction happens after decoding real audio.
+        pace = mood_pace(mood)
         generated = await synthesize_dialogue(
             client,
-            text=shot.get("dialogue_text") or "",
+            text=text,
             voice_id=voice_id,
             language=language,
+            pace=pace,
         )
+        measured = decoded_audio_duration(generated.data)
+        attempts = [{"pace":pace,"duration_sec":measured,"provider":generated.provider}]
+        mismatch = abs(measured - target) / target
+        if .10 < mismatch <= .15 and generated.provider == "sarvam":
+            corrected_pace = min(2.0, max(.5, pace * measured / target))
+            job_service.append_event(db, job_id, "voice_generation", f"Shot {shot_number}: decoded {measured:.3f}s vs {target:.3f}s; one bounded pace retry {pace:.3f} -> {corrected_pace:.3f}.")
+            # Exactly one retry; a retry failure retains the successful first audio.
+            try:
+                corrected = await _sarvam_tts(client, text, voice_id, language, pace=corrected_pace)
+                corrected_duration = decoded_audio_duration(corrected.data)
+                attempts.append({"pace":corrected_pace,"duration_sec":corrected_duration,"provider":corrected.provider})
+                generated, measured, pace = corrected, corrected_duration, corrected_pace
+            except Exception as error:
+                job_service.append_event(db, job_id, "voice_generation", f"Shot {shot_number}: bounded pace retry failed ({type(error).__name__}); retaining the first decoded audio.")
+        final_duration = measured if abs(measured-target)/target > .10 else target
+        if final_duration != target:
+            job_service.append_event(db, job_id, "voice_generation", f"Shot {shot_number}: duration_sec corrected {target:.3f}s -> decoded audio {measured:.3f}s; no further pace retries. Assembly/duration check follows audio correction.")
+        if measured > 9:
+            job_service.append_event(db, job_id, "voice_generation", f"Warning: shot {shot_number} audio is {measured:.3f}s, exceeding the current 9-second video-model limit; dialogue was preserved and requires review.")
         object_key = f"jobs/{job_id}/shots/{shot_number}/dialogue-{uuid.uuid4()}{generated.extension}"
         uploaded = await asyncio.to_thread(
             storage_service.upload_bytes,
@@ -250,6 +306,11 @@ async def _generate_dialogue_shot(
             "dialogue_audio_url": uploaded["url"],
             "dialogue_audio_provider": generated.provider,
             "dialogue_voice_id": voice_id,
+            "duration_sec": final_duration,
+            "dialogue_audio_duration_sec": measured,
+            "dialogue_timing": {"character_count":len(text),"planned_duration_sec":target,"mood":mood,
+                                "mood_pace":mood_pace(mood),"final_pace":pace,"attempts":attempts,
+                                "relative_error":abs(measured-final_duration)/final_duration},
         }
         job_service.update_shot_fields(db, job_id, shot_number, **fields)
         job_service.append_shot_status_event(
@@ -296,6 +357,18 @@ async def generate_job_dialogue_audio(
     if not result:
         raise ValueError("job has no stored result")
 
+    from app.services.voice_timing import select_calibrated_voices
+    from app.agents.director import _attach_voice_refs, finalize_audio_assembly
+    selections = select_calibrated_voices(db, result, job.language or "English")
+    for selection in selections:
+        job_service.append_event(db, job_id, "voice_generation", f"Calibrated voice selection: {json.dumps(selection)}")
+    if selections:
+        result["shots"] = _attach_voice_refs(result["shots"], result["continuity"]["characters"], result["continuity"].get("narrator_voice_ref"))
+    has_dialogue = any(shot.get("has_dialogue") for shot in result.get("shots", []))
+    result["audio_assembly_pending"] = has_dialogue
+    job_service.set_result(db, job_id, result)
+    moods = {scene["scene_number"]:scene.get("mood", "") for scene in result.get("script", {}).get("scenes", [])}
+
     selected = [
         shot
         for shot in result.get("shots", [])
@@ -320,7 +393,7 @@ async def generate_job_dialogue_audio(
     async with httpx.AsyncClient(timeout=timeout) as client:
         await asyncio.gather(
             *(
-                _generate_dialogue_shot(db, job_id, shot, job.language or "English", client)
+                _generate_dialogue_shot(db, job_id, shot, job.language or "English", client, moods.get(shot.get("scene_number"), ""))
                 for shot in dialogue_shots
             )
         )
@@ -331,6 +404,8 @@ async def generate_job_dialogue_audio(
         "voice_generation",
         f"Voice generation finished for {len(dialogue_shots)} dialogue shot(s).",
     )
+    if has_dialogue:
+        await asyncio.to_thread(finalize_audio_assembly, db, job_id)
 
 
 def fail_unfinished_shots(
@@ -346,6 +421,9 @@ def fail_unfinished_shots(
     if not result:
         return
     error_message = str(error)[:1200]
+    result["audio_assembly_pending"] = False
+    result["assembly"] = {**result.get("assembly", {}), "provisional": True, "error": error_message}
+    job_service.set_result(db, job_id, result)
     for shot in result.get("shots", []):
         shot_number = shot.get("shot_number")
         if shot_numbers is not None and shot_number not in shot_numbers:

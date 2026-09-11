@@ -8,8 +8,8 @@ from app.agents.dialogue_integrity import screen_issues, protected_dialogue
 
 
 def shots(two=False):
-    return [dict(shot_number=1,scene_number=2,has_dialogue=True,dialogue_text='Time to go.',characters_in_shot=[]),
-            dict(shot_number=2,scene_number=2,has_dialogue=two,dialogue_text='Come along.' if two else '',characters_in_shot=[])]
+    return [dict(shot_number=1,scene_number=2,duration_sec=5,has_dialogue=True,dialogue_text='Time to go.',characters_in_shot=[]),
+            dict(shot_number=2,scene_number=2,duration_sec=5,has_dialogue=two,dialogue_text='Come along.' if two else '',characters_in_shot=[])]
 
 
 def issue(number=1,problem='Scene 2 has two shots with dialogue',instruction='Remove dialogue from shot 1, make silent cutaway'):

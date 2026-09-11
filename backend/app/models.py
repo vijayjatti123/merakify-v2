@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Column, Float, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -67,6 +67,15 @@ class CharacterStyleVariant(Base):
     image_url = Column(Text, nullable=False)
     source = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class VoiceRateProfile(Base):
+    __tablename__ = "voice_rate_profiles"
+
+    voice_id = Column(String, primary_key=True)
+    language = Column(String, primary_key=True)
+    chars_per_second = Column(Float, nullable=False)
+    measured_at = Column(DateTime, nullable=False)
 
 
 class AgentEvent(Base):

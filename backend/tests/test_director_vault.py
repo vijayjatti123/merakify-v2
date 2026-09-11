@@ -41,6 +41,8 @@ class ApprovedVaultContinuityTests(unittest.TestCase):
             {
                 "name": "rAvI",
                 "description": "Vault-approved production coordinator",
+                "voice_assignment": "vault",
+                "character_id": "ravi-1",
                 "image_url": "https://example.test/ravi.png",
                 "voice_id": "rahul",
                 "voice_sample_ref": "rahul",

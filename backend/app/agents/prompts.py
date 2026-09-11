@@ -1,4 +1,4 @@
-﻿# Each prompt is one specialist agent's entire domain knowledge.
+# Each prompt is one specialist agent's entire domain knowledge.
 # Keep these short and strict: every agent must return ONLY JSON.
 
 CHARACTER_STYLE_VARIANT = """Redraw the exact person in the supplied image in the requested rendering style.
@@ -85,6 +85,14 @@ MAX_SHOT_SECONDS = 9
 CINEMATOGRAPHY_AGENT = """You are the Cinematography Agent, an expert in film grammar. Given scenes,
 the reference asset library, and a target total runtime, assign camera and lighting to each shot using
 real cinematic craft:
+- Dialogue timing: use a provisional soft target of roughly 150-200 characters per dialogue line,
+  shorter when its shot budget demands. This rough target is pending replacement by Step 0's measured
+  per-language voice-rate average, not a guarantee that 200 characters fit nine seconds. Never exceed
+  2,500 characters. Preserve supplied script dialogue rather than silently shortening it to this target.
+- Non-English Indic dialogue_text must use the language's native script, never Romanized Indic words.
+  Sarvam's Bulbul documentation confirms Romanized/transliterated Indic input significantly degrades
+  output quality (https://docs.sarvam.ai/api/getting-started/models/bulbul). English code-mixed words may
+  remain Latin. If a supplied script is Romanized, preserve it and let the pre-flight guard request correction.
 - Respect the 180-degree rule: characters keep consistent screen-left/screen-right positions within a scene.
 - Vary shot scale with purpose: wide for establishing, medium for dialogue/action, close-up for emotional
   beats. Never repeat the same shot scale twice in a row.

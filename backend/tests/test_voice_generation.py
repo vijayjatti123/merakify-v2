@@ -1,9 +1,19 @@
 import asyncio
+import io
+import wave
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from app.services import voice_generation_service
+
+
+def pcm(seconds=5):
+    output = io.BytesIO()
+    with wave.open(output, "wb") as audio:
+        audio.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+        audio.writeframes(b"\x00\x00" * int(seconds * 8000))
+    return output.getvalue()
 
 
 class VoiceAssignmentTests(unittest.TestCase):
@@ -17,7 +27,8 @@ class VoiceAssignmentTests(unittest.TestCase):
             ],
             "narrator_voice_ref": None,
         }
-        shots = [{"has_dialogue": True, "characters_in_shot": []}]
+        shots = [{"has_dialogue": True,
+                "duration_sec": 5, "characters_in_shot": []}]
 
         assigned = voice_generation_service.assign_missing_voice_ids(continuity, shots)
 
@@ -81,12 +92,14 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
             {
                 "shot_number": 1,
                 "has_dialogue": True,
+                "duration_sec": 5,
                 "dialogue_text": "First line",
                 "voice_refs": {"Aarohi": "priya"},
             },
             {
                 "shot_number": 2,
                 "has_dialogue": True,
+                "duration_sec": 5,
                 "dialogue_text": "Second line",
                 "voice_refs": {"Dev": "rahul"},
             },
@@ -96,20 +109,23 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
         both_started = asyncio.Event()
         started = []
 
-        async def synthesize(_client, *, text, voice_id, language):
+        async def synthesize(_client, *, text, voice_id, language, pace):
             started.append((text, voice_id, language))
             if len(started) == 2:
                 both_started.set()
             await asyncio.wait_for(both_started.wait(), timeout=0.2)
             await asyncio.sleep(0.01 if voice_id == "priya" else 0.02)
             return voice_generation_service.GeneratedAudio(
-                f"audio-{voice_id}".encode(), "audio/mpeg", ".mp3", "sarvam"
+                pcm(), "audio/wav", ".wav", "sarvam"
             )
 
         update = Mock(return_value={})
         status_event = Mock()
         with (
             patch("app.services.voice_generation_service.job_service.get_job", return_value=job),
+            patch("app.services.voice_generation_service.job_service.set_result"),
+            patch("app.services.voice_timing.select_calibrated_voices", return_value=[]),
+            patch("app.agents.director.finalize_audio_assembly"),
             patch("app.services.voice_generation_service.job_service.job_result", return_value={"shots": shots}),
             patch("app.services.voice_generation_service.job_service.update_shot_fields", update),
             patch("app.services.voice_generation_service.job_service.append_shot_status_event", status_event),
@@ -140,12 +156,14 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
             {
                 "shot_number": 1,
                 "has_dialogue": True,
+                "duration_sec": 5,
                 "dialogue_text": "This shot fails",
                 "voice_refs": {"Aarohi": "priya"},
             },
             {
                 "shot_number": 2,
                 "has_dialogue": True,
+                "duration_sec": 5,
                 "dialogue_text": "This shot succeeds",
                 "voice_refs": {"Dev": "rahul"},
             },
@@ -154,7 +172,7 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
         both_started = asyncio.Event()
         started = []
 
-        async def synthesize(_client, *, text, voice_id, language):
+        async def synthesize(_client, *, text, voice_id, language, pace):
             started.append((text, voice_id, language))
             if len(started) == 2:
                 both_started.set()
@@ -165,13 +183,16 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
                 )
             await asyncio.sleep(0.01)
             return voice_generation_service.GeneratedAudio(
-                b"successful-sibling-audio", "audio/mpeg", ".mp3", "sarvam"
+                pcm(), "audio/wav", ".wav", "sarvam"
             )
 
         update = Mock(return_value={})
         status_event = Mock()
         with (
             patch("app.services.voice_generation_service.job_service.get_job", return_value=job),
+            patch("app.services.voice_generation_service.job_service.set_result"),
+            patch("app.services.voice_timing.select_calibrated_voices", return_value=[]),
+            patch("app.agents.director.finalize_audio_assembly"),
             patch("app.services.voice_generation_service.job_service.job_result", return_value={"shots": shots}),
             patch("app.services.voice_generation_service.job_service.update_shot_fields", update),
             patch("app.services.voice_generation_service.job_service.append_shot_status_event", status_event),
@@ -216,6 +237,7 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
         shot = {
             "shot_number": 7,
             "has_dialogue": True,
+                "duration_sec": 5,
             "dialogue_text": "This call fails",
             "voice_refs": {"Narrator": "shubh"},
         }
@@ -227,6 +249,9 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch("app.services.voice_generation_service.job_service.get_job", return_value=job),
+            patch("app.services.voice_generation_service.job_service.set_result"),
+            patch("app.services.voice_timing.select_calibrated_voices", return_value=[]),
+            patch("app.agents.director.finalize_audio_assembly"),
             patch("app.services.voice_generation_service.job_service.job_result", return_value={"shots": [shot]}),
             patch("app.services.voice_generation_service.job_service.update_shot_fields", update),
             patch("app.services.voice_generation_service.job_service.append_shot_status_event", status_event),

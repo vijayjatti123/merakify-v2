@@ -1,5 +1,6 @@
 """Integrated endpoint tests. Provider responses are fixtures, never live evidence."""
 import copy
+from test_voice_generation import pcm
 import unittest
 from unittest.mock import patch
 
@@ -65,17 +66,17 @@ class ModuleFTests(unittest.TestCase):
 
     def audio_patches(self):
         return (
-            patch.object(voice_generation_service, "synthesize_dialogue", return_value=voice_generation_service.GeneratedAudio(b"fixture", "audio/wav", ".wav", "fixture")),
+            patch.object(voice_generation_service, "synthesize_dialogue", return_value=voice_generation_service.GeneratedAudio(pcm(), "audio/wav", ".wav", "fixture")),
             patch("app.services.storage_service.upload_bytes", return_value={"url": "https://example.invalid/new.wav"}),
         )
 
     def test_no_hint_preserves_shots_and_runs_existing_audio(self):
         audio_patch, storage_patch = self.audio_patches()
-        with patch("app.routes.jobs.call_agent") as cine, patch("app.agents.director.call_agent") as qa, audio_patch as audio, storage_patch:
+        with patch("app.routes.jobs.call_agent") as cine, patch("app.agents.director.call_agent", return_value=self.original["assembly"]) as qa, audio_patch as audio, storage_patch:
             response = self.client.post(self.url)
         self.assertEqual(response.status_code, 200)
         cine.assert_not_called()
-        qa.assert_not_called()
+        self.assertEqual([c.args[0] for c in qa.call_args_list], [prompts.SHOT_ASSEMBLER])
         audio.assert_awaited_once()
         final = self.client.get(f"/api/jobs/{self.job_id}").json()["result"]
         for index in (0, 2):

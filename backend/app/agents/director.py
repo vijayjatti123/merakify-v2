@@ -1,4 +1,4 @@
-﻿import json
+import json
 import unicodedata
 from typing import Callable
 
@@ -116,6 +116,8 @@ def _apply_continuity_overrides(
                 "name": resolved_name,
                 "description": vault_character.description,
                 **rendering(vault_character),
+                "voice_assignment": "vault",
+                "character_id": vault_character.id,
                 "voice_id": vault_character.voice_id,
                 "voice_sample_ref": vault_character.voice_id,
             }
@@ -129,6 +131,8 @@ def _apply_continuity_overrides(
             **proposed,
             "description": vault_character.description,
             **rendering(vault_character),
+            "voice_assignment": "vault",
+            "character_id": vault_character.id,
             "voice_id": vault_character.voice_id,
             "voice_sample_ref": vault_character.voice_id,
         }
@@ -147,6 +151,8 @@ def _apply_continuity_overrides(
                 "name": resolved_name,
                 "description": vault_character.description,
                 **rendering(vault_character),
+                "voice_assignment": "vault",
+                "character_id": vault_character.id,
                 "voice_id": vault_character.voice_id,
                 "voice_sample_ref": vault_character.voice_id,
             }
@@ -302,6 +308,7 @@ def validate_and_correct(
     *,
     narrator_voice_ref=None,
     source_script_text: str | None = None,
+    defer_audio_assembly: bool = True,
     emit: EventFn | None = None,
 ) -> dict:
     """Run the pipeline's single QA and duration self-correction sequence.
@@ -380,9 +387,28 @@ def validate_and_correct(
     if loss_warnings:
         qa["dialogue_loss_warnings"] = loss_warnings
 
+    # Dialogue timing is provisional until approval triggers real decoded audio.
+    # Module K's QA/FIX logic above is unchanged; only assembly is deferred.
+    if defer_audio_assembly and any(shot.get("has_dialogue") for shot in current_shots):
+        notify("assembly", "Assembly and duration self-check deferred until dialogue audio is decoded and corrected after approval.")
+        return {"shots": current_shots, "qa": qa, "assembly": {
+            "total_duration_sec": sum(float(s.get("duration_sec", 0)) for s in current_shots),
+            "transitions": [], "provisional": True,
+        }}
+    assembled = assemble_shots(current_shots, characters, target_duration_sec, narrator_voice_ref=narrator_voice_ref, emit=emit)
+    return {**assembled, "qa": qa}
+
+
+def assemble_shots(shots, characters, target_duration_sec, *, narrator_voice_ref=None, emit=None):
+    """Existing assembly/duration sequence; dialogue jobs call this only after audio."""
+    current_shots = shots
+    def notify(key, note):
+        if emit:
+            emit(key, note)
     # Shot assembly and one autonomous duration-correction pass.
     notify("assembly", "Sequencing shots and choosing transitions...")
     assembly = call_agent(prompts.SHOT_ASSEMBLER, json.dumps(current_shots))
+    assembly["total_duration_sec"] = sum(float(s["duration_sec"]) for s in current_shots)
     notify("assembly", f"Runtime locked at {assembly['total_duration_sec']}s.")
 
     actual = assembly["total_duration_sec"]
@@ -394,14 +420,30 @@ def validate_and_correct(
         cine = call_agent(
             prompts.CINEMATOGRAPHY_TRIM,
             f"Current shots: {json.dumps(current_shots)}\nTarget total duration: {target_duration_sec} seconds\n"
-            f"Current total: {actual} seconds",
+            f"Current total: {actual} seconds\n"
+            "Shots with dialogue_audio_duration_sec already have real audio. Keep their shot_number, dialogue, duration, and order fixed. Trim only silent shots; never invent dialogue.",
             max_tokens=4096,
         )
-        current_shots = _attach_voice_refs(cine["shots"], characters, narrator_voice_ref, emit=emit)
-        notify("cinematography", "Trimmed to fit the target runtime.")
+        measured = {s["shot_number"]: s for s in current_shots if s.get("dialogue_audio_duration_sec") is not None}
+        originals = {s["shot_number"]: s for s in current_shots}
+        proposed = {s["shot_number"]: s for s in cine["shots"]}
+        invalid_audio_trim = measured and (
+            [s["shot_number"] for s in cine["shots"] if s.get("has_dialogue")] != list(measured)
+            or any(s["shot_number"] not in originals for s in cine["shots"])
+            or any(number not in proposed or any(proposed[number].get(field) != original.get(field)
+                   for field in ("dialogue_text", "has_dialogue", "duration_sec", "scene_number", "characters_in_shot"))
+                   for number, original in measured.items()))
+        if invalid_audio_trim:
+            notify("assembly", "Duration trim rejected: it changed or removed a measured dialogue shot. Audio timing and words remain protected; runtime target may remain unresolved.")
+        else:
+            current_shots = _attach_voice_refs([
+                measured.get(s["shot_number"], {**originals.get(s["shot_number"], {}), **s}) for s in cine["shots"]
+            ], characters, narrator_voice_ref, emit=emit)
+            notify("cinematography", "Applied the duration trim while preserving measured dialogue shots.")
 
         notify("assembly", "Re-sequencing the trimmed shot list...")
         assembly = call_agent(prompts.SHOT_ASSEMBLER, json.dumps(current_shots))
+        assembly["total_duration_sec"] = sum(float(s["duration_sec"]) for s in current_shots)
         notify(
             "assembly",
             f"Runtime now {assembly['total_duration_sec']}s (target {target_duration_sec}s)."
@@ -411,7 +453,30 @@ def validate_and_correct(
     else:
         notify("assembly", f"{actual}s is within range of the {target_duration_sec}s target — no trim needed.")
 
-    return {"shots": current_shots, "qa": qa, "assembly": assembly}
+    return {"shots": current_shots, "assembly": assembly}
+
+
+def finalize_audio_assembly(db, job_id):
+    """Persist final assembly after all selected audio tasks have corrected durations."""
+    job = job_service.get_job(db, job_id)
+    result = job_service.job_result(job)
+    def emit(key, note):
+        job_service.append_event(db, job_id, key, note)
+    try:
+        if any(s.get("has_dialogue") and s.get("status") != "done" for s in result["shots"]):
+            raise ValueError("Dialogue audio incomplete; final assembly cannot lock timing")
+        emit("assembly", "Decoded audio corrections complete; running final Shot Assembler and duration self-check now.")
+        continuity = result.get("continuity", {})
+        assembled = assemble_shots(result["shots"], continuity.get("characters", []), result["format"]["duration_target_sec"],
+                                   narrator_voice_ref=continuity.get("narrator_voice_ref"), emit=emit)
+        result.update(assembled)
+        result["assembly"]["provisional"] = False
+    except Exception as error:
+        result["assembly"] = {**result.get("assembly", {}), "provisional": True, "error": str(error)}
+        emit("assembly", f"Final audio assembly failed: {type(error).__name__}: {error}")
+    finally:
+        result["audio_assembly_pending"] = False
+        job_service.set_result(db, job_id, result)
 
 
 def run_pipeline(db: Session, job_id: str) -> None:
@@ -497,6 +562,8 @@ def run_pipeline(db: Session, job_id: str) -> None:
         if source_script:
             cinematography_input += f"\nLocations: {json.dumps(continuity['locations'])}"
         cinematography_input += f"\nTarget total duration: {fmt['duration_target_sec']} seconds"
+        from app.services.voice_timing import measured_budget
+        cinematography_input += f"\nMeasured dialogue budget: {json.dumps(measured_budget(db, language))}"
         cine = call_agent(
             prompts.CINEMATOGRAPHY_AGENT,
             cinematography_input,

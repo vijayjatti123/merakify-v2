@@ -1,0 +1,2444 @@
+[
+  {
+    "voice_id": "rahul",
+    "language": "English",
+    "chars_per_second": 20.002693965517242,
+    "measured_at": "2026-09-11T07:19:15.015055"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "English",
+    "chars_per_second": 16.340228873239436,
+    "measured_at": "2026-09-11T07:19:15.277040"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "English",
+    "chars_per_second": 25.22078804347826,
+    "measured_at": "2026-09-11T07:19:15.308521"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "English",
+    "chars_per_second": 18.12744140625,
+    "measured_at": "2026-09-11T07:19:16.695237"
+  },
+  {
+    "voice_id": "dev",
+    "language": "English",
+    "chars_per_second": 19.01895491803279,
+    "measured_at": "2026-09-11T07:19:16.997289"
+  },
+  {
+    "voice_id": "amit",
+    "language": "English",
+    "chars_per_second": 14.501953124999998,
+    "measured_at": "2026-09-11T07:19:17.334273"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "English",
+    "chars_per_second": 21.889740566037734,
+    "measured_at": "2026-09-11T07:19:18.197346"
+  },
+  {
+    "voice_id": "varun",
+    "language": "English",
+    "chars_per_second": 16.573660714285715,
+    "measured_at": "2026-09-11T07:19:18.751371"
+  },
+  {
+    "voice_id": "manan",
+    "language": "English",
+    "chars_per_second": 16.813858695652176,
+    "measured_at": "2026-09-11T07:19:19.154027"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "English",
+    "chars_per_second": 21.09375,
+    "measured_at": "2026-09-11T07:19:19.745559"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "English",
+    "chars_per_second": 20.717075892857142,
+    "measured_at": "2026-09-11T07:19:20.373840"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "English",
+    "chars_per_second": 21.09375,
+    "measured_at": "2026-09-11T07:19:20.680982"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "English",
+    "chars_per_second": 19.01895491803279,
+    "measured_at": "2026-09-11T07:19:21.357673"
+  },
+  {
+    "voice_id": "advait",
+    "language": "English",
+    "chars_per_second": 21.889740566037734,
+    "measured_at": "2026-09-11T07:19:21.896144"
+  },
+  {
+    "voice_id": "anand",
+    "language": "English",
+    "chars_per_second": 23.203125,
+    "measured_at": "2026-09-11T07:19:22.057395"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "English",
+    "chars_per_second": 18.71219758064516,
+    "measured_at": "2026-09-11T07:19:22.853858"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "English",
+    "chars_per_second": 23.67665816326531,
+    "measured_at": "2026-09-11T07:19:23.109434"
+  },
+  {
+    "voice_id": "mani",
+    "language": "English",
+    "chars_per_second": 14.148246951219512,
+    "measured_at": "2026-09-11T07:19:23.897944"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "English",
+    "chars_per_second": 15.892551369863014,
+    "measured_at": "2026-09-11T07:19:24.583107"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "English",
+    "chars_per_second": 16.11328125,
+    "measured_at": "2026-09-11T07:19:24.835512"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "English",
+    "chars_per_second": 18.12744140625,
+    "measured_at": "2026-09-11T07:19:25.392604"
+  },
+  {
+    "voice_id": "soham",
+    "language": "English",
+    "chars_per_second": 15.892551369863014,
+    "measured_at": "2026-09-11T07:19:26.954689"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "English",
+    "chars_per_second": 21.889740566037734,
+    "measured_at": "2026-09-11T07:19:26.991551"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "English",
+    "chars_per_second": 14.322916666666666,
+    "measured_at": "2026-09-11T07:19:27.390642"
+  },
+  {
+    "voice_id": "priya",
+    "language": "English",
+    "chars_per_second": 17.578125,
+    "measured_at": "2026-09-11T07:19:28.874510"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "English",
+    "chars_per_second": 18.12744140625,
+    "measured_at": "2026-09-11T07:19:29.276139"
+  },
+  {
+    "voice_id": "neha",
+    "language": "English",
+    "chars_per_second": 13.64889705882353,
+    "measured_at": "2026-09-11T07:19:29.361601"
+  },
+  {
+    "voice_id": "simran",
+    "language": "English",
+    "chars_per_second": 22.310697115384617,
+    "measured_at": "2026-09-11T07:19:30.384581"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "English",
+    "chars_per_second": 19.01895491803279,
+    "measured_at": "2026-09-11T07:19:31.045402"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "English",
+    "chars_per_second": 17.578125,
+    "measured_at": "2026-09-11T07:19:31.155565"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "English",
+    "chars_per_second": 19.01895491803279,
+    "measured_at": "2026-09-11T07:19:31.929992"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "English",
+    "chars_per_second": 17.848557692307693,
+    "measured_at": "2026-09-11T07:19:32.701517"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "English",
+    "chars_per_second": 16.813858695652176,
+    "measured_at": "2026-09-11T07:19:32.857118"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "English",
+    "chars_per_second": 17.06112132352941,
+    "measured_at": "2026-09-11T07:19:33.568243"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "English",
+    "chars_per_second": 20.353618421052634,
+    "measured_at": "2026-09-11T07:19:34.128645"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "English",
+    "chars_per_second": 14.148246951219512,
+    "measured_at": "2026-09-11T07:19:34.778700"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "English",
+    "chars_per_second": 14.685522151898734,
+    "measured_at": "2026-09-11T07:19:35.383076"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Hindi",
+    "chars_per_second": 18.85986328125,
+    "measured_at": "2026-09-11T07:19:35.781512"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Hindi",
+    "chars_per_second": 12.192234848484848,
+    "measured_at": "2026-09-11T07:19:37.277370"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Hindi",
+    "chars_per_second": 17.000440140845072,
+    "measured_at": "2026-09-11T07:19:37.319064"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Hindi",
+    "chars_per_second": 13.873922413793103,
+    "measured_at": "2026-09-11T07:19:37.986936"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Hindi",
+    "chars_per_second": 15.675730519480519,
+    "measured_at": "2026-09-11T07:19:39.326990"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Hindi",
+    "chars_per_second": 14.200367647058824,
+    "measured_at": "2026-09-11T07:19:39.409301"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Hindi",
+    "chars_per_second": 17.75045955882353,
+    "measured_at": "2026-09-11T07:19:39.779417"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Hindi",
+    "chars_per_second": 17.000440140845072,
+    "measured_at": "2026-09-11T07:19:41.709986"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Hindi",
+    "chars_per_second": 12.840757978723405,
+    "measured_at": "2026-09-11T07:19:41.772517"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Hindi",
+    "chars_per_second": 10.874155405405405,
+    "measured_at": "2026-09-11T07:19:42.037355"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Hindi",
+    "chars_per_second": 18.015391791044777,
+    "measured_at": "2026-09-11T07:19:43.512984"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Hindi",
+    "chars_per_second": 14.200367647058824,
+    "measured_at": "2026-09-11T07:19:43.872993"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Hindi",
+    "chars_per_second": 14.200367647058824,
+    "measured_at": "2026-09-11T07:19:44.220588"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Hindi",
+    "chars_per_second": 17.000440140845072,
+    "measured_at": "2026-09-11T07:19:45.578669"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Hindi",
+    "chars_per_second": 13.411458333333334,
+    "measured_at": "2026-09-11T07:19:45.683332"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Hindi",
+    "chars_per_second": 14.200367647058824,
+    "measured_at": "2026-09-11T07:19:46.132522"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Hindi",
+    "chars_per_second": 19.15922619047619,
+    "measured_at": "2026-09-11T07:19:47.216067"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Hindi",
+    "chars_per_second": 11.387087264150942,
+    "measured_at": "2026-09-11T07:19:48.014710"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Hindi",
+    "chars_per_second": 12.5732421875,
+    "measured_at": "2026-09-11T07:19:48.343317"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Hindi",
+    "chars_per_second": 13.411458333333334,
+    "measured_at": "2026-09-11T07:19:49.270376"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Hindi",
+    "chars_per_second": 13.562148876404494,
+    "measured_at": "2026-09-11T07:19:50.042927"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Hindi",
+    "chars_per_second": 14.200367647058824,
+    "measured_at": "2026-09-11T07:19:50.277330"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Hindi",
+    "chars_per_second": 13.119904891304348,
+    "measured_at": "2026-09-11T07:19:51.287597"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Hindi",
+    "chars_per_second": 15.881990131578947,
+    "measured_at": "2026-09-11T07:19:52.051934"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Hindi",
+    "chars_per_second": 12.0703125,
+    "measured_at": "2026-09-11T07:19:52.782452"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Hindi",
+    "chars_per_second": 9.893698770491804,
+    "measured_at": "2026-09-11T07:19:54.088531"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Hindi",
+    "chars_per_second": 14.200367647058824,
+    "measured_at": "2026-09-11T07:19:54.222539"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Hindi",
+    "chars_per_second": 17.000440140845072,
+    "measured_at": "2026-09-11T07:19:54.589543"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Hindi",
+    "chars_per_second": 12.840757978723405,
+    "measured_at": "2026-09-11T07:19:56.392350"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Hindi",
+    "chars_per_second": 14.035247093023257,
+    "measured_at": "2026-09-11T07:19:56.541092"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Hindi",
+    "chars_per_second": 14.369419642857142,
+    "measured_at": "2026-09-11T07:19:56.725322"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Hindi",
+    "chars_per_second": 13.716264204545455,
+    "measured_at": "2026-09-11T07:19:58.489941"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Hindi",
+    "chars_per_second": 14.200367647058824,
+    "measured_at": "2026-09-11T07:19:58.632749"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Hindi",
+    "chars_per_second": 11.606069711538462,
+    "measured_at": "2026-09-11T07:19:59.247185"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Hindi",
+    "chars_per_second": 14.90162037037037,
+    "measured_at": "2026-09-11T07:20:00.373271"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Hindi",
+    "chars_per_second": 10.31650641025641,
+    "measured_at": "2026-09-11T07:20:01.789344"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Hindi",
+    "chars_per_second": 12.5732421875,
+    "measured_at": "2026-09-11T07:20:01.843534"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Bengali",
+    "chars_per_second": 13.21765988372093,
+    "measured_at": "2026-09-11T07:20:02.417128"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Bengali",
+    "chars_per_second": 10.05945796460177,
+    "measured_at": "2026-09-11T07:20:04.689179"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Bengali",
+    "chars_per_second": 10.525173611111112,
+    "measured_at": "2026-09-11T07:20:04.923224"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Bengali",
+    "chars_per_second": 10.825892857142856,
+    "measured_at": "2026-09-11T07:20:04.963567"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Bengali",
+    "chars_per_second": 10.929987980769232,
+    "measured_at": "2026-09-11T07:20:07.417406"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Bengali",
+    "chars_per_second": 12.222782258064516,
+    "measured_at": "2026-09-11T07:20:07.452776"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Bengali",
+    "chars_per_second": 10.72376179245283,
+    "measured_at": "2026-09-11T07:20:07.562088"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Bengali",
+    "chars_per_second": 12.917258522727273,
+    "measured_at": "2026-09-11T07:20:09.720531"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Bengali",
+    "chars_per_second": 10.929987980769232,
+    "measured_at": "2026-09-11T07:20:10.047437"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Bengali",
+    "chars_per_second": 10.623539719626168,
+    "measured_at": "2026-09-11T07:20:10.085118"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Bengali",
+    "chars_per_second": 11.8408203125,
+    "measured_at": "2026-09-11T07:20:12.010618"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Bengali",
+    "chars_per_second": 13.21765988372093,
+    "measured_at": "2026-09-11T07:20:12.244098"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Bengali",
+    "chars_per_second": 13.065732758620689,
+    "measured_at": "2026-09-11T07:20:12.397458"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Bengali",
+    "chars_per_second": 11.254641089108912,
+    "measured_at": "2026-09-11T07:20:14.516108"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Bengali",
+    "chars_per_second": 12.491414835164836,
+    "measured_at": "2026-09-11T07:20:14.555142"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Bengali",
+    "chars_per_second": 11.254641089108912,
+    "measured_at": "2026-09-11T07:20:14.595561"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Bengali",
+    "chars_per_second": 12.222782258064516,
+    "measured_at": "2026-09-11T07:20:16.562318"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Bengali",
+    "chars_per_second": 10.24070945945946,
+    "measured_at": "2026-09-11T07:20:16.965015"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Bengali",
+    "chars_per_second": 8.482975746268657,
+    "measured_at": "2026-09-11T07:20:17.376455"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Bengali",
+    "chars_per_second": 10.72376179245283,
+    "measured_at": "2026-09-11T07:20:18.837518"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Bengali",
+    "chars_per_second": 11.3671875,
+    "measured_at": "2026-09-11T07:20:19.186266"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Bengali",
+    "chars_per_second": 10.333806818181818,
+    "measured_at": "2026-09-11T07:20:19.771508"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Bengali",
+    "chars_per_second": 9.884510869565219,
+    "measured_at": "2026-09-11T07:20:21.254371"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Bengali",
+    "chars_per_second": 11.8408203125,
+    "measured_at": "2026-09-11T07:20:21.550026"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Bengali",
+    "chars_per_second": 11.8408203125,
+    "measured_at": "2026-09-11T07:20:22.588585"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Bengali",
+    "chars_per_second": 10.825892857142856,
+    "measured_at": "2026-09-11T07:20:23.984104"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Bengali",
+    "chars_per_second": 7.9490821678321675,
+    "measured_at": "2026-09-11T07:20:24.470172"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Bengali",
+    "chars_per_second": 11.254641089108912,
+    "measured_at": "2026-09-11T07:20:25.161975"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Bengali",
+    "chars_per_second": 12.772120786516853,
+    "measured_at": "2026-09-11T07:20:26.261827"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Bengali",
+    "chars_per_second": 11.3671875,
+    "measured_at": "2026-09-11T07:20:26.900053"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Bengali",
+    "chars_per_second": 9.799299568965516,
+    "measured_at": "2026-09-11T07:20:27.857427"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Bengali",
+    "chars_per_second": 9.971217105263158,
+    "measured_at": "2026-09-11T07:20:28.898487"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Bengali",
+    "chars_per_second": 9.394369834710744,
+    "measured_at": "2026-09-11T07:20:29.514173"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Bengali",
+    "chars_per_second": 11.71875,
+    "measured_at": "2026-09-11T07:20:30.020216"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Bengali",
+    "chars_per_second": 9.633209745762713,
+    "measured_at": "2026-09-11T07:20:31.493198"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Bengali",
+    "chars_per_second": 8.677242366412214,
+    "measured_at": "2026-09-11T07:20:32.212459"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Bengali",
+    "chars_per_second": 10.149274553571427,
+    "measured_at": "2026-09-11T07:20:32.410618"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Tamil",
+    "chars_per_second": 14.441287878787879,
+    "measured_at": "2026-09-11T07:20:33.841771"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Tamil",
+    "chars_per_second": 12.219551282051283,
+    "measured_at": "2026-09-11T07:20:34.954479"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Tamil",
+    "chars_per_second": 13.487617924528301,
+    "measured_at": "2026-09-11T07:20:35.045642"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Tamil",
+    "chars_per_second": 16.81985294117647,
+    "measured_at": "2026-09-11T07:20:35.857111"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Tamil",
+    "chars_per_second": 16.81985294117647,
+    "measured_at": "2026-09-11T07:20:37.160619"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Tamil",
+    "chars_per_second": 13.616071428571427,
+    "measured_at": "2026-09-11T07:20:37.591427"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Tamil",
+    "chars_per_second": 13.880461165048544,
+    "measured_at": "2026-09-11T07:20:38.304272"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Tamil",
+    "chars_per_second": 13.361565420560748,
+    "measured_at": "2026-09-11T07:20:39.657649"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Tamil",
+    "chars_per_second": 12.880067567567568,
+    "measured_at": "2026-09-11T07:20:40.354497"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Tamil",
+    "chars_per_second": 17.020089285714285,
+    "measured_at": "2026-09-11T07:20:40.467226"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Tamil",
+    "chars_per_second": 14.441287878787879,
+    "measured_at": "2026-09-11T07:20:42.020026"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Tamil",
+    "chars_per_second": 16.81985294117647,
+    "measured_at": "2026-09-11T07:20:42.496457"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Tamil",
+    "chars_per_second": 12.115995762711865,
+    "measured_at": "2026-09-11T07:20:43.274131"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Tamil",
+    "chars_per_second": 14.588647959183675,
+    "measured_at": "2026-09-11T07:20:44.582162"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Tamil",
+    "chars_per_second": 13.116399082568806,
+    "measured_at": "2026-09-11T07:20:44.658784"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Tamil",
+    "chars_per_second": 12.32489224137931,
+    "measured_at": "2026-09-11T07:20:45.745644"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Tamil",
+    "chars_per_second": 15.209441489361703,
+    "measured_at": "2026-09-11T07:20:46.633519"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Tamil",
+    "chars_per_second": 10.068221830985916,
+    "measured_at": "2026-09-11T07:20:47.526110"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Tamil",
+    "chars_per_second": 14.739046391752577,
+    "measured_at": "2026-09-11T07:20:47.873725"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Tamil",
+    "chars_per_second": 14.588647959183675,
+    "measured_at": "2026-09-11T07:20:48.716065"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Tamil",
+    "chars_per_second": 14.155321782178218,
+    "measured_at": "2026-09-11T07:20:49.712696"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Tamil",
+    "chars_per_second": 11.529737903225806,
+    "measured_at": "2026-09-11T07:20:50.493674"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Tamil",
+    "chars_per_second": 11.718750000000002,
+    "measured_at": "2026-09-11T07:20:51.326153"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Tamil",
+    "chars_per_second": 15.885416666666668,
+    "measured_at": "2026-09-11T07:20:51.970180"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Tamil",
+    "chars_per_second": 14.296875,
+    "measured_at": "2026-09-11T07:20:52.859819"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Tamil",
+    "chars_per_second": 11.34672619047619,
+    "measured_at": "2026-09-11T07:20:54.239463"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Tamil",
+    "chars_per_second": 14.892578125,
+    "measured_at": "2026-09-11T07:20:54.475544"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Tamil",
+    "chars_per_second": 13.487617924528301,
+    "measured_at": "2026-09-11T07:20:55.391633"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Tamil",
+    "chars_per_second": 14.155321782178218,
+    "measured_at": "2026-09-11T07:20:56.640220"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Tamil",
+    "chars_per_second": 12.997159090909092,
+    "measured_at": "2026-09-11T07:20:57.053289"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Tamil",
+    "chars_per_second": 14.016544117647058,
+    "measured_at": "2026-09-11T07:20:57.809138"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Tamil",
+    "chars_per_second": 14.739046391752577,
+    "measured_at": "2026-09-11T07:20:59.029367"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Tamil",
+    "chars_per_second": 14.739046391752577,
+    "measured_at": "2026-09-11T07:20:59.214265"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Tamil",
+    "chars_per_second": 12.765066964285714,
+    "measured_at": "2026-09-11T07:21:00.226341"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Tamil",
+    "chars_per_second": 15.710851648351648,
+    "measured_at": "2026-09-11T07:21:01.507225"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Tamil",
+    "chars_per_second": 12.014180672268907,
+    "measured_at": "2026-09-11T07:21:02.036120"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Tamil",
+    "chars_per_second": 11.81559917355372,
+    "measured_at": "2026-09-11T07:21:02.805957"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Telugu",
+    "chars_per_second": 14.835438829787234,
+    "measured_at": "2026-09-11T07:21:03.816179"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Telugu",
+    "chars_per_second": 11.33765243902439,
+    "measured_at": "2026-09-11T07:21:04.950296"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Telugu",
+    "chars_per_second": 13.408954326923078,
+    "measured_at": "2026-09-11T07:21:05.299802"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Telugu",
+    "chars_per_second": 11.430584016393443,
+    "measured_at": "2026-09-11T07:21:06.785636"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Telugu",
+    "chars_per_second": 12.451171874999998,
+    "measured_at": "2026-09-11T07:21:07.610431"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Telugu",
+    "chars_per_second": 12.232730263157896,
+    "measured_at": "2026-09-11T07:21:08.088453"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Telugu",
+    "chars_per_second": 11.818061440677967,
+    "measured_at": "2026-09-11T07:21:09.560303"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Telugu",
+    "chars_per_second": 12.793864678899082,
+    "measured_at": "2026-09-11T07:21:10.359140"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Telugu",
+    "chars_per_second": 13.9453125,
+    "measured_at": "2026-09-11T07:21:10.475583"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Telugu",
+    "chars_per_second": 14.229910714285715,
+    "measured_at": "2026-09-11T07:21:12.041641"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Telugu",
+    "chars_per_second": 13.807240099009903,
+    "measured_at": "2026-09-11T07:21:12.915317"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Telugu",
+    "chars_per_second": 11.818061440677967,
+    "measured_at": "2026-09-11T07:21:13.157232"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Telugu",
+    "chars_per_second": 12.677556818181818,
+    "measured_at": "2026-09-11T07:21:14.577839"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Telugu",
+    "chars_per_second": 13.671874999999998,
+    "measured_at": "2026-09-11T07:21:15.460261"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Telugu",
+    "chars_per_second": 13.155955188679245,
+    "measured_at": "2026-09-11T07:21:15.524164"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Telugu",
+    "chars_per_second": 9.422508445945946,
+    "measured_at": "2026-09-11T07:21:17.686381"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Telugu",
+    "chars_per_second": 11.71875,
+    "measured_at": "2026-09-11T07:21:18.028354"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Telugu",
+    "chars_per_second": 11.525051652892563,
+    "measured_at": "2026-09-11T07:21:18.135049"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Telugu",
+    "chars_per_second": 11.15625,
+    "measured_at": "2026-09-11T07:21:20.338954"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Telugu",
+    "chars_per_second": 10.32986111111111,
+    "measured_at": "2026-09-11T07:21:20.866778"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Telugu",
+    "chars_per_second": 10.105298913043478,
+    "measured_at": "2026-09-11T07:21:21.226360"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Telugu",
+    "chars_per_second": 12.340984513274336,
+    "measured_at": "2026-09-11T07:21:22.817519"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Telugu",
+    "chars_per_second": 13.281249999999998,
+    "measured_at": "2026-09-11T07:21:23.783567"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Telugu",
+    "chars_per_second": 10.25390625,
+    "measured_at": "2026-09-11T07:21:23.878676"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Telugu",
+    "chars_per_second": 12.793864678899082,
+    "measured_at": "2026-09-11T07:21:25.848211"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Telugu",
+    "chars_per_second": 11.62109375,
+    "measured_at": "2026-09-11T07:21:26.668361"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Telugu",
+    "chars_per_second": 8.882364649681529,
+    "measured_at": "2026-09-11T07:21:27.316482"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Telugu",
+    "chars_per_second": 14.5263671875,
+    "measured_at": "2026-09-11T07:21:28.437636"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Telugu",
+    "chars_per_second": 12.340984513274336,
+    "measured_at": "2026-09-11T07:21:29.307085"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Telugu",
+    "chars_per_second": 13.671874999999998,
+    "measured_at": "2026-09-11T07:21:29.844375"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Telugu",
+    "chars_per_second": 12.563344594594595,
+    "measured_at": "2026-09-11T07:21:31.076364"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Telugu",
+    "chars_per_second": 12.021821120689655,
+    "measured_at": "2026-09-11T07:21:32.010343"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Telugu",
+    "chars_per_second": 12.021821120689655,
+    "measured_at": "2026-09-11T07:21:32.266367"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Telugu",
+    "chars_per_second": 11.818061440677967,
+    "measured_at": "2026-09-11T07:21:33.611721"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Telugu",
+    "chars_per_second": 11.62109375,
+    "measured_at": "2026-09-11T07:21:34.746241"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Telugu",
+    "chars_per_second": 10.485197368421051,
+    "measured_at": "2026-09-11T07:21:34.910614"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Telugu",
+    "chars_per_second": 11.067708333333332,
+    "measured_at": "2026-09-11T07:21:36.251257"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Kannada",
+    "chars_per_second": 15.485491071428571,
+    "measured_at": "2026-09-11T07:21:36.882623"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Kannada",
+    "chars_per_second": 8.557771381578947,
+    "measured_at": "2026-09-11T07:21:38.340753"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Kannada",
+    "chars_per_second": 10.75025826446281,
+    "measured_at": "2026-09-11T07:21:39.152436"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Kannada",
+    "chars_per_second": 12.628944174757281,
+    "measured_at": "2026-09-11T07:21:39.377922"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Kannada",
+    "chars_per_second": 12.388392857142856,
+    "measured_at": "2026-09-11T07:21:40.821549"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Kannada",
+    "chars_per_second": 12.044270833333334,
+    "measured_at": "2026-09-11T07:21:41.774753"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Kannada",
+    "chars_per_second": 13.139204545454545,
+    "measured_at": "2026-09-11T07:21:41.829571"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Kannada",
+    "chars_per_second": 9.291294642857142,
+    "measured_at": "2026-09-11T07:21:43.949390"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Kannada",
+    "chars_per_second": 13.5498046875,
+    "measured_at": "2026-09-11T07:21:44.149341"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Kannada",
+    "chars_per_second": 12.752757352941176,
+    "measured_at": "2026-09-11T07:21:44.261330"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Kannada",
+    "chars_per_second": 14.615519662921347,
+    "measured_at": "2026-09-11T07:21:46.375054"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Kannada",
+    "chars_per_second": 12.388392857142856,
+    "measured_at": "2026-09-11T07:21:46.765309"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Kannada",
+    "chars_per_second": 10.006009615384615,
+    "measured_at": "2026-09-11T07:21:46.965811"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Kannada",
+    "chars_per_second": 14.453125,
+    "measured_at": "2026-09-11T07:21:49.031310"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Kannada",
+    "chars_per_second": 10.75025826446281,
+    "measured_at": "2026-09-11T07:21:49.255073"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Kannada",
+    "chars_per_second": 11.117788461538462,
+    "measured_at": "2026-09-11T07:21:49.522324"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Kannada",
+    "chars_per_second": 11.71875,
+    "measured_at": "2026-09-11T07:21:51.441367"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Kannada",
+    "chars_per_second": 11.51133849557522,
+    "measured_at": "2026-09-11T07:21:51.915131"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Kannada",
+    "chars_per_second": 11.311141304347826,
+    "measured_at": "2026-09-11T07:21:52.015647"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Kannada",
+    "chars_per_second": 10.323660714285714,
+    "measured_at": "2026-09-11T07:21:54.125437"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Kannada",
+    "chars_per_second": 12.156834112149532,
+    "measured_at": "2026-09-11T07:21:54.193178"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Kannada",
+    "chars_per_second": 11.117788461538462,
+    "measured_at": "2026-09-11T07:21:54.554880"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Kannada",
+    "chars_per_second": 11.311141304347826,
+    "measured_at": "2026-09-11T07:21:56.624710"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Kannada",
+    "chars_per_second": 14.138926630434783,
+    "measured_at": "2026-09-11T07:21:56.808893"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Kannada",
+    "chars_per_second": 11.71875,
+    "measured_at": "2026-09-11T07:21:57.175906"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Kannada",
+    "chars_per_second": 11.71875,
+    "measured_at": "2026-09-11T07:21:59.373891"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Kannada",
+    "chars_per_second": 12.50751201923077,
+    "measured_at": "2026-09-11T07:21:59.701152"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Kannada",
+    "chars_per_second": 10.40625,
+    "measured_at": "2026-09-11T07:21:59.745231"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Kannada",
+    "chars_per_second": 13.410115979381445,
+    "measured_at": "2026-09-11T07:22:02.328033"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Kannada",
+    "chars_per_second": 11.311141304347826,
+    "measured_at": "2026-09-11T07:22:02.420591"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Kannada",
+    "chars_per_second": 12.156834112149532,
+    "measured_at": "2026-09-11T07:22:02.497907"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Kannada",
+    "chars_per_second": 13.410115979381445,
+    "measured_at": "2026-09-11T07:22:04.703957"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Kannada",
+    "chars_per_second": 11.825284090909092,
+    "measured_at": "2026-09-11T07:22:04.998454"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Kannada",
+    "chars_per_second": 10.662141393442624,
+    "measured_at": "2026-09-11T07:22:05.175625"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Kannada",
+    "chars_per_second": 10.162353515625,
+    "measured_at": "2026-09-11T07:22:07.523380"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Kannada",
+    "chars_per_second": 11.117788461538462,
+    "measured_at": "2026-09-11T07:22:07.672554"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Kannada",
+    "chars_per_second": 11.023569915254237,
+    "measured_at": "2026-09-11T07:22:07.828585"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Malayalam",
+    "chars_per_second": 16.2890625,
+    "measured_at": "2026-09-11T07:22:10.394141"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Malayalam",
+    "chars_per_second": 13.92227564102564,
+    "measured_at": "2026-09-11T07:22:10.613419"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Malayalam",
+    "chars_per_second": 13.804290254237289,
+    "measured_at": "2026-09-11T07:22:10.658028"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Malayalam",
+    "chars_per_second": 15.082465277777779,
+    "measured_at": "2026-09-11T07:22:13.107321"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Malayalam",
+    "chars_per_second": 15.513392857142856,
+    "measured_at": "2026-09-11T07:22:13.212151"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Malayalam",
+    "chars_per_second": 13.243140243902438,
+    "measured_at": "2026-09-11T07:22:13.498358"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Malayalam",
+    "chars_per_second": 14.543805803571427,
+    "measured_at": "2026-09-11T07:22:15.785966"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Malayalam",
+    "chars_per_second": 12.247415413533833,
+    "measured_at": "2026-09-11T07:22:16.675385"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Malayalam",
+    "chars_per_second": 11.00612331081081,
+    "measured_at": "2026-09-11T07:22:16.721511"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Malayalam",
+    "chars_per_second": 17.515120967741936,
+    "measured_at": "2026-09-11T07:22:18.139799"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Malayalam",
+    "chars_per_second": 15.814623786407767,
+    "measured_at": "2026-09-11T07:22:19.229556"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Malayalam",
+    "chars_per_second": 13.804290254237289,
+    "measured_at": "2026-09-11T07:22:19.517390"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Malayalam",
+    "chars_per_second": 17.515120967741936,
+    "measured_at": "2026-09-11T07:22:20.479980"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Malayalam",
+    "chars_per_second": 16.2890625,
+    "measured_at": "2026-09-11T07:22:21.607393"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Malayalam",
+    "chars_per_second": 15.082465277777779,
+    "measured_at": "2026-09-11T07:22:21.862777"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Malayalam",
+    "chars_per_second": 14.288651315789474,
+    "measured_at": "2026-09-11T07:22:22.873735"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Malayalam",
+    "chars_per_second": 15.082465277777779,
+    "measured_at": "2026-09-11T07:22:24.235251"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Malayalam",
+    "chars_per_second": 13.57421875,
+    "measured_at": "2026-09-11T07:22:24.418469"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Malayalam",
+    "chars_per_second": 12.725830078125,
+    "measured_at": "2026-09-11T07:22:25.598701"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Malayalam",
+    "chars_per_second": 13.804290254237289,
+    "measured_at": "2026-09-11T07:22:26.870415"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Malayalam",
+    "chars_per_second": 14.415099557522124,
+    "measured_at": "2026-09-11T07:22:27.440434"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Malayalam",
+    "chars_per_second": 16.127784653465348,
+    "measured_at": "2026-09-11T07:22:27.843038"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Malayalam",
+    "chars_per_second": 14.164402173913045,
+    "measured_at": "2026-09-11T07:22:29.351475"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Malayalam",
+    "chars_per_second": 14.164402173913045,
+    "measured_at": "2026-09-11T07:22:30.204335"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Malayalam",
+    "chars_per_second": 11.390952797202797,
+    "measured_at": "2026-09-11T07:22:31.011382"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Malayalam",
+    "chars_per_second": 12.530048076923077,
+    "measured_at": "2026-09-11T07:22:32.396095"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Malayalam",
+    "chars_per_second": 14.674831081081082,
+    "measured_at": "2026-09-11T07:22:32.833195"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Malayalam",
+    "chars_per_second": 13.92227564102564,
+    "measured_at": "2026-09-11T07:22:34.068395"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Malayalam",
+    "chars_per_second": 14.415099557522124,
+    "measured_at": "2026-09-11T07:22:35.025568"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Malayalam",
+    "chars_per_second": 14.808238636363637,
+    "measured_at": "2026-09-11T07:22:35.513447"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Malayalam",
+    "chars_per_second": 15.082465277777779,
+    "measured_at": "2026-09-11T07:22:36.614698"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Malayalam",
+    "chars_per_second": 14.288651315789474,
+    "measured_at": "2026-09-11T07:22:37.740792"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Malayalam",
+    "chars_per_second": 14.543805803571427,
+    "measured_at": "2026-09-11T07:22:39.036308"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Malayalam",
+    "chars_per_second": 16.127784653465348,
+    "measured_at": "2026-09-11T07:22:39.996373"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Malayalam",
+    "chars_per_second": 13.136340725806452,
+    "measured_at": "2026-09-11T07:22:41.669665"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Malayalam",
+    "chars_per_second": 14.042295258620689,
+    "measured_at": "2026-09-11T07:22:41.745428"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Malayalam",
+    "chars_per_second": 14.042295258620689,
+    "measured_at": "2026-09-11T07:22:42.482533"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Marathi",
+    "chars_per_second": 14.573317307692308,
+    "measured_at": "2026-09-11T07:22:43.662211"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Marathi",
+    "chars_per_second": 9.971217105263158,
+    "measured_at": "2026-09-11T07:22:44.482325"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Marathi",
+    "chars_per_second": 12.772120786516853,
+    "measured_at": "2026-09-11T07:22:44.639168"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Marathi",
+    "chars_per_second": 13.373161764705882,
+    "measured_at": "2026-09-11T07:22:45.755822"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Marathi",
+    "chars_per_second": 12.491414835164836,
+    "measured_at": "2026-09-11T07:22:46.708306"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Marathi",
+    "chars_per_second": 11.482007575757574,
+    "measured_at": "2026-09-11T07:22:47.032305"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Marathi",
+    "chars_per_second": 13.373161764705882,
+    "measured_at": "2026-09-11T07:22:47.880199"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Marathi",
+    "chars_per_second": 12.092752659574469,
+    "measured_at": "2026-09-11T07:22:49.335755"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Marathi",
+    "chars_per_second": 10.4286123853211,
+    "measured_at": "2026-09-11T07:22:49.443684"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Marathi",
+    "chars_per_second": 14.208984374999998,
+    "measured_at": "2026-09-11T07:22:50.030107"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Marathi",
+    "chars_per_second": 10.4286123853211,
+    "measured_at": "2026-09-11T07:22:52.081176"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Marathi",
+    "chars_per_second": 10.24070945945946,
+    "measured_at": "2026-09-11T07:22:52.115810"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Marathi",
+    "chars_per_second": 10.929987980769232,
+    "measured_at": "2026-09-11T07:22:52.527477"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Marathi",
+    "chars_per_second": 10.623539719626168,
+    "measured_at": "2026-09-11T07:22:54.365117"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Marathi",
+    "chars_per_second": 10.333806818181818,
+    "measured_at": "2026-09-11T07:22:54.713204"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Marathi",
+    "chars_per_second": 11.599170918367347,
+    "measured_at": "2026-09-11T07:22:54.832855"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Marathi",
+    "chars_per_second": 12.630208333333334,
+    "measured_at": "2026-09-11T07:22:56.393745"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Marathi",
+    "chars_per_second": 11.254641089108912,
+    "measured_at": "2026-09-11T07:22:57.079072"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Marathi",
+    "chars_per_second": 9.884510869565219,
+    "measured_at": "2026-09-11T07:22:57.195548"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Marathi",
+    "chars_per_second": 9.971217105263158,
+    "measured_at": "2026-09-11T07:22:58.911822"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Marathi",
+    "chars_per_second": 11.036104368932039,
+    "measured_at": "2026-09-11T07:22:59.425140"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Marathi",
+    "chars_per_second": 10.825892857142856,
+    "measured_at": "2026-09-11T07:22:59.577365"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Marathi",
+    "chars_per_second": 12.092752659574469,
+    "measured_at": "2026-09-11T07:23:00.957462"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Marathi",
+    "chars_per_second": 12.092752659574469,
+    "measured_at": "2026-09-11T07:23:01.790222"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Marathi",
+    "chars_per_second": 9.971217105263158,
+    "measured_at": "2026-09-11T07:23:02.310296"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Marathi",
+    "chars_per_second": 9.31736680327869,
+    "measured_at": "2026-09-11T07:23:03.856540"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Marathi",
+    "chars_per_second": 11.3671875,
+    "measured_at": "2026-09-11T07:23:04.194149"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Marathi",
+    "chars_per_second": 10.149274553571427,
+    "measured_at": "2026-09-11T07:23:04.962940"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Marathi",
+    "chars_per_second": 10.525173611111112,
+    "measured_at": "2026-09-11T07:23:06.443231"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Marathi",
+    "chars_per_second": 10.24070945945946,
+    "measured_at": "2026-09-11T07:23:06.734265"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Marathi",
+    "chars_per_second": 12.917258522727273,
+    "measured_at": "2026-09-11T07:23:07.142156"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Marathi",
+    "chars_per_second": 11.599170918367347,
+    "measured_at": "2026-09-11T07:23:08.831958"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Marathi",
+    "chars_per_second": 10.825892857142856,
+    "measured_at": "2026-09-11T07:23:09.020246"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Marathi",
+    "chars_per_second": 9.09375,
+    "measured_at": "2026-09-11T07:23:09.748673"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Marathi",
+    "chars_per_second": 10.4286123853211,
+    "measured_at": "2026-09-11T07:23:11.167523"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Marathi",
+    "chars_per_second": 10.623539719626168,
+    "measured_at": "2026-09-11T07:23:11.329026"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Marathi",
+    "chars_per_second": 10.623539719626168,
+    "measured_at": "2026-09-11T07:23:12.080425"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Gujarati",
+    "chars_per_second": 12.600806451612904,
+    "measured_at": "2026-09-11T07:23:13.516023"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Gujarati",
+    "chars_per_second": 9.22736220472441,
+    "measured_at": "2026-09-11T07:23:14.294875"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Gujarati",
+    "chars_per_second": 11.837121212121211,
+    "measured_at": "2026-09-11T07:23:14.546355"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Gujarati",
+    "chars_per_second": 12.600806451612904,
+    "measured_at": "2026-09-11T07:23:16.525954"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Gujarati",
+    "chars_per_second": 10.19021739130435,
+    "measured_at": "2026-09-11T07:23:16.597943"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Gujarati",
+    "chars_per_second": 10.751146788990825,
+    "measured_at": "2026-09-11T07:23:17.093711"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Gujarati",
+    "chars_per_second": 11.268028846153847,
+    "measured_at": "2026-09-11T07:23:19.121332"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Gujarati",
+    "chars_per_second": 10.463169642857142,
+    "measured_at": "2026-09-11T07:23:19.259666"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Gujarati",
+    "chars_per_second": 10.279605263157896,
+    "measured_at": "2026-09-11T07:23:19.893629"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Gujarati",
+    "chars_per_second": 12.08118556701031,
+    "measured_at": "2026-09-11T07:23:21.460744"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Gujarati",
+    "chars_per_second": 9.300595238095237,
+    "measured_at": "2026-09-11T07:23:22.193363"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Gujarati",
+    "chars_per_second": 10.463169642857142,
+    "measured_at": "2026-09-11T07:23:22.467300"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Gujarati",
+    "chars_per_second": 11.957908163265307,
+    "measured_at": "2026-09-11T07:23:23.924340"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Gujarati",
+    "chars_per_second": 13.167134831460674,
+    "measured_at": "2026-09-11T07:23:24.558353"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Gujarati",
+    "chars_per_second": 11.160714285714285,
+    "measured_at": "2026-09-11T07:23:24.786650"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Gujarati",
+    "chars_per_second": 10.463169642857142,
+    "measured_at": "2026-09-11T07:23:26.276468"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Gujarati",
+    "chars_per_second": 12.600806451612904,
+    "measured_at": "2026-09-11T07:23:26.587872"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Gujarati",
+    "chars_per_second": 10.653409090909092,
+    "measured_at": "2026-09-11T07:23:27.106499"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Gujarati",
+    "chars_per_second": 10.557432432432433,
+    "measured_at": "2026-09-11T07:23:28.574561"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Gujarati",
+    "chars_per_second": 10.370575221238937,
+    "measured_at": "2026-09-11T07:23:29.302822"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Gujarati",
+    "chars_per_second": 8.491847826086957,
+    "measured_at": "2026-09-11T07:23:29.970398"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Gujarati",
+    "chars_per_second": 10.952102803738319,
+    "measured_at": "2026-09-11T07:23:30.855008"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Gujarati",
+    "chars_per_second": 11.837121212121211,
+    "measured_at": "2026-09-11T07:23:31.388736"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Gujarati",
+    "chars_per_second": 10.653409090909092,
+    "measured_at": "2026-09-11T07:23:32.598555"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Gujarati",
+    "chars_per_second": 10.102370689655173,
+    "measured_at": "2026-09-11T07:23:33.561262"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Gujarati",
+    "chars_per_second": 7.971938775510203,
+    "measured_at": "2026-09-11T07:23:34.721823"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Gujarati",
+    "chars_per_second": 11.268028846153847,
+    "measured_at": "2026-09-11T07:23:35.128001"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Gujarati",
+    "chars_per_second": 12.877747252747252,
+    "measured_at": "2026-09-11T07:23:35.795177"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Gujarati",
+    "chars_per_second": 9.847689075630251,
+    "measured_at": "2026-09-11T07:23:37.554865"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Gujarati",
+    "chars_per_second": 8.745335820895523,
+    "measured_at": "2026-09-11T07:23:38.265062"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Gujarati",
+    "chars_per_second": 12.08118556701031,
+    "measured_at": "2026-09-11T07:23:38.308767"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Gujarati",
+    "chars_per_second": 9.300595238095237,
+    "measured_at": "2026-09-11T07:23:40.544610"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Gujarati",
+    "chars_per_second": 9.527439024390244,
+    "measured_at": "2026-09-11T07:23:40.841090"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Gujarati",
+    "chars_per_second": 9.1552734375,
+    "measured_at": "2026-09-11T07:23:41.061465"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Gujarati",
+    "chars_per_second": 9.300595238095237,
+    "measured_at": "2026-09-11T07:23:43.249811"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Gujarati",
+    "chars_per_second": 10.557432432432433,
+    "measured_at": "2026-09-11T07:23:43.556127"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Gujarati",
+    "chars_per_second": 8.945610687022901,
+    "measured_at": "2026-09-11T07:23:43.593641"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Punjabi",
+    "chars_per_second": 15.441176470588236,
+    "measured_at": "2026-09-11T07:23:45.466284"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Punjabi",
+    "chars_per_second": 11.122881355932204,
+    "measured_at": "2026-09-11T07:23:46.415859"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Punjabi",
+    "chars_per_second": 9.308510638297872,
+    "measured_at": "2026-09-11T07:23:46.765713"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Punjabi",
+    "chars_per_second": 11.314655172413792,
+    "measured_at": "2026-09-11T07:23:48.294179"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Punjabi",
+    "chars_per_second": 12.995049504950495,
+    "measured_at": "2026-09-11T07:23:48.842952"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Punjabi",
+    "chars_per_second": 11.217948717948717,
+    "measured_at": "2026-09-11T07:23:49.497507"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Punjabi",
+    "chars_per_second": 12.867647058823529,
+    "measured_at": "2026-09-11T07:23:50.754237"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Punjabi",
+    "chars_per_second": 10.416666666666666,
+    "measured_at": "2026-09-11T07:23:51.761188"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Punjabi",
+    "chars_per_second": 12.499999999999998,
+    "measured_at": "2026-09-11T07:23:52.004346"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Punjabi",
+    "chars_per_second": 14.266304347826088,
+    "measured_at": "2026-09-11T07:23:53.004704"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Punjabi",
+    "chars_per_second": 11.217948717948717,
+    "measured_at": "2026-09-11T07:23:54.728539"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Punjabi",
+    "chars_per_second": 9.58029197080292,
+    "measured_at": "2026-09-11T07:23:54.959258"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Punjabi",
+    "chars_per_second": 11.314655172413792,
+    "measured_at": "2026-09-11T07:23:55.791602"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Punjabi",
+    "chars_per_second": 11.931818181818182,
+    "measured_at": "2026-09-11T07:23:57.373029"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Punjabi",
+    "chars_per_second": 10.670731707317072,
+    "measured_at": "2026-09-11T07:23:57.609798"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Punjabi",
+    "chars_per_second": 12.266355140186915,
+    "measured_at": "2026-09-11T07:23:58.086311"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Punjabi",
+    "chars_per_second": 11.931818181818182,
+    "measured_at": "2026-09-11T07:23:59.782660"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Punjabi",
+    "chars_per_second": 10.01908396946565,
+    "measured_at": "2026-09-11T07:24:00.444309"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Punjabi",
+    "chars_per_second": 10.758196721311476,
+    "measured_at": "2026-09-11T07:24:00.724166"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Punjabi",
+    "chars_per_second": 10.758196721311476,
+    "measured_at": "2026-09-11T07:24:03.047219"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Punjabi",
+    "chars_per_second": 8.522727272727272,
+    "measured_at": "2026-09-11T07:24:03.091404"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Punjabi",
+    "chars_per_second": 10.9375,
+    "measured_at": "2026-09-11T07:24:03.476288"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Punjabi",
+    "chars_per_second": 12.266355140186915,
+    "measured_at": "2026-09-11T07:24:05.394575"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Punjabi",
+    "chars_per_second": 12.382075471698112,
+    "measured_at": "2026-09-11T07:24:05.626215"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Punjabi",
+    "chars_per_second": 10.758196721311476,
+    "measured_at": "2026-09-11T07:24:06.337653"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Punjabi",
+    "chars_per_second": 12.867647058823529,
+    "measured_at": "2026-09-11T07:24:08.108065"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Punjabi",
+    "chars_per_second": 8.75,
+    "measured_at": "2026-09-11T07:24:08.771408"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Punjabi",
+    "chars_per_second": 10.416666666666666,
+    "measured_at": "2026-09-11T07:24:09.219776"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Punjabi",
+    "chars_per_second": 11.217948717948717,
+    "measured_at": "2026-09-11T07:24:10.839359"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Punjabi",
+    "chars_per_second": 10.670731707317072,
+    "measured_at": "2026-09-11T07:24:11.643531"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Punjabi",
+    "chars_per_second": 10.334645669291339,
+    "measured_at": "2026-09-11T07:24:12.112850"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Punjabi",
+    "chars_per_second": 11.61504424778761,
+    "measured_at": "2026-09-11T07:24:13.739477"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Punjabi",
+    "chars_per_second": 10.25390625,
+    "measured_at": "2026-09-11T07:24:14.271763"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Punjabi",
+    "chars_per_second": 9.242957746478874,
+    "measured_at": "2026-09-11T07:24:15.010495"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Punjabi",
+    "chars_per_second": 11.122881355932204,
+    "measured_at": "2026-09-11T07:24:16.328434"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Punjabi",
+    "chars_per_second": 9.051724137931034,
+    "measured_at": "2026-09-11T07:24:17.249750"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Punjabi",
+    "chars_per_second": 9.242957746478874,
+    "measured_at": "2026-09-11T07:24:17.963443"
+  },
+  {
+    "voice_id": "shubh",
+    "language": "Odia",
+    "chars_per_second": 10.710685483870968,
+    "measured_at": "2026-09-11T07:24:18.658103"
+  },
+  {
+    "voice_id": "aditya",
+    "language": "Odia",
+    "chars_per_second": 9.30928738317757,
+    "measured_at": "2026-09-11T07:24:19.885525"
+  },
+  {
+    "voice_id": "rahul",
+    "language": "Odia",
+    "chars_per_second": 9.30928738317757,
+    "measured_at": "2026-09-11T07:24:20.621867"
+  },
+  {
+    "voice_id": "rohan",
+    "language": "Odia",
+    "chars_per_second": 10.596742021276597,
+    "measured_at": "2026-09-11T07:24:21.016344"
+  },
+  {
+    "voice_id": "amit",
+    "language": "Odia",
+    "chars_per_second": 12.14748475609756,
+    "measured_at": "2026-09-11T07:24:21.947137"
+  },
+  {
+    "voice_id": "dev",
+    "language": "Odia",
+    "chars_per_second": 10.596742021276597,
+    "measured_at": "2026-09-11T07:24:23.079032"
+  },
+  {
+    "voice_id": "ratan",
+    "language": "Odia",
+    "chars_per_second": 11.067708333333334,
+    "measured_at": "2026-09-11T07:24:23.213849"
+  },
+  {
+    "voice_id": "varun",
+    "language": "Odia",
+    "chars_per_second": 8.033014112903226,
+    "measured_at": "2026-09-11T07:24:24.814681"
+  },
+  {
+    "voice_id": "sumit",
+    "language": "Odia",
+    "chars_per_second": 10.164221938775512,
+    "measured_at": "2026-09-11T07:24:25.659555"
+  },
+  {
+    "voice_id": "manan",
+    "language": "Odia",
+    "chars_per_second": 8.73766447368421,
+    "measured_at": "2026-09-11T07:24:25.863325"
+  },
+  {
+    "voice_id": "kabir",
+    "language": "Odia",
+    "chars_per_second": 8.814988938053098,
+    "measured_at": "2026-09-11T07:24:27.480331"
+  },
+  {
+    "voice_id": "aayan",
+    "language": "Odia",
+    "chars_per_second": 10.827105978260871,
+    "measured_at": "2026-09-11T07:24:27.959388"
+  },
+  {
+    "voice_id": "ashutosh",
+    "language": "Odia",
+    "chars_per_second": 10.06155303030303,
+    "measured_at": "2026-09-11T07:24:28.189044"
+  },
+  {
+    "voice_id": "advait",
+    "language": "Odia",
+    "chars_per_second": 9.765625,
+    "measured_at": "2026-09-11T07:24:29.990580"
+  },
+  {
+    "voice_id": "anand",
+    "language": "Odia",
+    "chars_per_second": 10.485197368421051,
+    "measured_at": "2026-09-11T07:24:30.156427"
+  },
+  {
+    "voice_id": "tarun",
+    "language": "Odia",
+    "chars_per_second": 10.710685483870968,
+    "measured_at": "2026-09-11T07:24:30.544474"
+  },
+  {
+    "voice_id": "sunny",
+    "language": "Odia",
+    "chars_per_second": 11.067708333333334,
+    "measured_at": "2026-09-11T07:24:32.060212"
+  },
+  {
+    "voice_id": "mani",
+    "language": "Odia",
+    "chars_per_second": 8.587015086206897,
+    "measured_at": "2026-09-11T07:24:32.589268"
+  },
+  {
+    "voice_id": "gokul",
+    "language": "Odia",
+    "chars_per_second": 8.513621794871796,
+    "measured_at": "2026-09-11T07:24:33.088938"
+  },
+  {
+    "voice_id": "vijay",
+    "language": "Odia",
+    "chars_per_second": 9.223090277777779,
+    "measured_at": "2026-09-11T07:24:34.342588"
+  },
+  {
+    "voice_id": "mohit",
+    "language": "Odia",
+    "chars_per_second": 9.30928738317757,
+    "measured_at": "2026-09-11T07:24:34.874900"
+  },
+  {
+    "voice_id": "rehan",
+    "language": "Odia",
+    "chars_per_second": 9.9609375,
+    "measured_at": "2026-09-11T07:24:35.238492"
+  },
+  {
+    "voice_id": "soham",
+    "language": "Odia",
+    "chars_per_second": 9.862314356435645,
+    "measured_at": "2026-09-11T07:24:36.956474"
+  },
+  {
+    "voice_id": "ritu",
+    "language": "Odia",
+    "chars_per_second": 11.858258928571429,
+    "measured_at": "2026-09-11T07:24:36.997650"
+  },
+  {
+    "voice_id": "priya",
+    "language": "Odia",
+    "chars_per_second": 8.16470286885246,
+    "measured_at": "2026-09-11T07:24:38.014869"
+  },
+  {
+    "voice_id": "pooja",
+    "language": "Odia",
+    "chars_per_second": 10.710685483870968,
+    "measured_at": "2026-09-11T07:24:39.335229"
+  },
+  {
+    "voice_id": "neha",
+    "language": "Odia",
+    "chars_per_second": 8.370535714285714,
+    "measured_at": "2026-09-11T07:24:39.747289"
+  },
+  {
+    "voice_id": "simran",
+    "language": "Odia",
+    "chars_per_second": 9.30928738317757,
+    "measured_at": "2026-09-11T07:24:40.698269"
+  },
+  {
+    "voice_id": "kavya",
+    "language": "Odia",
+    "chars_per_second": 11.449353448275861,
+    "measured_at": "2026-09-11T07:24:41.901550"
+  },
+  {
+    "voice_id": "ishita",
+    "language": "Odia",
+    "chars_per_second": 9.397110849056604,
+    "measured_at": "2026-09-11T07:24:42.313626"
+  },
+  {
+    "voice_id": "shreya",
+    "language": "Odia",
+    "chars_per_second": 10.06155303030303,
+    "measured_at": "2026-09-11T07:24:43.204527"
+  },
+  {
+    "voice_id": "roopa",
+    "language": "Odia",
+    "chars_per_second": 9.9609375,
+    "measured_at": "2026-09-11T07:24:44.366540"
+  },
+  {
+    "voice_id": "tanya",
+    "language": "Odia",
+    "chars_per_second": 9.765625,
+    "measured_at": "2026-09-11T07:24:44.544617"
+  },
+  {
+    "voice_id": "shruti",
+    "language": "Odia",
+    "chars_per_second": 7.96875,
+    "measured_at": "2026-09-11T07:24:45.912621"
+  },
+  {
+    "voice_id": "suhani",
+    "language": "Odia",
+    "chars_per_second": 9.486607142857142,
+    "measured_at": "2026-09-11T07:24:46.647344"
+  },
+  {
+    "voice_id": "kavitha",
+    "language": "Odia",
+    "chars_per_second": 8.893694196428571,
+    "measured_at": "2026-09-11T07:24:46.903602"
+  },
+  {
+    "voice_id": "rupali",
+    "language": "Odia",
+    "chars_per_second": 9.670813106796116,
+    "measured_at": "2026-09-11T07:24:48.100581"
+  }
+]
