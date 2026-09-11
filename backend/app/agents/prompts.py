@@ -1,6 +1,22 @@
 ﻿# Each prompt is one specialist agent's entire domain knowledge.
 # Keep these short and strict: every agent must return ONLY JSON.
 
+CHARACTER_STYLE_VARIANT = """Redraw the exact person in the supplied image in the requested rendering style.
+Only the rendering changes. Preserve facial identity, face shape, apparent age, skin tone, hair silhouette
+and color, outfit, garment colors, accessories and distinguishing details. Keep one full-body or
+three-quarter portrait, a clear face and a neutral background. No new people, text, collage or turnaround.
+Cartoon / Anime changes linework and shading, not the person's identity. 3D / CGI changes rendering,
+not body proportions or wardrobe. Cinematic, Realistic, Hyper-realistic and Vintage / retro film
+change the image treatment without redesigning the character. Do not change gender or ethnicity."""
+
+CHARACTER_STYLE_QA = """Compare the identity reference and its proposed style variant visually.
+Check that there is one same recognizable character: face shape, apparent age, skin tone, hair,
+outfit colors, accessories and distinguishing details must remain consistent. Allow simplification
+appropriate to the requested style, but reject identity drift, changed outfits or a missing style change.
+Check that the candidate actually uses the requested rendering and is a usable portrait, not a sheet.
+Do not generate an image. Return ONLY JSON: {"approved":true,"reason":"short concrete visual reason"}.
+If any check fails, set approved false and explain the correction needed. Judge the pixels, not assurances."""
+
 FORMAT_CLASSIFIER = """You classify a video request into a production format.
 Respond with ONLY JSON:
 {"format":"ad|skit|short_film|explainer","structure":"AIDA|three_act|hook_body_cta|explainer_structure","duration_target_sec":number,"num_scenes":number}

@@ -49,15 +49,30 @@ def _apply_continuity_overrides(
     db: Session,
     continuity: dict,
     resolutions: dict | None = None,
+    *,
+    job_brief: str = "",
+    emit: EventFn | None = None,
 ) -> dict[str, int]:
     """Apply automatic and explicit references in one post-Continuity pass.
 
     An explicit D2 resolution wins over Module C's automatic name match. Explicit
     ``invent`` choices deliberately suppress automatic matching so the Continuity
-    Agent's own proposal remains untouched. With no resolution map, this executes
-    the original Module C behavior only.
+    Agent's own proposal remains untouched. With no resolution map, Module C's
+    automatic name matching still applies. Only matched vault renderings vary by style.
     """
     resolutions = resolutions or {}
+    from app.services import character_style_service
+
+    visual_style = character_style_service.visual_style_from_brief(job_brief)
+    renderings = {}
+
+    def rendering(vault_character):
+        if vault_character.id not in renderings:
+            renderings[vault_character.id] = character_style_service.resolve_character_rendering(
+                db, vault_character, visual_style, emit,
+            )
+        return renderings[vault_character.id]
+
     explicit_characters = {
         _reference_name_key(name): (name, resolution)
         for name, resolution in resolutions.get("characters", {}).items()
@@ -99,7 +114,7 @@ def _apply_continuity_overrides(
                 **proposed,
                 "name": resolved_name,
                 "description": vault_character.description,
-                "image_url": vault_character.image_url,
+                **rendering(vault_character),
                 "voice_id": vault_character.voice_id,
                 "voice_sample_ref": vault_character.voice_id,
             }
@@ -112,7 +127,7 @@ def _apply_continuity_overrides(
         characters[index] = {
             **proposed,
             "description": vault_character.description,
-            "image_url": vault_character.image_url,
+            **rendering(vault_character),
             "voice_id": vault_character.voice_id,
             "voice_sample_ref": vault_character.voice_id,
         }
@@ -130,7 +145,7 @@ def _apply_continuity_overrides(
             {
                 "name": resolved_name,
                 "description": vault_character.description,
-                "image_url": vault_character.image_url,
+                **rendering(vault_character),
                 "voice_id": vault_character.voice_id,
                 "voice_sample_ref": vault_character.voice_id,
             }
@@ -418,7 +433,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
                 f"Locations: {json.dumps(list((resolutions or {}).get('locations', {})), ensure_ascii=False)}"
             )
         continuity = call_agent(prompts.CONTINUITY_AGENT, continuity_input)
-        override_stats = _apply_continuity_overrides(db, continuity, resolutions)
+        override_stats = _apply_continuity_overrides(db, continuity, resolutions, job_brief=brief, emit=emit)
         assigned_voice_count = voice_generation_service.assign_missing_voice_ids(continuity)
         if override_stats["automatic_characters"]:
             emit(

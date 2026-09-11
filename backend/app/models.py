@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -54,6 +54,18 @@ class Character(Base):
     image_source = Column(String, nullable=False)  # generated | uploaded
     voice_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default="draft")  # draft | approved
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CharacterStyleVariant(Base):
+    __tablename__ = "character_style_variants"
+    __table_args__ = (UniqueConstraint("character_id", "visual_style", name="uq_character_visual_style"),)
+
+    id = Column(String, primary_key=True, default=new_id)
+    character_id = Column(String, ForeignKey("characters.id"), nullable=False)
+    visual_style = Column(String, nullable=False)
+    image_url = Column(Text, nullable=False)
+    source = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

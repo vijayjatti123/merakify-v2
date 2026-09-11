@@ -287,6 +287,19 @@ export default function JobView({ jobId, onReset }) {
             </div>
 
             <div className="shot-card-list">
+              {result.continuity?.characters?.some((character) => character.style_variant_id || character.style_variant_warning) && (
+                <section className="shot-card shrink-0" aria-label="Character references for this style">
+                  <p className="text-sm">Character references for this style</p>
+                  {result.continuity.characters.filter((character) => character.style_variant_id || character.style_variant_warning).map((character) => (
+                    <div key={character.name} className="mt-3 text-xs">
+                      <p>{character.name}{character.visual_style ? ` · ${character.visual_style}` : ""}</p>
+                      {character.style_variant_id && <img src={character.image_url} alt={`${character.name} — ${character.visual_style} reference`} className="mt-2 w-24 rounded-md" />}
+                      {character.style_variant_source === "style_transfer_from_upload" && <p className="audio-warning">Style-transferred from an uploaded photo. Fidelity and quality can vary and are less reliable than a from-scratch generation.</p>}
+                      {character.style_variant_warning && <p className="audio-warning">{character.style_variant_warning}</p>}
+                    </div>
+                  ))}
+                </section>
+              )}
               {shots.map((shot) => {
                 const isEditing = editingShot === shot.shot_number;
                 const visualStatus = shotStatuses[shot.shot_number] || shot.status || "pending";
