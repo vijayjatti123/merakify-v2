@@ -38,7 +38,7 @@ class TimingPolicyTests(unittest.TestCase):
 
     def test_selection_uses_all_shots_once_and_preserves_vault(self):
         result = {"continuity": {"characters": [
-            {"name": "Asha", "description": "adult woman", "voice_assignment": "heuristic"},
+            {"name": "Asha", "description": "adult woman", "gender": "female", "age_bracket": "adult", "voice_assignment": "heuristic"},
             {"name": "Vault", "description": "adult woman", "voice_assignment": "vault", "character_id": "fixed", "voice_id": "priya"},
         ]}, "shots": [
             {"has_dialogue": True, "characters_in_shot": ["Asha"], "dialogue_text": "अ" * 60, "duration_sec": 4},
@@ -63,9 +63,61 @@ class TimingPolicyTests(unittest.TestCase):
         self.assertEqual(timing.mood_pace("neutral"), 1)
         self.assertEqual(timing.mood_pace("उत्साहित"), 1.12)
         self.assertEqual(timing.mood_pace("कोमल"), .88)
-        self.assertEqual(timing.eligible_voices("elderly woman"), ["roopa"])
-        self.assertEqual(timing.eligible_voices("teenage boy"), ["kabir"])
+        self.assertEqual(timing.eligible_voices({"gender": "female", "age_bracket": "older_adult"}), ["roopa"])
+        self.assertEqual(timing.eligible_voices({"gender": "male", "age_bracket": "teen"}), ["kabir"])
         self.assertEqual(voice.decoded_audio_duration(pcm(2.375)), 2.375)
+
+    def test_casting_uses_structured_fields_independent_of_description_language(self):
+        hindi = "युवती, नीली कुर्ती, घर पर सुबह चाय बनाती, सौम्य भाव"
+        english = "Young adult woman in a blue kurta making morning tea at home"
+        for description in [hindi, english, "elderly man", ""]:
+            character = {"description": description, "gender": "female", "age_bracket": "adult"}
+            self.assertEqual(set(timing.eligible_voices(character)), voice.FEMALE_VOICE_IDS)
+            self.assertEqual(voice.heuristic_voice_id(character), "priya")
+        self.assertEqual(len(timing.eligible_voices({"gender": "male", "age_bracket": "adult"})), 23)
+        self.assertEqual(timing.eligible_voices({"gender": "female", "age_bracket": "child"}), ["kavya"])
+        self.assertEqual(timing.eligible_voices({"gender": "male", "age_bracket": "older_adult"}), ["ratan"])
+
+    def test_missing_invalid_fields_warn_and_keep_full_pool_fit(self):
+        for character in [{"description": "adult woman"}, {"gender": "female"},
+                          {"gender": "महिला", "age_bracket": "adult"},
+                          {"gender": "female", "age_bracket": "grown-up"},
+                          {"gender": ["female"], "age_bracket": "adult"}]:
+            self.assertEqual(len(timing.eligible_voices(character)), 37)
+            self.assertIn("WITHOUT demographic narrowing", timing.casting_warning(character))
+            self.assertEqual(voice.heuristic_voice_id(character), "shubh")
+        # A deliberate unspecified classification is distinguishable from missing metadata.
+        self.assertEqual(len(timing.eligible_voices({"gender": "unspecified", "age_bracket": "adult"})), 37)
+        self.assertEqual(timing.eligible_voices({"gender": "nonbinary", "age_bracket": "teen"}), ["kavya", "kabir"])
+
+    def test_vault_and_already_selected_legacy_voices_skip_classification(self):
+        characters = [
+            {"name": "Vault", "character_id": "approved-id", "voice_assignment": "vault", "voice_id": "priya"},
+            {"name": "Legacy", "voice_assignment": "calibrated", "voice_id": "shruti"},
+        ]
+        result = {"continuity": {"characters": characters}, "shots": [
+            {"has_dialogue": True, "characters_in_shot": ["Vault", "Legacy"], "duration_sec": 5, "dialogue_text": "नमस्ते"}]}
+        before = copy.deepcopy(characters)
+        self.assertEqual(timing.select_calibrated_voices(self.db, result, "Hindi"), [])
+        self.assertEqual(characters, before)
+        self.assertEqual(voice.assign_missing_voice_ids(result["continuity"]), 0)
+        self.assertEqual([c["voice_id"] for c in characters], ["priya", "shruti"])
+
+    def test_new_character_missing_classification_completes_fit_with_trace_warning(self):
+        events = []
+        character = {"name": "New character", "description": "युवती"}
+        result = {"continuity": {"characters": [character]}, "shots": [
+            {"has_dialogue": True, "characters_in_shot": ["New character"], "dialogue_text": "अ"*57, "duration_sec": 5}]}
+        emit = lambda key, note: events.append((key, note))
+        voice.assign_missing_voice_ids(result["continuity"], emit=emit)
+        self.assertEqual(character["voice_assignment"], "heuristic")
+        record = timing.select_calibrated_voices(self.db, result, "Hindi", emit=emit)[0]
+        self.assertEqual(len(record["candidates"]), 37)
+        self.assertFalse(record["classification_valid"])
+        self.assertEqual(character["voice_assignment"], "calibrated")
+        self.assertEqual(record["selected_voice_id"], min(record["candidates"], key=lambda c:c["mean_pace_deviation"])["voice_id"])
+        self.assertEqual([key for key, _ in events], ["casting_warning", "casting_warning"])
+        self.assertIn("all 37 voices", character["casting_warning"])
 
     def test_audio_trim_cannot_delete_or_retime_measured_dialogue(self):
         original = [{"shot_number": 1, "duration_sec": 7, "has_dialogue": True,

@@ -91,6 +91,15 @@ across the whole video — same character look, same location, same key props th
 For each character, also note that a voice reference will be needed for audio continuity — set
 voice_sample_ref to null; deterministic application code fills it later with a fixed Sarvam catalog
 voice ID. It is never a cloned or uploaded voice sample and must never be invented by you.
+In this same response, classify EACH character with required structured casting fields:
+- gender: exactly female, male, nonbinary, or unspecified.
+- age_bracket: exactly child (under 13), teen (13-17), adult (18-59), older_adult (60+), or unspecified.
+Read the supplied character/story facts in any language. Output these enum tokens in English even
+when name and description use another language. Preserve the description's language.
+Use explicit identity/age information or unambiguous life-stage terms; do not guess from a name,
+wardrobe, occupation or gender stereotypes. If the story does not establish a field, output unspecified;
+never omit the field or replace an enum token with translated prose. These fields guide non-vault
+casting only; a vault character's approved voice remains authoritative.
 Some dialogue_or_vo lines are narration or voiceover, not spoken by a visible character (no one is
 on-screen speaking them). Those lines still need one consistent voice across the whole video, the same
 way a character does — set narrator_voice_ref to null for the same reason: it is filled later with a fixed
@@ -105,7 +114,7 @@ Natural and None mean a restrained natural rendering and neutral grade, not a mi
 These typed job settings override conflicting style prose. Keep characters and locations faithful to
 the scenes; the style bible changes rendering, not story facts, identity, wardrobe or source dialogue.
 Respond with ONLY JSON:
-{"characters":[{"name":"...","description":"under 15 words, physical + wardrobe anchor","voice_sample_ref":null}],"locations":[{"name":"...","description":"under 12 words"}],"props":[{"name":"under 5 words"}],"narrator_voice_ref":null,"visual_style":{"rendering":"concrete rendering treatment","palette":"specific colors and grade","lighting_motif":"repeatable motivated lighting","texture_grain":"specific texture, linework or grain"}}
+{"characters":[{"name":"...","description":"under 15 words, physical + wardrobe anchor","gender":"female|male|nonbinary|unspecified","age_bracket":"child|teen|adult|older_adult|unspecified","voice_sample_ref":null}],"locations":[{"name":"...","description":"under 12 words"}],"props":[{"name":"under 5 words"}],"narrator_voice_ref":null,"visual_style":{"rendering":"concrete rendering treatment","palette":"specific colors and grade","lighting_motif":"repeatable motivated lighting","texture_grain":"specific texture, linework or grain"}}
 Max 4 characters, 3 locations, 4 props."""
 
 # Generation models cap out around 8-10 seconds per shot. Rather than

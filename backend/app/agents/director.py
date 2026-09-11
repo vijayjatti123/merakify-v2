@@ -536,7 +536,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             )
         continuity = call_agent(prompts.CONTINUITY_AGENT, continuity_input)
         override_stats = _apply_continuity_overrides(db, continuity, resolutions, job_brief=brief, emit=emit)
-        assigned_voice_count = voice_generation_service.assign_missing_voice_ids(continuity)
+        assigned_voice_count = voice_generation_service.assign_missing_voice_ids(continuity, emit=emit)
         if override_stats["automatic_characters"]:
             emit(
                 "continuity_plan",
@@ -573,7 +573,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             cinematography_input,
             max_tokens=4096,
         )
-        assigned_voice_count += voice_generation_service.assign_missing_voice_ids(continuity, cine["shots"])
+        assigned_voice_count += voice_generation_service.assign_missing_voice_ids(continuity, cine["shots"], emit=emit)
         if assigned_voice_count:
             emit(
                 "continuity_plan",

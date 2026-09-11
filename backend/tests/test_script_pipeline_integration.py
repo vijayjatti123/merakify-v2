@@ -135,7 +135,7 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
                 }
             if system_prompt == prompts.CONTINUITY_AGENT:
                 return {
-                    "characters": [{"name": "Ravi", "description": "AI Ravi", "voice_sample_ref": None}],
+                    "characters": [{"name": "Ravi", "description": "AI Ravi", "gender": "male", "age_bracket": "adult", "voice_sample_ref": None}],
                     "locations": [{"name": "CAFE", "description": "AI cafe"}],
                     "props": [],
                     "narrator_voice_ref": None,

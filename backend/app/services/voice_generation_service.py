@@ -34,10 +34,6 @@ LANGUAGE_CODES = {
 FEMALE_VOICE_IDS = frozenset(
     {"ritu", "priya", "neha", "pooja", "simran", "kavya", "ishita", "shreya", "roopa", "tanya", "shruti", "suhani", "kavitha", "rupali"}
 )
-OLDER_TERMS = ("elderly", "older", "old woman", "old man", "grandmother", "grandfather", "senior")
-YOUNGER_TERMS = ("child", "young girl", "young boy", "teen", "teenage", "daughter", "son")
-FEMALE_TERMS = ("woman", "female", "girl", "mother", "daughter", "grandmother", "wife", "sister")
-MALE_TERMS = ("man", "male", "boy", "father", "son", "grandfather", "husband", "brother")
 
 # Public ElevenLabs catalog IDs used only as a technical fallback. Character
 # identity remains the Sarvam catalog voice_id selected for the job.
@@ -72,28 +68,27 @@ def decoded_audio_duration(data: bytes) -> float:
     return duration
 
 
-def heuristic_voice_id(description: str) -> str:
-    """Choose one fixed Sarvam catalog voice from simple age/gender words."""
-    text = description.casefold()
-    is_female = any(term in text for term in FEMALE_TERMS)
-    is_male = any(term in text for term in MALE_TERMS)
-    is_older = any(term in text for term in OLDER_TERMS)
-    is_younger = any(term in text for term in YOUNGER_TERMS)
-
-    if is_female:
-        return "roopa" if is_older else "kavya" if is_younger else "priya"
-    if is_male:
-        return "ratan" if is_older else "kabir" if is_younger else "rahul"
-    return "shubh"
+def heuristic_voice_id(character: dict) -> str:
+    """Provisional voice from structured casting; measured selection follows once."""
+    from app.services.voice_timing import eligible_voices, casting_fields
+    pool = eligible_voices(character)
+    preferred = {"female": "priya", "male": "rahul"}.get(casting_fields(character)[0], "shubh")
+    return preferred if preferred in pool else pool[0]
 
 
-def assign_missing_voice_ids(continuity: dict, shots: list[dict] | None = None) -> int:
+def assign_missing_voice_ids(continuity: dict, shots: list[dict] | None = None, *, emit=None) -> int:
     """Assign stable catalog IDs once without replacing vault-selected voices."""
     assigned = 0
     for character in continuity.get("characters", []):
         voice_id = character.get("voice_id")
         if not voice_id:
-            voice_id = heuristic_voice_id(character.get("description") or "")
+            from app.services.voice_timing import casting_warning
+            warning = casting_warning(character)
+            if warning:
+                character["casting_warning"] = warning
+                if emit:
+                    emit("casting_warning", warning)
+            voice_id = heuristic_voice_id(character)
             character["voice_id"] = voice_id
             character["voice_assignment"] = "heuristic"
             assigned += 1
@@ -105,7 +100,7 @@ def assign_missing_voice_ids(continuity: dict, shots: list[dict] | None = None) 
         and any(shot.get("has_dialogue") and not shot.get("characters_in_shot") for shot in shots)
     )
     if narrator_used and not continuity.get("narrator_voice_ref"):
-        continuity["narrator_voice_ref"] = heuristic_voice_id("neutral narrator")
+        continuity["narrator_voice_ref"] = "shubh"
         assigned += 1
     return assigned
 
@@ -359,7 +354,8 @@ async def generate_job_dialogue_audio(
 
     from app.services.voice_timing import select_calibrated_voices
     from app.agents.director import _attach_voice_refs, finalize_audio_assembly
-    selections = select_calibrated_voices(db, result, job.language or "English")
+    selections = select_calibrated_voices(db, result, job.language or "English",
+        emit=lambda key, note: job_service.append_event(db, job_id, key, note))
     for selection in selections:
         job_service.append_event(db, job_id, "voice_generation", f"Calibrated voice selection: {json.dumps(selection)}")
     if selections:

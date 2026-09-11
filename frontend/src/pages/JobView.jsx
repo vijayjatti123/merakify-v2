@@ -143,6 +143,10 @@ export default function JobView({ jobId, onReset }) {
   const shots = result?.shots || [];
   const approved = Boolean(result?.generation_approved);
   const latestTrace = trace[trace.length - 1];
+  const castingWarnings = [...new Set([
+    ...trace.filter((event) => event.agent_key === "casting_warning").map((event) => event.note),
+    ...(result?.continuity?.characters || []).map((character) => character.casting_warning).filter(Boolean),
+  ])];
 
   useEffect(() => {
     if (!approved || !shots.length || generationStage !== "shots") return;
@@ -264,6 +268,12 @@ export default function JobView({ jobId, onReset }) {
             ))}
           </div>
         </details>
+
+        {castingWarnings.map((warning) => (
+          <div key={warning} role="alert" className="m-3 rounded-lg border-2 border-amber-500 bg-amber-100 p-3 text-sm font-semibold text-amber-950">
+            {warning}
+          </div>
+        ))}
 
         {!done && !errored && (
           <div className="panel-waiting">

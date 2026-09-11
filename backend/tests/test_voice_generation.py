@@ -21,9 +21,9 @@ class VoiceAssignmentTests(unittest.TestCase):
         continuity = {
             "characters": [
                 {"name": "Vault", "description": "young woman", "voice_id": "ritu", "voice_sample_ref": "ritu"},
-                {"name": "Mother", "description": "elderly grandmother in a sari", "voice_sample_ref": None},
-                {"name": "Boy", "description": "young boy carrying a kite", "voice_sample_ref": None},
-                {"name": "Guide", "description": "quiet masked guide", "voice_sample_ref": None},
+                {"name": "Mother", "description": "elderly grandmother in a sari", "gender": "female", "age_bracket": "older_adult", "voice_sample_ref": None},
+                {"name": "Boy", "description": "young boy carrying a kite", "gender": "male", "age_bracket": "child", "voice_sample_ref": None},
+                {"name": "Guide", "description": "quiet masked guide", "gender": "unspecified", "age_bracket": "unspecified", "voice_sample_ref": None},
             ],
             "narrator_voice_ref": None,
         }
