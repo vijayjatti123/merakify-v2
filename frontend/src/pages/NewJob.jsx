@@ -47,6 +47,8 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const [customDuration, setCustomDuration] = useState("");
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [contentType, setContentType] = useState("Ad");
+  const [colorGrade, setColorGrade] = useState("None");
+  const [visualStyle, setVisualStyle] = useState("Natural");
   const [quality, setQuality] = useState("720p");
   const [language, setLanguage] = useState("English");
   const [customLanguage, setCustomLanguage] = useState("");
@@ -124,6 +126,8 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
       return;
     }
     const briefParts = [brief.trim(), `Target duration: ${effectiveDuration}. Content type: ${contentType}.`];
+    if (colorGrade !== "None") briefParts.push(`Whole-video color grade: ${colorGrade}.`);
+    if (visualStyle !== "Natural") briefParts.push(`Visual style: ${visualStyle}.`);
     if (selectedAsset) briefParts.push(`Reference image: ${selectedAsset.url}`);
 
     setSubmitting(true);
@@ -145,6 +149,8 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
 
   async function handleResolvedScriptSubmit(resolutions) {
     const briefParts = [brief.trim(), `Target duration: ${effectiveDuration}. Content type: ${contentType}.`];
+    if (colorGrade !== "None") briefParts.push(`Whole-video color grade: ${colorGrade}.`);
+    if (visualStyle !== "Natural") briefParts.push(`Visual style: ${visualStyle}.`);
     if (selectedAsset) briefParts.push(`Reference image: ${selectedAsset.url}`);
     await onSubmit({
       brief: briefParts.join("\n\n"),
@@ -220,7 +226,13 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
                 <option value="9:16">Portrait (9:16)</option><option value="16:9">Landscape (16:9)</option>
               </SelectField>
               <SelectField label="Content type" value={contentType} onChange={(event) => setContentType(event.target.value)}>
-                <option>Ad</option><option>Short story</option><option>Documentary</option><option>Other</option>
+                <option>Ad</option><option>Short story</option><option>Documentary</option><option>Product hero</option><option>UGC</option><option>Other</option>
+              </SelectField>
+              <SelectField label="Color grade" value={colorGrade} onChange={(event) => setColorGrade(event.target.value)}>
+                {["None", "Warm", "Cool", "Vintage", "Neon", "Black & white", "Vibrant"].map((value) => <option key={value}>{value}</option>)}
+              </SelectField>
+              <SelectField label="Visual Style" value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)}>
+                {["Natural", "Cinematic", "Realistic", "Cartoon / Anime", "3D / CGI", "Hyper-realistic", "Vintage / retro film"].map((value) => <option key={value}>{value}</option>)}
               </SelectField>
               <SelectField label="Quality" note="Applies once video rendering is live" value={quality} onChange={(event) => setQuality(event.target.value)}>
                 <option>480p</option><option>720p</option>

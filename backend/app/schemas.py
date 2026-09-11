@@ -105,6 +105,15 @@ class JobRetry(BaseModel):
     change_request: Optional[str] = None
 
 
+class ShotRegenerateHints(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    angle: Optional[Literal["lowangle", "highangle", "overhead", "pov", "overtheshoulder", "eyelevel", "dutch"]] = None
+    movement: Optional[Literal["dollyin", "dollyout", "tracking", "orbit", "handheld", "craneup", "cranedown", "static"]] = None
+    lighting: Optional[Literal["goldenhour", "bluehour", "moody", "softlight", "rimlight", "silhouette", "spotlight", "backlight"]] = None
+    composition: Optional[Literal["leadinglines", "ruleofthirds", "symmetry", "negativespace", "foreground"]] = None
+
+
 class JobOut(BaseModel):
     id: str
     brief: str

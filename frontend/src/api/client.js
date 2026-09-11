@@ -125,9 +125,14 @@ export async function approveJob(jobId) {
   return res.json();
 }
 
-export async function regenerateShot(jobId, shotNumber) {
+export async function regenerateShot(jobId, shotNumber, hints = {}) {
+  const selectedHints = Object.fromEntries(Object.entries(hints).filter(([, value]) => value));
   const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shotNumber}/regenerate`, {
     method: "POST",
+    ...(Object.keys(selectedHints).length ? {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(selectedHints),
+    } : {}),
   });
   if (!res.ok) throw new Error("Failed to regenerate shot");
   return res.json();

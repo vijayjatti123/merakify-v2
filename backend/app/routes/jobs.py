@@ -5,6 +5,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.agents import prompts
+from app.agents.llm_client import call_agent
 from app.agents.director import (
     SHOT_STATUS_GENERATING,
     SHOT_STATUS_PENDING,
@@ -13,7 +15,7 @@ from app.agents.director import (
     validate_and_correct,
 )
 from app.db import SessionLocal, get_db
-from app.schemas import JobCreate, JobOut, JobRetry, JobRevise
+from app.schemas import JobCreate, JobOut, JobRetry, JobRevise, ShotRegenerateHints
 from app.services import job_service, voice_generation_service
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -245,6 +247,7 @@ def regenerate_shot(
     shot_number: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    payload: ShotRegenerateHints | None = None,
 ):
     job = job_service.get_job(db, job_id)
     if not job:
@@ -278,6 +281,55 @@ def regenerate_shot(
         raise HTTPException(status_code=404, detail="shot not found")
 
     updated_result = dict(result)
+    hints = payload.model_dump(exclude_none=True) if payload else {}
+    if hints:
+        visual_fields = ("camera_angle", "camera_movement", "lens", "lighting", "composition_note")
+        try:
+            cine = call_agent(
+                prompts.CINEMATOGRAPHY_FIX,
+                f"Current shots: {json.dumps(result['shots'])}\n"
+                f"Target shot number: {shot_number}\nOptional style hints: {json.dumps(hints)}",
+                max_tokens=4096,
+            )
+            candidates = [shot for shot in cine["shots"] if shot["shot_number"] == shot_number]
+            if len(candidates) != 1:
+                raise ValueError("Expected exactly one target shot")
+            candidate = candidates[0]
+            if any(not isinstance(candidate.get(key), str) or not candidate[key].strip() for key in visual_fields):
+                raise ValueError("Missing visual fields")
+            # Copy only visual fields: dialogue, timing, identity and all neighbors remain authoritative.
+            proposed = [
+                {**shot, **{key: candidate[key] for key in visual_fields}} if shot["shot_number"] == shot_number else dict(shot)
+                for shot in result["shots"]
+            ]
+            continuity = result["continuity"]
+            validated = validate_and_correct(
+                proposed,
+                continuity["characters"],
+                result["format"]["duration_target_sec"],
+                narrator_voice_ref=continuity.get("narrator_voice_ref"),
+            )
+            if not validated["qa"].get("approved"):
+                raise ValueError("Continuity check did not approve the hint")
+            checked = validated["shots"]
+            if len(checked) != len(proposed):
+                raise ValueError("Correction changed the shot list")
+            protected_fields = ("shot_number", "scene_number", "duration_sec", "description", "characters_in_shot", "has_dialogue", "dialogue_text")
+            for original, revised in zip(proposed, checked):
+                fields = protected_fields if original["shot_number"] == shot_number else (*protected_fields, *visual_fields)
+                for key in fields:
+                    if revised.get(key) != original.get(key):
+                        raise ValueError("Correction changed protected shot fields")
+            target = next(shot for shot in checked if shot["shot_number"] == shot_number)
+            if any(not isinstance(target.get(key), str) or not target[key].strip() for key in visual_fields):
+                raise ValueError("Correction returned invalid visual fields")
+            for shot in updated_shots:
+                if shot["shot_number"] == shot_number:
+                    shot.update({key: target[key] for key in visual_fields})
+            updated_result.update(qa=validated["qa"], assembly=validated["assembly"])
+        except Exception as error:
+            # Do not expose provider errors containing raw briefs or leave a partial change stored.
+            raise HTTPException(status_code=502, detail="Style hint could not be applied safely; shot unchanged. Retry or clear the hints.") from error
     updated_result["shots"] = updated_shots
     job_service.set_result(db, job_id, updated_result)
     job_service.append_shot_status_event(

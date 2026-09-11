@@ -2,6 +2,7 @@ import { AlertTriangle, Check, Clapperboard, Clock3, ImageIcon, Loader2, Pencil,
 import { useEffect, useRef, useState } from "react";
 
 import { approveJob, regenerateShot, reviseJob, streamJob } from "../api/client";
+import { CAMERA_VOCABULARY } from "../utils/cameraVocabulary";
 
 const COLORS = {
   bg: "#13141F",
@@ -90,6 +91,7 @@ export default function JobView({ jobId, onReset }) {
   const [editValues, setEditValues] = useState({ description: "", dialogue_text: "" });
   const [savingShot, setSavingShot] = useState(null);
   const [regeneratingShot, setRegeneratingShot] = useState(null);
+  const [shotHints, setShotHints] = useState({});
   const [shotStatuses, setShotStatuses] = useState({});
   const [generationStage, setGenerationStage] = useState("shots");
   const stitchingTimerRef = useRef(null);
@@ -200,7 +202,7 @@ export default function JobView({ jobId, onReset }) {
     setRegeneratingShot(shotNumber);
     setError("");
     try {
-      const job = await regenerateShot(jobId, shotNumber);
+      const job = await regenerateShot(jobId, shotNumber, shotHints[shotNumber]);
       clearTimeout(stitchingTimerRef.current);
       stitchingTimerRef.current = null;
       setGenerationStage("shots");
@@ -248,6 +250,20 @@ export default function JobView({ jobId, onReset }) {
           </div>
           <button type="button" onClick={onReset} className="icon-button" aria-label="Start over"><X size={17} /></button>
         </div>
+
+        <details className="px-4 py-3 text-sm shrink-0">
+          <summary className="cursor-pointer underline" style={{ color: COLORS.marigold }}>Camera guide</summary>
+          <div className="mt-3 flex flex-col gap-4 max-h-[30vh] overflow-y-auto">
+            {CAMERA_VOCABULARY.map(({ key, label, options }) => (
+              <section key={key} aria-label={`${label} vocabulary`}>
+                <h3 className="font-semibold mb-2">{label}</h3>
+                <dl className="flex flex-col gap-2">
+                  {options.map(([value, description]) => <div key={value}><dt className="font-semibold">{value}</dt><dd style={{ color: COLORS.muted }}>{description}</dd></div>)}
+                </dl>
+              </section>
+            ))}
+          </div>
+        </details>
 
         {!done && !errored && (
           <div className="panel-waiting">
@@ -308,6 +324,21 @@ export default function JobView({ jobId, onReset }) {
                       <span><Clapperboard size={12} /> {shot.camera_angle} · {shot.camera_movement}</span>
                       <span><Clock3 size={12} /> {shot.duration_sec}s · {shot.lighting}</span>
                     </div>
+
+                    <details className="my-3 text-xs">
+                      <summary className="cursor-pointer" style={{ color: COLORS.marigold }}>Regenerate hints (optional)</summary>
+                      <p className="my-2" style={{ color: COLORS.muted }}>The Director may adapt or decline a hint to preserve continuity.</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {CAMERA_VOCABULARY.map(({ key, label, options }) => (
+                          <label key={key} className="flex flex-col gap-1">{label}
+                            <select aria-label={`${label} hint for shot ${shot.shot_number}`} value={shotHints[shot.shot_number]?.[key] || ""} disabled={regeneratingShot === shot.shot_number} onChange={(event) => setShotHints((current) => ({ ...current, [shot.shot_number]: { ...current[shot.shot_number], [key]: event.target.value } }))} className="rounded-md p-2 min-w-0" style={{ background: COLORS.field, color: COLORS.text, border: `1px solid ${COLORS.border}` }}>
+                              <option value="">No hint</option>
+                              {options.map(([value, description]) => <option key={value} value={value} title={description}>{value}</option>)}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                    </details>
 
                     <div className="shot-card-actions">
                       {isEditing ? (
