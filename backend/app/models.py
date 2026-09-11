@@ -50,6 +50,7 @@ class Character(Base):
     name = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     image_url = Column(Text, nullable=False)
+    reference_sheet_url = Column(Text, nullable=True)
     image_source = Column(String, nullable=False)  # generated | uploaded
     voice_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default="draft")  # draft | approved

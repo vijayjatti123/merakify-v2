@@ -41,6 +41,10 @@ ASSET_COLUMN_DDL = {
     "label": "VARCHAR",
 }
 
+CHARACTER_COLUMN_DDL = {
+    "reference_sheet_url": "TEXT",
+}
+
 
 def ensure_job_intake_columns() -> None:
     """Add intake columns for existing SQLite/Postgres deployments.
@@ -69,6 +73,18 @@ def ensure_asset_tagging_columns() -> None:
         for name, definition in ASSET_COLUMN_DDL.items():
             if name not in existing:
                 connection.exec_driver_sql(f"ALTER TABLE assets ADD COLUMN {name} {definition}")
+
+
+def ensure_character_reference_sheet_column() -> None:
+    """Add the nullable reference-sheet URL to existing character vaults."""
+    inspector = inspect(engine)
+    if "characters" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("characters")}
+    with engine.begin() as connection:
+        for name, definition in CHARACTER_COLUMN_DDL.items():
+            if name not in existing:
+                connection.exec_driver_sql(f"ALTER TABLE characters ADD COLUMN {name} {definition}")
 
 
 def get_db():

@@ -125,9 +125,39 @@ def approve_character(character_id: str, db: Session = Depends(get_db)):
     if not character:
         raise HTTPException(status_code=404, detail="character not found")
     try:
-        return character_service.approve_character(db, character)
+        approved = character_service.approve_character(db, character)
     except character_service.CharacterStateError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+    uploaded_key = None
+    try:
+        sheet = character_image_service.generate_character_reference_sheet(
+            approved.name,
+            approved.description,
+            approved.image_url,
+        )
+        uploaded = storage_service.upload_bytes(
+            f"characters/{approved.id}/reference-sheet-{uuid.uuid4()}"
+            f"{_generated_image_extension(sheet.content_type)}",
+            sheet.data,
+            content_type=sheet.content_type,
+            cache_control="private, max-age=3600",
+        )
+        uploaded_key = uploaded["key"]
+        approved = character_service.save_reference_sheet(db, approved, uploaded["url"])
+    except Exception as error:
+        if uploaded_key:
+            try:
+                storage_service.delete_object(uploaded_key)
+            except Exception:
+                pass
+        db.rollback()
+        db.refresh(approved)
+        return CharacterOut.model_validate(approved).model_copy(
+            update={"reference_sheet_error": str(error) or error.__class__.__name__}
+        )
+
+    return approved
 
 
 @router.get("", response_model=list[CharacterOut])

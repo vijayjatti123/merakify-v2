@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.routes.character_routes import router as characters_router
-from app.services.character_image_service import GeneratedCharacterImage
+from app.services.character_image_service import CharacterImageGenerationError, GeneratedCharacterImage
 
 
 class CharacterVaultTests(unittest.TestCase):
@@ -78,13 +78,17 @@ class CharacterVaultTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "draft")
 
     @patch("app.routes.character_routes.storage_service.upload_bytes")
+    @patch("app.routes.character_routes.character_image_service.generate_character_reference_sheet")
     @patch("app.routes.character_routes.character_image_service.generate_character_image")
-    def test_voice_approval_and_approved_only_listing(self, generate_image, upload_bytes) -> None:
+    def test_voice_approval_and_approved_only_listing(
+        self, generate_image, generate_reference_sheet, upload_bytes
+    ) -> None:
         generate_image.return_value = GeneratedCharacterImage(b"image", "image/png")
-        upload_bytes.return_value = {
-            "key": "characters/meera.png",
-            "url": "https://example.test/meera.png",
-        }
+        generate_reference_sheet.return_value = GeneratedCharacterImage(b"sheet", "image/webp")
+        upload_bytes.side_effect = [
+            {"key": "characters/meera.png", "url": "https://example.test/meera.png"},
+            {"key": "characters/meera-sheet.webp", "url": "https://example.test/meera-sheet.webp"},
+        ]
         draft = self.client.post(
             "/api/characters/generate",
             json={"name": "Meera", "description": "An architect in a linen jacket"},
@@ -103,10 +107,89 @@ class CharacterVaultTests(unittest.TestCase):
         self.assertEqual(approved.status_code, 200)
         self.assertEqual(approved.json()["status"], "approved")
         self.assertEqual(approved.json()["voice_id"], "priya")
+        self.assertEqual(approved.json()["image_url"], "https://example.test/meera.png")
+        self.assertEqual(
+            approved.json()["reference_sheet_url"], "https://example.test/meera-sheet.webp"
+        )
+        self.assertIsNone(approved.json()["reference_sheet_error"])
+        generate_reference_sheet.assert_called_once_with(
+            "Meera",
+            "An architect in a linen jacket",
+            "https://example.test/meera.png",
+        )
 
         listing = self.client.get("/api/characters")
         self.assertEqual(listing.status_code, 200)
         self.assertEqual([character["id"] for character in listing.json()], [draft["id"]])
+
+    @patch("app.routes.character_routes.storage_service.upload_bytes")
+    @patch("app.routes.character_routes.character_image_service.generate_character_reference_sheet")
+    @patch("app.routes.character_routes.storage_service.upload_file")
+    def test_uploaded_character_uses_its_uploaded_image_for_reference_sheet(
+        self, upload_file, generate_reference_sheet, upload_bytes
+    ) -> None:
+        upload_file.return_value = {
+            "key": "characters/upload/reference.png",
+            "url": "https://example.test/uploaded.png",
+        }
+        generate_reference_sheet.return_value = GeneratedCharacterImage(b"sheet", "image/png")
+        upload_bytes.return_value = {
+            "key": "characters/arjun/reference-sheet.png",
+            "url": "https://example.test/arjun-sheet.png",
+        }
+        draft = self.client.post(
+            "/api/characters/upload",
+            data={"name": "Arjun", "description": "A chef in a white apron"},
+            files={"file": ("reference.png", b"image", "image/png")},
+        ).json()
+        self.client.post(f"/api/characters/{draft['id']}/voice", json={"voice_id": "rahul"})
+
+        approved = self.client.post(f"/api/characters/{draft['id']}/approve")
+
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["status"], "approved")
+        self.assertEqual(approved.json()["image_source"], "uploaded")
+        self.assertEqual(approved.json()["image_url"], "https://example.test/uploaded.png")
+        self.assertEqual(
+            approved.json()["reference_sheet_url"], "https://example.test/arjun-sheet.png"
+        )
+        generate_reference_sheet.assert_called_once_with(
+            "Arjun",
+            "A chef in a white apron",
+            "https://example.test/uploaded.png",
+        )
+
+    @patch("app.routes.character_routes.character_image_service.generate_character_reference_sheet")
+    @patch("app.routes.character_routes.storage_service.upload_file")
+    def test_reference_sheet_failure_does_not_roll_back_approval(
+        self, upload_file, generate_reference_sheet
+    ) -> None:
+        upload_file.return_value = {
+            "key": "characters/upload/broken.png",
+            "url": "https://example.test/broken.png",
+        }
+        generate_reference_sheet.side_effect = CharacterImageGenerationError(
+            "Google returned no reference-sheet image"
+        )
+        draft = self.client.post(
+            "/api/characters/upload",
+            data={"name": "Leela", "description": "A detective in a charcoal coat"},
+            files={"file": ("broken.png", b"not-an-image", "image/png")},
+        ).json()
+        self.client.post(f"/api/characters/{draft['id']}/voice", json={"voice_id": "neha"})
+
+        approved = self.client.post(f"/api/characters/{draft['id']}/approve")
+
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["status"], "approved")
+        self.assertIsNone(approved.json()["reference_sheet_url"])
+        self.assertEqual(
+            approved.json()["reference_sheet_error"],
+            "Google returned no reference-sheet image",
+        )
+        persisted = self.client.get("/api/characters").json()[0]
+        self.assertEqual(persisted["status"], "approved")
+        self.assertIsNone(persisted["reference_sheet_url"])
 
 
 if __name__ == "__main__":

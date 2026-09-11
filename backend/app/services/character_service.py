@@ -116,6 +116,13 @@ def approve_character(db: Session, character: Character) -> Character:
     return character
 
 
+def save_reference_sheet(db: Session, character: Character, reference_sheet_url: str) -> Character:
+    character.reference_sheet_url = reference_sheet_url
+    db.commit()
+    db.refresh(character)
+    return character
+
+
 def list_approved_characters(db: Session) -> list[Character]:
     return (
         db.query(Character)

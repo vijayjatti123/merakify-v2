@@ -21,3 +21,14 @@ test("approval stays disabled until the current voice selection is saved", () =>
   assert.match(source, /disabled=\{busy \|\| !voiceSelectionSaved\}/);
   assert.match(source, /Save your voice selection before approving\./);
 });
+
+test("review and approved cards share the original/reference-sheet presentation", () => {
+  const { source } = loadVaultSourceAndGuard();
+
+  assert.match(source, /function CharacterImages\(\{ character, compact = false \}\)/);
+  assert.match(source, /character\.reference_sheet_url/);
+  assert.match(source, /Reference sheet will be generated on approval\./);
+  assert.match(source, /The reference sheet couldn't be generated\./);
+  assert.match(source, /<CharacterImages character=\{draft\} compact \/>/);
+  assert.match(source, /<CharacterImages character=\{character\} \/>/);
+});

@@ -150,6 +150,8 @@ class CharacterOut(BaseModel):
     name: str
     description: str
     image_url: str
+    reference_sheet_url: Optional[str] = None
+    reference_sheet_error: Optional[str] = None
     image_source: Literal["generated", "uploaded"]
     voice_id: Optional[str] = None
     status: Literal["draft", "approved"]

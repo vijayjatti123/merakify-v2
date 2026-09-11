@@ -226,6 +226,53 @@ input {
   background: #252738;
 }
 
+.vault-character-images {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.vault-character-images figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.vault-character-images img {
+  display: block;
+  width: 100%;
+  height: 170px;
+  border-radius: 0.65rem;
+  object-fit: cover;
+  background: #252738;
+}
+
+.vault-character-images figcaption {
+  margin-top: 0.3rem;
+  color: #aaa8bb;
+  font-size: 0.68rem;
+}
+
+.vault-character-images.is-compact img {
+  height: 96px;
+}
+
+.vault-reference-sheet-empty {
+  display: grid;
+  min-height: 170px;
+  place-items: center;
+  padding: 0.7rem;
+  border: 1px dashed #45485f;
+  border-radius: 0.65rem;
+  color: #aaa8bb;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.vault-character-images.is-compact .vault-reference-sheet-empty {
+  min-height: 96px;
+}
+
 .vault-character-card > div {
   padding: 0.7rem;
 }

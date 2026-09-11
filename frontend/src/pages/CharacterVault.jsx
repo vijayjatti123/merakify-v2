@@ -24,6 +24,29 @@ export function isVoiceSelectionSaved(voiceId, savedVoiceId) {
   return Boolean(voiceId && savedVoiceId && voiceId === savedVoiceId);
 }
 
+function CharacterImages({ character, compact = false }) {
+  return (
+    <div className={`vault-character-images${compact ? " is-compact" : ""}`}>
+      <figure>
+        <img src={character.image_url} alt={`${character.name} approved character`} />
+        <figcaption>Character</figcaption>
+      </figure>
+      {character.reference_sheet_url ? (
+        <figure>
+          <img src={character.reference_sheet_url} alt={`${character.name} reference sheet`} />
+          <figcaption>Reference sheet</figcaption>
+        </figure>
+      ) : (
+        <div className="vault-reference-sheet-empty">
+          {character.status === "approved"
+            ? "The reference sheet couldn't be generated."
+            : "Reference sheet will be generated on approval."}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CharacterVault({ onBack }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -182,18 +205,12 @@ export default function CharacterVault({ onBack }) {
                     style={{ padding: "0.75rem", border: "1px solid #34374c", borderRadius: "0.65rem", background: "#181a27" }}
                   >
                     <p className="eyebrow" style={{ marginBottom: "0.55rem" }}>Review before approval</p>
-                    <div style={{ display: "grid", gridTemplateColumns: "64px minmax(0, 1fr)", gap: "0.7rem", alignItems: "center" }}>
-                      <img
-                        src={draft.image_url}
-                        alt={`${draft.name} character review`}
-                        style={{ width: "64px", height: "80px", borderRadius: "0.45rem", objectFit: "cover", background: "#252738" }}
-                      />
-                      <div>
-                        <strong style={{ display: "block", color: "#f3f0e8" }}>{draft.name}</strong>
-                        <span style={{ color: "#aaa8bb", fontSize: "0.72rem" }}>
-                          Selected voice: {voiceLabel(draft.voice_id)}
-                        </span>
-                      </div>
+                    <CharacterImages character={draft} compact />
+                    <div style={{ marginTop: "0.65rem" }}>
+                      <strong style={{ display: "block", color: "#f3f0e8" }}>{draft.name}</strong>
+                      <span style={{ color: "#aaa8bb", fontSize: "0.72rem" }}>
+                        Selected voice: {voiceLabel(draft.voice_id)}
+                      </span>
                     </div>
                   </section>
                 )}
@@ -219,7 +236,7 @@ export default function CharacterVault({ onBack }) {
             <div className="vault-grid">
               {approvedCharacters.map((character) => (
                 <article key={character.id} className="vault-character-card">
-                  <img src={character.image_url} alt={`${character.name} character reference`} />
+                  <CharacterImages character={character} />
                   <div>
                     <h3>{character.name}</h3>
                     <p>{character.description}</p>
