@@ -5,6 +5,7 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.agents import prompts
+from app.agents.dialogue_integrity import protected_dialogue, restore_protected, screen_issues, warn_dialogue_loss
 from app.agents.llm_client import call_agent
 from app.services import asset_service, character_service, job_service, storage_service, voice_generation_service
 
@@ -300,6 +301,7 @@ def validate_and_correct(
     target_duration_sec: float,
     *,
     narrator_voice_ref=None,
+    source_script_text: str | None = None,
     emit: EventFn | None = None,
 ) -> dict:
     """Run the pipeline's single QA and duration self-correction sequence.
@@ -322,6 +324,13 @@ def validate_and_correct(
         max_tokens=3072,
     )
 
+    protected = protected_dialogue(current_shots, source_script_text)
+    issues, verified, rejected, limitations = screen_issues(current_shots, qa.get("issues", []), protected, notify)
+    qa = {**qa, "issues": issues}
+    if rejected or limitations:
+        qa["approved"] = not issues and not limitations
+    loss_warnings = []
+
     if not qa.get("approved") and qa.get("issues"):
         notify("qa", f"Found {len(qa['issues'])} issue(s) — sending back to Cinematography, no human needed.")
         for issue in qa["issues"]:
@@ -330,10 +339,16 @@ def validate_and_correct(
         notify("cinematography", "Revising flagged shots per QA feedback...")
         cine = call_agent(
             prompts.CINEMATOGRAPHY_FIX,
-            f"Current shots: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}",
+            f"Current shots: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}"
+            + (f"\nProtected user-scripted dialogue shot numbers: {json.dumps(list(protected))}. "
+               "Keep these shots present and preserve their dialogue_text, has_dialogue and scene_number exactly. "
+               "Only apply compatible visual corrections." if protected else ""),
             max_tokens=4096,
         )
-        current_shots = _attach_voice_refs(cine["shots"], characters, narrator_voice_ref, emit=emit)
+        loss_warnings = warn_dialogue_loss(current_shots, cine["shots"], verified, notify)
+        revised, violations = restore_protected(current_shots, cine["shots"], protected, notify)
+        limitations.extend(violations)
+        current_shots = _attach_voice_refs(revised, characters, narrator_voice_ref, emit=emit)
         notify("cinematography", "Revision complete.")
 
         notify("qa", "Re-checking the revised shot list...")
@@ -342,9 +357,28 @@ def validate_and_correct(
             f"Shots: {json.dumps(current_shots)}\nCharacters: {json.dumps(characters)}",
             max_tokens=3072,
         )
+        remaining, _, rejected_again, blocked_again = screen_issues(current_shots, qa.get("issues", []), protected, notify)
+        rejected.extend(rejected_again)
+        limitations.extend(blocked_again)
+        qa = {**qa, "issues": remaining}
+        if rejected_again or blocked_again:
+            qa["approved"] = not remaining and not limitations
+        if limitations:
+            qa["approved"] = False
         notify("qa", "Approved — continuity holds." if qa.get("approved") else "Residual notes remain; proceeding with best version.")
     else:
-        notify("qa", "Approved on first pass — no continuity issues found.")
+        notify("qa", "User-scripted dialogue protected; unresolved QA limitation remains." if limitations
+               else "No actionable QA issues remain after deterministic validation." if rejected
+               else "Approved on first pass — no continuity issues found.")
+
+    if rejected:
+        qa["rejected_claims"] = rejected
+    if limitations:
+        qa["approved"] = False
+        qa["issues"] = [*qa["issues"], *limitations]
+        qa["dialogue_protection_limitations"] = limitations
+    if loss_warnings:
+        qa["dialogue_loss_warnings"] = loss_warnings
 
     # Shot assembly and one autonomous duration-correction pass.
     notify("assembly", "Sequencing shots and choosing transitions...")
@@ -495,6 +529,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             continuity["characters"],
             fmt["duration_target_sec"],
             narrator_voice_ref=continuity.get("narrator_voice_ref"),
+            source_script_text=source_script,
             emit=emit,
         )
         cine["shots"] = _attach_voice_refs(

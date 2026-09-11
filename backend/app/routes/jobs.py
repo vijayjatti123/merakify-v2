@@ -183,6 +183,8 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
         continuity["characters"],
         target_duration_sec,
         narrator_voice_ref=continuity.get("narrator_voice_ref"),
+        source_script_text=result.get("source_script_text"),
+        emit=lambda key, note: job_service.append_event(db, job_id, key, note),
     )
     validated_shots = _attach_voice_refs(
         validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")
