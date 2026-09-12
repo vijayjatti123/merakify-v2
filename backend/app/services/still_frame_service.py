@@ -182,11 +182,25 @@ def _words(text):
     return re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", text).casefold())
 
 
+def _entity_anchor(name):
+    # A bounded English noun-phrase heuristic, not a general noun parser:
+    # 'Strainer with tea leaves' anchors on strainer, never on its contents.
+    # Shared colors/materials and qualifier words cannot trigger loose matches.
+    # Synonyms, unusual word order and other languages may still be missed.
+    words = _words(name)
+    for index, word in enumerate(words):
+        if word in {"with", "without", "of", "for", "in", "on", "at"}:
+            words = words[:index]
+            break
+    return words[-1] if words else None
+
+
 def match_entities(result, shot, visual):
     """Conservative lexical matching, not semantic coreference. Synonyms can be missed.
 
-    Unique final nouns cover 'Plain Cup' -> 'plain ceramic cup'; ambiguous nouns
-    are never guessed. QA must establish actual visibility before seeding.
+    Unique main-object anchors cover 'Plain Cup' -> 'plain ceramic cup' and
+    'Strainer with tea leaves' -> 'metal strainer'. Ambiguous anchors are never
+    guessed. QA must establish actual visibility before seeding.
     """
     catalog = {}
     for kind in ("characters", "props", "locations"):
@@ -202,9 +216,9 @@ def match_entities(result, shot, visual):
         if not words:
             continue
         exact = " " + " ".join(words) + " " in " " + " ".join(text) + " "
-        head = words[-1]
-        unique = sum(_words(e["name"])[-1:] == [head] for k, e in catalog.values() if k == kind) == 1
-        noun = head in text or (head == "counter" and "countertop" in text)
+        head = _entity_anchor(entity["name"])
+        unique = sum(_entity_anchor(e["name"]) == head for k, e in catalog.values() if k == kind) == 1
+        noun = head is not None and (head in text or (head == "counter" and "countertop" in text))
         if (kind == "characters" and " ".join(words) in visible) or (kind != "characters" and (exact or unique and noun)):
             matches[key] = entity["name"]
     return matches
