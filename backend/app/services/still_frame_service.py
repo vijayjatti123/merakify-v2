@@ -3,6 +3,8 @@ import base64
 import hashlib
 import io
 import json
+import re
+import unicodedata
 import uuid
 from urllib.error import HTTPError
 from urllib.parse import quote, unquote, urlsplit
@@ -53,6 +55,11 @@ def invalidate_changed_stills(result):
             shot["still_frame_url"] = None
             shot.pop("still_frame_key", None)
             shot["still_frame_warning"] = "Still preview is out of date after shot edits; awaiting final shot planning."
+    shots = {s.get("shot_number"): s for s in result.get("shots", [])}
+    for entity, reference in list(result.get("entity_references", {}).items()):
+        source = shots.get(reference.get("shot_number"), {})
+        if not source.get("still_frame_key") or reference.get("source_hash") != shot_fingerprint(source):
+            result["entity_references"].pop(entity)
 
 
 def fresh_reference(url):
@@ -131,7 +138,7 @@ def generate_still(visual, references, aspect_ratio, feedback=""):
     raise StillFrameError("Google returned no usable still image")
 
 
-def check_still(visual, references, image):
+def check_still(visual, references, image, *, emit=None, entities=None):
     parts = [{"text": (
         "Check this single opening-frame preview against the compiled visual description and any "
         "locked character references. Reject clear identity/outfit changes, wrong subject or framing, "
@@ -140,12 +147,27 @@ def check_still(visual, references, image):
         "details absent from the description. Return JSON only: {\"approved\": boolean, \"reason\": string}.\n"
         + visual
     )}]
+    if entities:
+        parts.append({"text": "Also return visible_entities: an array of the exact entity IDs below that are "
+                      "visibly identifiable in the candidate. Omit offscreen, merely mentioned, or too-cropped "
+                      "entities. For job references compare ONLY the named entity's identity/design/material; "
+                      "allow the new framing, pose, action and lighting. Reject changed faces, garments, prop "
+                      "designs or location surfaces. Entity catalog: " + json.dumps(entities)})
     for name, reference in references:
         parts.extend([{"text": f"Identity reference: {name}"}, _inline(reference)])
     parts.extend([{"text": "Candidate opening frame to check:"}, _inline(image)])
-    response = _google(parts)
-    content = "".join(p.get("text", "") for c in response.get("candidates", [])
-                      for p in c.get("content", {}).get("parts", []) if not p.get("thought"))
+    for attempt in range(2):
+        response = _google(parts)
+        output = [p for c in response.get("candidates", [])
+                  for p in c.get("content", {}).get("parts", []) if not p.get("thought")]
+        content = "".join(p.get("text", "") for p in output)
+        if content.strip() or not any(p.get("inlineData", {}).get("mimeType", "").startswith("image/") for p in output):
+            break
+        if emit:
+            emit("still_frame", "WARNING: Still QA returned an image instead of JSON text. "
+                 + ("Retrying the identical QA request once." if attempt == 0 else "Retry exhausted; using text fallback."))
+        if attempt == 1:
+            raise StillFrameError("Still QA returned image instead of JSON text twice")
     verdict = json.loads(content.strip().removeprefix("```json").removesuffix("```").strip())
     # Google can return a null reason for approval. No correction text is needed
     # then; a rejection still requires a real explanation for the retry.
@@ -156,10 +178,46 @@ def check_still(visual, references, image):
     return verdict
 
 
+def _words(text):
+    return re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", text).casefold())
+
+
+def match_entities(result, shot, visual):
+    """Conservative lexical matching, not semantic coreference. Synonyms can be missed.
+
+    Unique final nouns cover 'Plain Cup' -> 'plain ceramic cup'; ambiguous nouns
+    are never guessed. QA must establish actual visibility before seeding.
+    """
+    catalog = {}
+    for kind in ("characters", "props", "locations"):
+        for entity in result.get("continuity", {}).get(kind, []):
+            if not isinstance(entity, dict) or not entity.get("name") or entity.get("character_id"):
+                continue
+            catalog[kind + ":" + " ".join(_words(entity["name"]))] = (kind, entity)
+    text = _words(visual)
+    visible = {" ".join(_words(n)) for n in shot.get("characters_in_shot", [])}
+    matches = {}
+    for key, (kind, entity) in catalog.items():
+        words = _words(entity["name"])
+        if not words:
+            continue
+        exact = " " + " ".join(words) + " " in " " + " ".join(text) + " "
+        head = words[-1]
+        unique = sum(_words(e["name"])[-1:] == [head] for k, e in catalog.values() if k == kind) == 1
+        noun = head in text or (head == "counter" and "countertop" in text)
+        if (kind == "characters" and " ".join(words) in visible) or (kind != "characters" and (exact or unique and noun)):
+            matches[key] = entity["name"]
+    return matches
+
+
 def generate_still_frames(result, *, job_id, emit):
     """A failed shot remains usable as text; never convert image failures to job errors."""
     characters = {c["name"].strip().casefold(): c for c in result.get("continuity", {}).get("characters", [])}
-    for shot in result.get("shots", []):
+    # References live only in this job's result JSON, pointing to its own stills.
+    # Rebuild on each full still pass so revised plans cannot inherit stale anchors.
+    reference_map = result["entity_references"] = {}
+    reference_bytes = {}
+    for shot in sorted(result.get("shots", []), key=lambda s: s["shot_number"]):
         shot["still_frame_url"] = None
         shot.pop("still_frame_key", None)
         shot.pop("still_frame_source_hash", None)
@@ -169,6 +227,7 @@ def generate_still_frames(result, *, job_id, emit):
         number = shot["shot_number"]
         try:
             visual = visual_description(shot["compiled_prompt"])
+            entities = match_entities(result, shot, visual)
             references = []
             for name in shot.get("characters_in_shot", []):
                 character = characters.get(name.strip().casefold(), {})
@@ -176,6 +235,16 @@ def generate_still_frames(result, *, job_id, emit):
                     if not character.get("image_url"):
                         raise StillFrameError("Locked character has no reference image")
                     references.append((name, _download_reference_image(fresh_reference(character["image_url"]))))
+            for entity_id in entities:
+                if entity_id in reference_map:
+                    references.append(("Job entity " + entity_id + "; preserve only this entity, not the old shot layout",
+                                       reference_bytes[entity_id]))
+                    emit("still_frame", f"Shot {number}: conditioning {entity_id} from job reference shot {reference_map[entity_id]['shot_number']}.")
+            if entities:
+                visual += ("\nJob-scoped consistency: reference frames lock ONLY each labeled entity's face, hair, "
+                           "garment construction, object geometry/material/color or location surfaces. Keep those "
+                           "facts identical; follow THIS shot's camera, pose and action. Do not copy the old "
+                           "composition or add other subjects from the reference. Matched entities: " + json.dumps(entities))
             emit("still_frame", f"Shot {number}: generating opening still with {len(references)} locked image reference(s).")
             feedback = ""
             aspect_ratio = result.get("aspect_ratio") or "16:9"
@@ -192,7 +261,7 @@ def generate_still_frames(result, *, job_id, emit):
                     continue
                 emit("still_frame", f"Shot {number}: decoded {dimensions['width']}x{dimensions['height']} "
                      f"matches {aspect_ratio} within 2% ratio tolerance.")
-                verdict = check_still(visual, references, image)
+                verdict = check_still(visual, references, image, emit=emit, entities=entities)
                 if verdict["approved"]:
                     break
                 feedback = verdict["reason"]
@@ -205,6 +274,18 @@ def generate_still_frames(result, *, job_id, emit):
             stored = storage_service.upload_bytes(key=key, body=image.data, content_type=image.content_type)
             shot.update(still_frame_url=stored["url"], still_frame_key=stored["key"],
                         still_frame_source_hash=shot_fingerprint(shot))
+            observed = verdict.get("visible_entities", [])
+            if not isinstance(observed, list):
+                observed = []
+            for entity_id in entities:
+                if entity_id not in reference_map and entity_id in observed:
+                    reference_map[entity_id] = {"name": entities[entity_id], "url": stored["url"],
+                                                "key": stored["key"], "shot_number": number,
+                                                "source_hash": shot_fingerprint(shot)}
+                    reference_bytes[entity_id] = image
+                    emit("still_frame", f"Shot {number}: established job-only reference for {entity_id}.")
+                elif entity_id not in reference_map:
+                    emit("still_frame", f"WARNING: Shot {number}: QA did not confirm visibility of {entity_id}; no job reference established.")
             emit("still_frame", f"Shot {number}: opening still passed visual check and was stored.")
         except Exception as error:
             detail = str(error) if isinstance(error, StillFrameError) else type(error).__name__
