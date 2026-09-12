@@ -70,6 +70,8 @@ def set_result(db: Session, job_id: str, result: dict) -> None:
     job = get_job(db, job_id)
     if not job:
         return
+    from app.services.still_frame_service import invalidate_changed_stills
+    invalidate_changed_stills(result)
     job.result_json = json.dumps(result)
     db.commit()
 
@@ -121,4 +123,17 @@ def get_events_since(db: Session, job_id: str, after_id: Optional[str] = None) -
 
 
 def job_result(job: Job) -> Optional[Any]:
-    return json.loads(job.result_json) if job.result_json else None
+    result = json.loads(job.result_json) if job.result_json else None
+    if result:
+        from app.services import storage_service
+        from app.services.still_frame_service import invalidate_changed_stills
+        invalidate_changed_stills(result)
+        for shot in result.get("shots", []):
+            if shot.get("still_frame_key"):
+                try:
+                    shot["still_frame_url"] = storage_service.asset_url(shot["still_frame_key"])
+                except Exception:
+                    # Reading a job must remain possible during storage outages.
+                    shot["still_frame_url"] = None
+                    shot["still_frame_warning"] = "Still frame temporarily unavailable: could not refresh image access."
+    return result

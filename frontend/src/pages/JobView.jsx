@@ -338,11 +338,18 @@ export default function JobView({ jobId, onReset }) {
                       <span>Characters present</span>
                       <p>{shot.characters_in_shot?.length ? shot.characters_in_shot.join(", ") : "None"}</p>
                     </div>
-                    <div className="reference-image-slot" aria-label={`Reference image for shot ${shot.shot_number}`}>
-                      <ImageIcon size={18} />
-                      <span>Reference image</span>
-                      <small>Not attached</small>
-                    </div>
+                    {shot.still_frame_url ? (
+                      <figure className="my-3" aria-label={`Opening still for shot ${shot.shot_number}`}>
+                        <img src={shot.still_frame_url} alt={`Shot ${shot.shot_number} opening frame — ${shot.description}`} className="w-full rounded-md" loading="lazy" />
+                        <figcaption className="mt-1 text-xs" style={{ color: COLORS.muted }}>Opening still preview</figcaption>
+                      </figure>
+                    ) : (
+                      <div className="reference-image-slot" aria-label={`Still preview for shot ${shot.shot_number}`}>
+                        <ImageIcon size={18} /><span>Opening still</span>
+                        <small>{shot.still_frame_warning ? "Unavailable" : "Available after final shot planning"}</small>
+                      </div>
+                    )}
+                    {shot.still_frame_warning && <p className="audio-warning">{shot.still_frame_warning}</p>}
                     <div className="shot-technical">
                       <span><Clapperboard size={12} /> {shot.camera_angle} · {shot.camera_movement}</span>
                       <span><Clock3 size={12} /> {shot.duration_sec}s · {shot.lighting}</span>

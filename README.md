@@ -105,6 +105,25 @@ part of the skeleton:
   Redis pub/sub subscription — the event shape sent to the frontend doesn't
   need to change.
 
+## Phase 3 — mandatory still-image review
+
+Module O advances the real asset generation milestone with per-shot opening
+stills after the Shot Prompt Compiler. Silent jobs generate stills after
+Assembly; dialogue jobs wait for audio approval and final Assembly. No video
+generation is performed. Decoded aspect ratios must match the requested ratio
+within 2% to allow provider resolution rounding. A mismatch emits a trace
+warning and uses the existing one-retry budget; exhausted retries leave a null
+still URL without blocking the job. Dimension checks do not verify camera
+angles, subject cropping or composition.
+
+Framing requests are not guaranteed to be honored. Automated visual QA can miss or accept discrepancies in shot scale, subject placement and cropping. A passed QA result does not establish exact framing compliance.
+
+Before trusting still generation broadly, mandatory Phase 3 review must inspect
+real stills across multiple categories against their compiled prompts and
+reference images: framing, cropping, subject placement, identity, visual style
+and opening-action state. Compiler text approval and still-image QA approval
+are separate checks; neither replaces reviewing the actual images.
+
 ## Why it's structured this way
 
 - **One route file, one orchestrator file.** The old codebase had four

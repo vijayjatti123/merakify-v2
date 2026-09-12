@@ -9,6 +9,7 @@ from app.agents.dialogue_integrity import protected_dialogue, restore_protected,
 from app.agents.llm_client import call_agent
 from app.services import asset_service, character_service, job_service, storage_service, voice_generation_service
 from app.services.shot_prompt_compiler import compile_shot_prompts
+from app.services.still_frame_service import generate_still_frames
 
 EventFn = Callable[[str, str], None]
 
@@ -483,6 +484,7 @@ def finalize_audio_assembly(db, job_id):
             try:
                 result["ai_model"] = result.get("ai_model") or job.ai_model
                 result["shots"] = compile_shot_prompts(result, brief=job.brief, emit=emit, call_agent=call_agent)
+                result["shots"] = generate_still_frames(result, job_id=job_id, emit=emit)
             except Exception as error:
                 for shot in result["shots"]:
                     shot.pop("compiled_prompt", None)  # Never retain stale text after a failed recompile.
@@ -665,6 +667,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
         # finalize_audio_assembly after approval, never from provisional boundaries.
         if not assembly.get("provisional", False):
             result["shots"] = compile_shot_prompts(result, brief=brief, emit=emit, call_agent=call_agent)
+            result["shots"] = generate_still_frames(result, job_id=job_id, emit=emit)
         job_service.set_result(db, job_id, result)
         job_service.set_status(db, job_id, "done")
 
