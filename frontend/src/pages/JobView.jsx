@@ -355,6 +355,13 @@ export default function JobView({ jobId, onReset }) {
                       <span><Clock3 size={12} /> {shot.duration_sec}s · {shot.lighting}</span>
                     </div>
 
+                    {shot.compiled_prompt?.trim() && (
+                      <details className="my-3 text-xs">
+                        <summary className="cursor-pointer" style={{ color: COLORS.muted }}>View technical prompt</summary>
+                        <p className="mt-2 whitespace-pre-wrap break-words leading-relaxed" style={{ overflowWrap: "anywhere" }}>{shot.compiled_prompt}</p>
+                      </details>
+                    )}
+
                     <details className="my-3 text-xs">
                       <summary className="cursor-pointer" style={{ color: COLORS.marigold }}>Regenerate hints (optional)</summary>
                       <p className="my-2" style={{ color: COLORS.muted }}>The Director may adapt or decline a hint to preserve continuity.</p>
