@@ -408,8 +408,17 @@ opening of the right around a shared visual element grounded in BOTH shots (shap
 subject or theme). Mention the corresponding end/open in natural prose, with the same concrete
 element named in both. Make the boundaries explicit: use "ending" in the left shot's last visual
 sentence and "opening" in the right shot's first visual sentence, both naming the shared element.
-For action-based matches, an action already begun in the left shot completes
-at the opening of the right; do not invent this action just because a match cut exists. If no shared
+For action-based matches, bridge one continuous movement across the cut: the left shot's ending
+state and the right shot's opening state must show the SAME physical instant from their respective
+angles, not different moments separated by an action ellipsis. Keep the action in progress at the
+left ending, pick up that exact phase at the right opening, then let it complete within the right
+shot. If the left ends with fingers approaching a handle, open on that same approach reaching
+contact (or immediately after contact), then show the grasp, lever depression and door opening
+in order. Preserve any more precise action phase explicitly specified by the source.
+Do not freeze the reaching hand short of contact and jump to a fully depressed handle or a door
+already swinging. Do not replay an earlier phase or skip the intervening motion. Coordinate the
+same hand/object, contact point and action phase in the two boundary sentences using only supplied
+action; do not invent this action just because a match cut exists. If no shared
 source element is available, preserve source and say the match is unresolved rather than inventing.
 For hard cuts with similar framing, do not change Cinematography's choice and do not repeat added
 incidental details that make the similarity worse; emphasize distinct EXISTING actions/focal points.
