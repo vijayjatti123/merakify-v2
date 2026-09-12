@@ -29,6 +29,65 @@ def prose():
 
 
 class CompilerTests(unittest.TestCase):
+    def lighting_case(self):
+        result = source()
+        result['shots'][0]['lighting'] = 'soft diffused overhead, motivated rim highlight'
+        result['shots'].append({**result['shots'][0], 'shot_number': 2})
+        result['assembly']['transitions'] = [{'between': '1-2', 'type': 'match cut', 'reason': 'continuous motion'}]
+        payload = compiler.compiler_input(result, emit=Mock())
+        # Real failed job's repeated setup; different actions and wording around it.
+        response = {'shots': [
+            {'shot_number': 1, 'compiled_prompt': 'Since the liquid is transparent, the key glows from behind and below the glass so amber light transmits outward; the crown rises.'},
+            {'shot_number': 2, 'compiled_prompt': 'Because the soda stays transparent, the key glows from behind and below the glass so amber light transmits through the ripples; foam settles.'},
+        ]}
+        return payload, response
+
+    def test_unchanged_light_setup_can_repeat_but_other_checks_remain(self):
+        payload, response = self.lighting_case()
+        errors = compiler.validate_compiled(response, payload)
+        self.assertFalse(any('repeated descriptive clause' in e for e in errors), errors)
+        self.assertTrue(any('early Render style sentence missing' in e for e in errors))
+        self.assertTrue(any('word count' in e for e in errors))
+
+    def test_lighting_exception_requires_unchanged_source_scene_and_light(self):
+        for changed in ({'scene_number': 2}, {'scene_number': None},
+                        {'lighting': 'harsh frontal spotlight'}, {'lighting': ''}):
+            with self.subTest(changed=changed):
+                payload, response = self.lighting_case()
+                payload['shots'][1].update(changed)
+                self.assertIn('repeated descriptive clause', str(compiler.validate_compiled(response, payload)))
+        payload, response = self.lighting_case()
+        payload['boundaries'][0]['reason'] = 'several hours later'
+        self.assertIn('repeated descriptive clause', str(compiler.validate_compiled(response, payload)))
+
+    def test_lighting_exception_checks_generated_source_role_position_and_modifiers(self):
+        for original, replacement in (
+            ('the key', 'the fill'), ('behind and below', 'in front and below'),
+            ('the key', 'the warm key'), ('from behind', 'not from behind'),
+        ):
+            with self.subTest(replacement=replacement):
+                payload, response = self.lighting_case()
+                response['shots'][1]['compiled_prompt'] = response['shots'][1]['compiled_prompt'].replace(original, replacement)
+                self.assertIn('repeated descriptive clause', str(compiler.validate_compiled(response, payload)))
+
+    def test_lighting_exception_does_not_hide_other_repeated_clauses(self):
+        for boilerplate in (
+            'The pale cup keeps its circular outline against the empty table.',
+            'dreamy memories awaken beneath a timeless veil of cinematic beauty',
+        ):
+            payload, response = self.lighting_case()
+            for shot in response['shots']:
+                # Append both outside and inside a lighting clause to verify that
+                # mentioning a light never exempts an entire decorative sentence.
+                shot['compiled_prompt'] = shot['compiled_prompt'].replace(';', ' ' + boilerplate + ';', 1)
+            self.assertIn('repeated descriptive clause', str(compiler.validate_compiled(response, payload)))
+
+    def test_light_setup_after_intervening_scene_is_not_exempt(self):
+        payload, response = self.lighting_case()
+        payload['shots'].insert(1, {**payload['shots'][0], 'shot_number': 9, 'scene_number': 2})
+        response['shots'].insert(1, {'shot_number': 9, 'compiled_prompt': 'An unrelated scene.'})
+        self.assertIn('repeated descriptive clause', str(compiler.validate_compiled(response, payload)))
+
     def test_reference_url_is_inserted_without_provider_retyping(self):
         result=source()
         url="https://example.test/meera.png?X-Amz-Date=20260911T184033Z&X-Amz-Expires=3600&signature=unaltered"

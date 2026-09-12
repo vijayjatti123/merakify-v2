@@ -402,6 +402,90 @@ Explicit job style remains authoritative over category taste: a stylized documen
 specified rendering while avoiding invented drama and gratuitous polish. Report sparse source
 through restrained prose, never silently change the style bible to suit a genre stereotype.
 
+BEVERAGE PHYSICAL DETAIL — cold drinks, carbonated liquids, pours
+
+Condensation is uneven and time-bound, not decorative. Real condensation
+clusters as fine misting beads low on the glass and near the base, with
+at most one or two visible rivulet trails — never a uniform dewy sheen
+across the whole surface. A freshly poured cold drink has a real decay
+window: describe condensation, foam, and ice as actively forming or
+settling, not eternally pristine, unless the shot is explicitly a
+just-poured hero beat.
+
+Carbonation bubbles nucleate at surface imperfections, not uniformly.
+They rise in thin, roughly vertical trains rather than scattering at
+random, and cluster into a foam head at the surface that visibly
+settles over a few seconds. Finer, smaller bubbles read as more
+refined/premium than large, sparse ones — use bubble size deliberately
+to signal product tier.
+
+A poured liquid falls as a coherent column and breaks into droplets
+only after falling some distance — it does not fragment at the point
+of exit. Impact creates a crown-shaped splash, then radiating ripples,
+then a settling foam head.
+
+Do NOT:
+- Describe condensation as a uniform coating or even "dewy" sheen
+  across the entire glass — this reads as CGI, not real condensation.
+- Use vague bubble language like "sparkling glitter" or "fizzy sparkle"
+  — describe bubble size, density, and rise pattern instead.
+- Render a freshly poured fizzy drink as static/frozen-perfect unless
+  the shot explicitly calls for a just-poured instant.
+
+HARD RULE — Liquid lighting depends on transparency, not category.
+This rule has the same priority as the exactly-one-camera-movement hard rule;
+it is a conditional lighting instruction, not sensory-register vocabulary.
+
+Before writing lighting for any shot containing a beverage, first
+determine: is the liquid transparent/translucent (water, soda, iced
+tea, wine, spirits) or opaque (milkshake, latte, smoothie, creamy
+cocktail)?
+
+- If TRANSPARENT: light the liquid primarily by transmission — place
+  the key light behind or below the glass so color radiates outward
+  through the liquid, with a secondary fill so the glass doesn't fall
+  into shadow. Side-lighting alone will flatten a transparent liquid
+  into a dark silhouette and must not be used as the sole light source.
+- If OPAQUE: light by reflection as with solid food — side or top
+  lighting to reveal surface texture and gloss is correct here and
+  should NOT be replaced with backlighting, which does nothing for an
+  opaque liquid.
+
+This is a binary branch, not a stylistic preference — get the
+transparency classification right first, then apply the matching
+lighting instruction. Do not blend both approaches in one shot.
+For transparent liquids, explicitly say the key is BEHIND or BELOW the
+glass in the finished prose; saying only "transmission" or "upper-left"
+does not locate it. Retain a supplied upper-left direction by placing
+that key behind and upper-left of the glass, with secondary fill.
+This beverage-specific lighting rule governs key placement; retain the
+existing palette, rendering, camera geometry and all unrelated facts.
+
+WORKED EXAMPLE — cutting on action across a pour
+(Illustrative supplied facts for an actual action-based match cut, not
+new action or a transition to import into an unrelated shot.)
+Apply this example ONLY when the supplied Assembly boundary is a match
+cut AND both source shots contain the continuing pour. For a crossfade
+or hard cut, do not borrow this example's ending/opening bridge, invent
+a pour, or stage a shared foam phase across the cut.
+
+Shot N (wide, liquid enters glass): "...ending as liquid strikes the surface,
+the crown-shaped splash just beginning to rise at the point of
+impact, droplets starting to separate at its rim..."
+
+Shot N+1 (close, continuation): "Opening on that same rising crown at the
+point of impact, droplets just starting to separate at its rim; the crown
+then collapses, radiating ripples travel across the surface, and foam
+settles into a thin visible head..."
+
+The ending and opening show the SAME physical instant from two angles:
+the crown beginning to rise and its rim droplets beginning to separate.
+Collapse, ripples and settling happen afterward WITHIN shot N+1, never
+across an unseen gap at the cut. Do not open on an already-collapsed crown
+or settled foam when shot N ends on a crown just beginning to rise.
+As with the door-handle example, preserve the exact phase of interruption;
+neither skip the intervening motion nor replay an earlier phase.
+
 Transitions: targets are compiled in small batches with readonly neighbor context. Use actual boundaries, never
 invent a transition. For each match cut, deliberately coordinate the ending of the left prompt and
 opening of the right around a shared visual element grounded in BOTH shots (shape, motion, color,

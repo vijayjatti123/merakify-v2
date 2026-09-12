@@ -315,6 +315,61 @@ def compiler_input(result, *, brief="", emit):
             "boundaries": boundaries, "shots": inputs}
 
 
+_LIGHT_SOURCE = re.compile(
+    r"\b(?:(?:transparent|translucent|opaque)[, ]+)?(?:(?:the|a|an|same)\s+){0,2}"
+    r"(?:(?:soft|hard|diffused|gentle|warm|cool|white|amber|blue|red)\s+)*"
+    r"(?P<role>key|fill|rim|backlight)(?:\s+light)?\b", re.I)
+_LIGHT_POSITION = re.compile(r"\b(?:behind|below|above|upper|lower|left|right|front|rear|overhead|underneath|side)\b", re.I)
+# A deliberately limited physical vocabulary, not a blanket exemption for any
+# sentence mentioning light. Hardware explanations and creative prose still pass
+# through the ordinary repetition checks. Unsupported wording stays conservative.
+_LIGHT_PHYSICAL_WORDS = set("""a an the same its and or of to from at in on by with
+as so that while it is are stays remains sits placed positioned comes glows shines
+falls travels passes sends keeps keeping lets letting through across into outward
+outwards within off behind below above upper lower left right front rear overhead
+underneath side key fill rim backlight light lighting source soft hard diffused
+gentle warm cool white amber blue red pale neutral transparent translucent opaque
+glass liquid soda tea water milk cream cup bottle pitcher surface face near far
+edge base rim visible readable shadow shadows reflection reflections reflected
+reflects transmission transmits transmitted glow color colour highlights highlight
+illuminates illuminated bright dim low high
+""".split())
+
+
+def _lighting_setup_phrases(prose):
+    """Recognize literal physical setup spans; do not infer general prose semantics.
+
+    A repeated eight-word window must lie wholly inside a positioned light-source
+    clause and contain only physical setup words. Role, position and supplied color/
+    softness modifiers must match too. If a window also occurs outside a recognized
+    setup, it remains subject to the ordinary repetition check.
+    """
+    tokens = list(re.finditer(r"\w+", prose.casefold()))
+    sources = list(_LIGHT_SOURCE.finditer(prose))
+    spans = []
+    for index, source in enumerate(sources):
+        end = sources[index + 1].start() if index + 1 < len(sources) else len(prose)
+        punctuation = re.search(r"[.!?;]", prose[source.end():end])
+        if punctuation:
+            end = source.end() + punctuation.start()
+        clause = prose[source.start():end].casefold()
+        setup = re.split(r"\b(?:so|while|with|keeping|letting)\b", clause, maxsplit=1)[0]
+        positions = tuple(sorted(set(_LIGHT_POSITION.findall(setup))))
+        modifiers = tuple(sorted(set(re.findall(
+            r"\b(?:soft|hard|diffused|gentle|warm|cool|white|amber|blue|red)\b", setup))))
+        if positions and not re.search(r"\b(?:not|no|instead|moves|moving|switches|changes)\b", setup):
+            spans.append((source.start(), end, (source['role'].casefold(), positions, modifiers)))
+    contexts = {}
+    for index in range(len(tokens) - 7):
+        window = tokens[index:index + 8]
+        phrase = tuple(token.group() for token in window)
+        signatures = {signature for start, end, signature in spans
+                      if start <= window[0].start() and window[-1].end() <= end
+                      and set(phrase) <= _LIGHT_PHYSICAL_WORDS}
+        contexts[phrase] = contexts[phrase] & signatures if phrase in contexts else signatures
+    return contexts
+
+
 def validate_compiled(response, payload):
     """Deterministic checks plus a bounded compiler retry; no upstream QA changes.
 
@@ -412,7 +467,21 @@ def validate_compiled(response, payload):
     # Short factual anchors can repeat; semantic equivalence still needs review.
     seen = {}
     hardware_seen = {}
+    lighting_group = 0
+    previous_lighting = None
     for source, output in zip(payload["shots"], generated):
+        # Only an uninterrupted run of the same scene AND identical source lighting
+        # can reuse setup phrasing. No exemption for missing metadata, scene changes,
+        # intervening lighting changes, or an explicitly time-shifting transition.
+        lighting = tuple(re.findall(r"\w+", (source.get("lighting") or "").casefold()))
+        lighting_key = (source.get("scene_number"), lighting,
+                        (source.get("scene_context") or {}).get("heading"))
+        time_jump = any(b['between'].split('-')[-1] == str(source['shot_number']) and
+                        re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", b.get('reason', ''), re.I)
+                        for b in payload['boundaries'])
+        if lighting_key != previous_lighting or not lighting or lighting_key[0] is None or time_jump:
+            lighting_group += 1
+        previous_lighting = lighting_key
         prose = output.get("compiled_prompt", "")
         if reference_insert(source):
             prose = prose.replace(reference_insert(source), "")
@@ -445,11 +514,14 @@ def validate_compiled(response, payload):
         prose = re.sub(r"(?:maintain(?:ing)?|preserv(?:e|ing)) visual consistency with (?:the supplied |the |this )?reference(?: image)?(?: at)?", " ", prose, flags=re.I)
         words = re.findall(r"\w+", prose.casefold())
         phrases = {tuple(words[i:i+8]) for i in range(len(words)-7)}
-        repeats = [phrase for phrase in phrases if phrase in seen]
+        setups = _lighting_setup_phrases(prose)
+        repeats = [phrase for phrase in phrases if phrase in seen and not all(
+            group == lighting_group and signatures & setups.get(phrase, set())
+            for group, signatures in seen[phrase])]
         if repeats:
             errors.append(f"Shot {source['shot_number']}: repeated descriptive clause; vary phrasing: {' '.join(sorted(repeats)[0])}")
         for phrase in phrases:
-            seen[phrase] = source["shot_number"]
+            seen.setdefault(phrase, []).append((lighting_group, setups.get(phrase, set())))
     for boundary in payload["boundaries"]:
         if boundary["type"] == "match cut":
             left, right = (int(n) for n in boundary["between"].split("-"))
