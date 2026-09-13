@@ -136,15 +136,47 @@ def provider(method, path, body=None):
         raise RuntimeError(f"EvoLink HTTP {error.code}: inspect provider task/account before retrying") from error
 
 
-def start(db, job_id, number):
+def regenerate_translation(result, shot, hint=""):
+    translated = translate(result, shot)
+    if shot.get("has_dialogue"):
+        if hint:
+            translated["warnings"].append("Hedra regenerates the full performance; targeted video editing is unavailable.")
+        return translated
+    if hint.strip() and shot.get("video_key"):
+        request = translated["request"]
+        request["video_urls"] = [storage_service.asset_url(shot["video_key"], expires_in=86400)]
+        # Keep the existing reference-array translation, but do not force the old
+        # opening still as a new first frame when editing the actual source clip.
+        request["prompt"] = ("Edit @video1 (video 1), the existing source clip. Targeted change: " + hint.strip()
+            + ". Change only the requested element. Preserve all other subjects, identity, objects, action timing, "
+              "duration, composition and sound unless explicitly named in the change. Do not extend the clip. "
+              "The @image references are identity/context references only, not replacement opening frames.")
+        request["duration"] = int(shot.get("video_requested_duration") or request["duration"])
+        translated["warnings"] = ["Targeted video edit requested. Unrelated visual or audio changes remain possible; review the result."]
+        translated["mode"] = "video_edit"
+    else:
+        translated["mode"] = "reference_to_video"
+        if hint.strip():
+            translated["request"]["prompt"] += "\nRequested correction: " + hint.strip()
+        translated["warnings"].append("Full generation: no existing clip with a targeted hint was supplied.")
+    return translated
+
+
+def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=None):
     result, shot = job_service.video_source(db, job_id, number)
+    if regenerate and not result.get("generation_approved"):
+        raise ValueError("Approve the revised plan/audio before video regeneration")
+    if regenerate and expected_attempt is None:
+        raise ValueError("Refresh the shot before regenerating")
     if shot.get("has_dialogue"):
         from app.services import hedra_video_service
-        return hedra_video_service.start(db, job_id, number, result, shot)
-    translated = translate(result, shot)
+        return hedra_video_service.start(db, job_id, number, result, shot,
+            replace_token=expected_attempt if regenerate else None, hint=hint)
+    translated = regenerate_translation(result, shot, hint) if regenerate else translate(result, shot)
     job_service.claim_video(db, job_id, number, {"video_status": "submitting", "video_error": None,
                            "video_source_hash": source_fingerprint(shot), "video_submitted_at": datetime.now(timezone.utc).isoformat(),
-                           "video_warnings": translated["warnings"]})
+                           "video_warnings": translated["warnings"], "video_mode": translated.get("mode", "reference_to_video")},
+                           replace_token=expected_attempt if regenerate else None)
     for warning in translated["warnings"]:
         job_service.append_event(db, job_id, "video_generation", f"Shot {number}: {warning}")
     try:
@@ -171,11 +203,11 @@ def poll(db, job_id, shot):
     age = (datetime.now(timezone.utc) - datetime.fromisoformat(shot["video_submitted_at"])).total_seconds()
     if shot["video_status"] == "submitting":
         if age > 180:
-            job_service.update_video(db, job_id, shot['shot_number'], video_status="submission_unknown", video_error="No task ID was saved after submission. Check provider account; do not resubmit blindly.")
+            job_service.update_video(db, job_id, shot['shot_number'], expected_submitted_at=shot.get('video_submitted_at'), video_status="submission_unknown", video_error="No task ID was saved after submission. Check provider account; do not resubmit blindly.")
             job_service.append_event(db, job_id, "video_generation", "WARNING: Video submission has no saved task ID after three minutes; stopped for account reconciliation.")
         return
     if age > 23 * 3600:
-        job_service.update_video(db, job_id, shot['shot_number'], video_status="review_required", video_error="Video task/storage recovery exceeded 23 hours; inspect provider before its result expires.")
+        job_service.update_video(db, job_id, shot['shot_number'], expected_submitted_at=shot.get('video_submitted_at'), video_status="review_required", video_error="Video task/storage recovery exceeded 23 hours; inspect provider before its result expires.")
         job_service.append_event(db, job_id, "video_generation", "WARNING: Video recovery deadline reached; provider result may expire soon.")
         return
     number, task = shot['shot_number'], shot['video_task_id']
@@ -184,11 +216,11 @@ def poll(db, job_id, shot):
         return hedra_video_service.poll(db, job_id, shot)
     response = provider("GET", "/v1/tasks/" + quote(task, safe=""))
     if response.get("model") and response["model"] != MODEL:
-        job_service.update_video(db, job_id, number, video_status="review_required", video_error="Provider reported a different model/mode; review before proceeding")
+        job_service.update_video(db, job_id, number, expected_task_id=task, video_status="review_required", video_error="Provider reported a different model/mode; review before proceeding")
         job_service.append_event(db, job_id, "video_generation", f"Shot {number}: provider model mismatch; stopped for review.")
         return
     if response.get("status") == "failed":
-        job_service.update_video(db, job_id, number, video_status="failed", video_error=json.dumps(response.get("error")))
+        job_service.update_video(db, job_id, number, expected_task_id=task, video_status="failed", video_error=json.dumps(response.get("error")))
         job_service.append_event(db, job_id, "video_generation", f"Shot {number}: provider task failed; no paid regeneration attempted.")
     elif response.get("status") == "completed":
         urls = response.get("results") or []
@@ -213,7 +245,7 @@ def poll(db, job_id, shot):
             video.seek(0)
             key = f"jobs/{job_id}/videos/{number}-{task}.mp4"
             stored = storage_service.upload_file(key, video, content_type="video/mp4")
-        job_service.update_video(db, job_id, number, video_status="done", video_url=stored['url'],
+        job_service.update_video(db, job_id, number, expected_task_id=task, video_status="done", video_url=stored['url'],
                                       video_key=key, video_sha256=digest.hexdigest(), video_bytes=size,
                                       video_usage=response.get("usage"), video_error=None,
                                       video_stored_at=datetime.now(timezone.utc).isoformat())
@@ -238,7 +270,7 @@ def polling_loop(stop):
                     message = f"Video polling/storage temporarily failed: {type(error).__name__}; saved task will be polled again."
                     if shot.get("video_error") != message:
                         try:
-                            job_service.update_video(db, job_id, shot['shot_number'], video_error=message)
+                            job_service.update_video(db, job_id, shot['shot_number'], expected_submitted_at=shot.get('video_submitted_at'), video_error=message)
                             job_service.append_event(db, job_id, "video_generation", f"Shot {shot['shot_number']}: {message}")
                         except Exception:
                             db.rollback()

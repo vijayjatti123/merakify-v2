@@ -111,9 +111,13 @@ def fit_image(data, ratio):
                                    "matte_added": abs(image.width / image.height - w / h) > 0.001}
 
 
-def start(db, job_id, number, result, shot):
+def start(db, job_id, number, result, shot, *, replace_token=None, hint=""):
     from app.services.video_generation_service import source_fingerprint
     translated = preview(result, shot)
+    if hint.strip():
+        translated["request"]["input"]["prompt"] += (" Requested performance correction: " + hint.strip()
+            + ". Preserve the supplied audio exactly; do not add or change dialogue.")
+        translated["warnings"].append("Full Hedra regeneration using the existing approved audio, not a targeted video edit.")
     if not settings.hedra_api_key.strip():
         raise ValueError("HEDRA_API_KEY is not configured")
     ffmpeg()  # Fail before spending if the local post-processing runtime is unavailable.
@@ -133,7 +137,8 @@ def start(db, job_id, number, result, shot):
         "video_reference_audio_sha256": hashlib.sha256(audio).hexdigest(),
         "video_reference_source": translated["reference_source"],
         "video_reference_character_id": translated["character_id"], "video_input_framing": framing,
-        "video_aspect_ratio": inputs["aspect_ratio"], "video_resolution": "720p"})
+        "video_aspect_ratio": inputs["aspect_ratio"], "video_resolution": "720p",
+        "video_dialogue_text": shot.get("dialogue_text")}, replace_token=replace_token)
     try:
         refs = {}
         for name, data, mime in [("start_image", image, "image/jpeg"), ("audio", audio, "audio/wav")]:
@@ -209,18 +214,18 @@ def poll(db, job_id, shot):
     number = shot["shot_number"]
     response = api("GET", "/jobs/" + quote(shot["video_task_id"], safe=""))
     if response.get("model") != MODEL:
-        job_service.update_video(db, job_id, number, video_status="review_required", video_error="Hedra task model mismatch")
+        job_service.update_video(db, job_id, number, expected_task_id=shot["video_task_id"], video_status="review_required", video_error="Hedra task model mismatch")
         job_service.append_event(db, job_id, "video_generation", f"WARNING: Shot {number}: Hedra task model mismatch; stopped for review.")
         return
     if response.get("status") == "FAILED":
-        job_service.update_video(db, job_id, number, video_status="failed", video_error="Hedra generation failed; inspect provider task before retrying")
+        job_service.update_video(db, job_id, number, expected_task_id=shot["video_task_id"], video_status="failed", video_error="Hedra generation failed; inspect provider task before retrying")
         job_service.append_event(db, job_id, "video_generation", f"Shot {number}: Hedra task failed; no paid regeneration attempted.")
         return
     if response.get("status") != "COMPLETED":
         return
     outputs = response.get("outputs") or []
     if len(outputs) != 1 or not outputs[0].get("url"):
-        job_service.update_video(db, job_id, number, video_status="review_required", video_error="Completed Hedra task did not return one usable video")
+        job_service.update_video(db, job_id, number, expected_task_id=shot["video_task_id"], video_status="review_required", video_error="Completed Hedra task did not return one usable video")
         job_service.append_event(db, job_id, "video_generation", f"WARNING: Shot {number}: completed Hedra task has no usable output; stopped for review.")
         return
     try:
@@ -237,10 +242,10 @@ def poll(db, job_id, shot):
             with target.open("rb") as media:
                 stored = storage_service.upload_file(key, media, content_type="video/mp4")
     except MediaValidationError as error:
-        job_service.update_video(db, job_id, number, video_status="review_required", video_error=str(error))
+        job_service.update_video(db, job_id, number, expected_task_id=shot["video_task_id"], video_status="review_required", video_error=str(error))
         job_service.append_event(db, job_id, "video_generation", f"WARNING: Shot {number}: {error}; no paid regeneration attempted.")
         return
-    job_service.update_video(db, job_id, number, video_status="done", video_error=None,
+    job_service.update_video(db, job_id, number, expected_task_id=shot["video_task_id"], video_status="done", video_error=None,
         video_url=stored["url"], video_key=key, video_sha256=hashlib.sha256(raw).hexdigest(), video_bytes=len(raw),
         video_usage={"cost": response.get("cost"), "currency": response.get("currency")},
         video_trim=evidence, video_stored_at=datetime.now(timezone.utc).isoformat())

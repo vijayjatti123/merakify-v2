@@ -1,7 +1,7 @@
 import { AlertTriangle, Check, Clapperboard, Clock3, ImageIcon, Loader2, Pencil, RefreshCw, Save, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { approveJob, regenerateShot, reviseJob, streamJob, getJob, generateShotVideo } from "../api/client";
+import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo } from "../api/client";
 import { CAMERA_VOCABULARY } from "../utils/cameraVocabulary";
 
 const COLORS = {
@@ -91,12 +91,12 @@ export default function JobView({ jobId, onReset }) {
   const [editValues, setEditValues] = useState({ description: "", dialogue_text: "" });
   const [savingShot, setSavingShot] = useState(null);
   const [regeneratingShot, setRegeneratingShot] = useState(null);
-  const [shotHints, setShotHints] = useState({});
   const [shotStatuses, setShotStatuses] = useState({});
   const [generationStage, setGenerationStage] = useState("shots");
   const stitchingTimerRef = useRef(null);
   const [streamCycle, setStreamCycle] = useState(0);
   const [videoSubmitting, setVideoSubmitting] = useState(null);
+  const [videoHints, setVideoHints] = useState({});
   const videoBusy = final?.result?.shots?.some((shot) => ["submitting", "processing"].includes(shot.video_status));
 
   useEffect(() => {
@@ -234,21 +234,19 @@ export default function JobView({ jobId, onReset }) {
     }
   }
 
-  async function handleRegenerate(shotNumber) {
+  async function handleRegenerate(shotNumber, editVideo = false) {
+    const hint = editVideo ? (videoHints[shotNumber] || "").trim() : "";
+    if (editVideo && !hint) return;
     setRegeneratingShot(shotNumber);
     setError("");
     try {
-      const job = await regenerateShot(jobId, shotNumber, shotHints[shotNumber]);
-      clearTimeout(stitchingTimerRef.current);
-      stitchingTimerRef.current = null;
-      setGenerationStage("shots");
-      setTrace([]);
-      setShotStatuses(Object.fromEntries(job.result.shots.map((shot) => [shot.shot_number, shot.status])));
-      setFinal({ status: job.status, error_message: job.error_message, result: job.result });
-      setStreamCycle((current) => current + 1);
+      const shot = shots.find((item) => item.shot_number === shotNumber);
+      await regenerateShotVideo(jobId, shot, hint);
+      setFinal(await getJob(jobId));
     } catch (regenerateError) {
       setError(regenerateError.message);
     } finally {
+      try { setFinal(await getJob(jobId)); } catch (err) { setError(err.message); }
       setRegeneratingShot(null);
     }
   }
@@ -404,20 +402,14 @@ export default function JobView({ jobId, onReset }) {
                       </details>
                     )}
 
-                    <details className="my-3 text-xs">
-                      <summary className="cursor-pointer" style={{ color: COLORS.marigold }}>Regenerate hints (optional)</summary>
-                      <p className="my-2" style={{ color: COLORS.muted }}>The Director may adapt or decline a hint to preserve continuity.</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        {CAMERA_VOCABULARY.map(({ key, label, options }) => (
-                          <label key={key} className="flex flex-col gap-1">{label}
-                            <select aria-label={`${label} hint for shot ${shot.shot_number}`} value={shotHints[shot.shot_number]?.[key] || ""} disabled={regeneratingShot === shot.shot_number} onChange={(event) => setShotHints((current) => ({ ...current, [shot.shot_number]: { ...current[shot.shot_number], [key]: event.target.value } }))} className="rounded-md p-2 min-w-0" style={{ background: COLORS.field, color: COLORS.text, border: `1px solid ${COLORS.border}` }}>
-                              <option value="">No hint</option>
-                              {options.map(([value, description]) => <option key={value} value={value} title={description}>{value}</option>)}
-                            </select>
-                          </label>
-                        ))}
+                    {!shot.has_dialogue && shot.video_provider !== "hedra" && shot.video_url && (
+                      <div className="my-3 text-xs">
+                        <label className="block">What should change? (required for Edit Shot)
+                          <textarea required aria-label={`Edit hint for shot ${shot.shot_number}`} maxLength={700} value={videoHints[shot.shot_number] || ""} onChange={(event) => setVideoHints((current) => ({ ...current, [shot.shot_number]: event.target.value }))} className="block w-full rounded-md p-2 mt-1" style={{ background: COLORS.field, color: COLORS.text }} placeholder="For example: make the lighting warmer" />
+                        </label>
+                        <p className="mt-2" style={{ color: COLORS.muted }}>May affect framing and composition beyond the requested change.</p>
                       </div>
-                    </details>
+                    )}
 
                     <div className="shot-card-actions">
                       {isEditing ? (
@@ -429,10 +421,15 @@ export default function JobView({ jobId, onReset }) {
                         </>
                       ) : (
                         <>
-                          <button type="button" onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot ${shot.shot_number}`}><Pencil size={13} /> Edit</button>
-                          <button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={!approved || regeneratingShot === shot.shot_number} className="card-action" aria-label={`Regenerate shot ${shot.shot_number}`} title={approved ? "Restart this shot only" : "Approve the plan first"}>
+                          <button type="button" onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot text ${shot.shot_number}`}><Pencil size={13} /> Edit text</button>
+                          <button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={!approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title={approved ? "Restart this shot only" : "Approve the plan first"}>
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate
                           </button>
+                          {!shot.has_dialogue && shot.video_provider !== "hedra" && shot.video_url && (
+                            <button type="button" onClick={() => handleRegenerate(shot.shot_number, true)} disabled={!(videoHints[shot.shot_number] || "").trim() || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action" style={{ background: "transparent", border: `1px solid ${COLORS.border}`, fontSize: "0.62rem", padding: "0.3rem 0.45rem" }} aria-label={`Edit shot video ${shot.shot_number}`}>
+                              Edit Shot
+                            </button>
+                          )}
                         </>
                       )}
                     </div>

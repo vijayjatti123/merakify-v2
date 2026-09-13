@@ -144,6 +144,10 @@ def job_result(job: Job) -> Optional[Any]:
             for shot in result.get("shots", []):
                 fields = videos.get(shot.get("shot_number"))
                 if fields:
+                    # Revised plan JSON can contain a previous task's presentation
+                    # fields. Only the current durable attempt may supply them.
+                    for key in [key for key in shot if key.startswith("video_")]:
+                        shot.pop(key)
                     shot.update(fields)
                     if fields.get("video_key"):
                         try:
@@ -170,7 +174,33 @@ def video_source(db, job_id, number):
     return result, shot
 
 
-def claim_video(db, job_id, number, fields):
+def claim_video(db, job_id, number, fields, *, replace_token=None):
+    # One current task per shot; retain old attempts in job-scoped history.
+    # Compare-and-swap protects against double clicks, stale tabs and SQLite's
+    # lack of SELECT FOR UPDATE. Uncertain submissions require reconciliation.
+    if replace_token is not None:
+        row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).one_or_none()
+        if row is None:
+            if replace_token != "none":
+                raise ValueError("Video attempt changed; refresh before regenerating")
+        else:
+            old_json = row.data_json
+            old = json.loads(old_json)
+            token = old.get("video_task_id") or old.get("video_submitted_at")
+            if token != replace_token or row.status not in {"done", "failed", "review_required"}:
+                raise ValueError("Video attempt changed, is busy, or needs reconciliation; refresh before regenerating")
+            history = old.pop("video_attempt_history", [])
+            fields = {**fields, "video_url": None, "video_key": None,
+                      "video_attempt_history": history + [old]}
+            changed = db.query(VideoTask).filter(VideoTask.id == row.id, VideoTask.data_json == old_json).update(
+                {VideoTask.data_json: json.dumps(fields), VideoTask.status: "submitting"}, synchronize_session=False)
+            if changed != 1:
+                db.rollback()
+                raise ValueError("Another request already regenerated this shot")
+            db.commit()
+            db.expire_all()
+            return
+
     from sqlalchemy.exc import IntegrityError
     row = VideoTask(job_id=job_id, shot_number=number, status="submitting", data_json=json.dumps(fields))
     db.add(row)
@@ -184,6 +214,12 @@ def claim_video(db, job_id, number, fields):
 def update_video(db, job_id, number, **fields):
     row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).with_for_update().populate_existing().one()
     data = json.loads(row.data_json)
+    expected_task = fields.pop("expected_task_id", None)
+    expected_started = fields.pop("expected_submitted_at", None)
+    if ((expected_task is not None and data.get("video_task_id") != expected_task)
+            or (expected_started is not None and data.get("video_submitted_at") != expected_started)):
+        db.rollback()
+        return False  # A late poll must never overwrite a newer paid attempt.
     data.update(fields)
     row.data_json = json.dumps(data)
     row.status = data["video_status"]

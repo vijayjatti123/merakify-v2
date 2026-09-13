@@ -180,3 +180,13 @@ export function streamJob(jobId, { onEvent, onFinal, onError }) {
 
   return source;
 }
+
+export async function regenerateShotVideo(jobId, shot, hint = "") {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shot.shot_number}/video/regenerate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hint, expected_attempt: shot.video_task_id || shot.video_submitted_at || "none" }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Failed to regenerate video");
+  return data;
+}

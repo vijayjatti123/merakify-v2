@@ -4,6 +4,7 @@ import json
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field, ConfigDict
 
 from app.agents import prompts
 from app.agents.llm_client import call_agent
@@ -21,6 +22,26 @@ from app.services import job_service, voice_generation_service
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 RETRY_CONTEXT_MARKER = "\n\n--- Retry context ---\n"
+
+
+class VideoRegenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    hint: str = Field(default="", max_length=1000)
+    expected_attempt: str = Field(min_length=1, max_length=160)
+
+
+@router.post("/{job_id}/shots/{shot_number}/video/regenerate", status_code=202)
+def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequest, db: Session = Depends(get_db)):
+    from app.services import video_generation_service as video
+    try:
+        return video.start(db, job_id, shot_number, regenerate=True, hint=payload.hint,
+                           expected_attempt=payload.expected_attempt)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    except Exception as error:
+        raise HTTPException(502, "Video regeneration failed or is uncertain; inspect shot status before retrying") from error
 
 
 @router.get("/{job_id}/shots/{shot_number}/video-request")
