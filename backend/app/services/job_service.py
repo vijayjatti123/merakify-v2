@@ -229,3 +229,31 @@ def update_video(db, job_id, number, **fields):
 def pending_videos(db):
     return [(row.job_id, {**json.loads(row.data_json), "shot_number": int(row.shot_number)})
             for row in db.query(VideoTask).filter(VideoTask.status.in_(["processing", "submitting"])).all()]
+
+
+def video_check_state(db, job_id, number, task, *, check=None, claim_retry=False):
+    """CAS the existing task JSON: at most one paid compliance retry across workers/restarts."""
+    row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).populate_existing().one()
+    old_json = row.data_json
+    data = json.loads(old_json)
+    if data.get("video_task_id") != task or row.status != "processing":
+        db.rollback()
+        return None
+    if check is None and not claim_retry:
+        return data
+    if claim_retry:
+        if data.get("video_compliance_retries", 0):
+            return None
+        data.update(video_compliance_retries=1, video_status="submitting", video_retry_parent_task=task)
+        from datetime import datetime, timezone
+        data["video_submitted_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        data.setdefault("video_compliance_checks", {}).setdefault(task, check)
+    changed = db.query(VideoTask).filter(VideoTask.id == row.id, VideoTask.data_json == old_json).update(
+        {VideoTask.data_json: json.dumps(data), VideoTask.status: data["video_status"]}, synchronize_session=False)
+    if changed != 1:
+        db.rollback()
+        return None
+    db.commit()
+    db.expire_all()
+    return data

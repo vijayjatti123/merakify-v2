@@ -1,4 +1,4 @@
-"""Module R: one explicit Seedance 2.0 reference-to-video path, no auto rerenders."""
+"""Module R/S video path with Module T's one bounded compliance rerender."""
 import hashlib
 import json
 import math
@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 from app.config import settings
-from app.services import job_service, storage_service
+from app.services import job_service, storage_service, render_compliance_service
 from app.services.still_frame_service import match_entities, visual_description
 
 MODEL = "seedance-2.0-reference-to-video"
@@ -175,7 +175,10 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
     translated = regenerate_translation(result, shot, hint) if regenerate else translate(result, shot)
     job_service.claim_video(db, job_id, number, {"video_status": "submitting", "video_error": None,
                            "video_source_hash": source_fingerprint(shot), "video_submitted_at": datetime.now(timezone.utc).isoformat(),
-                           "video_warnings": translated["warnings"], "video_mode": translated.get("mode", "reference_to_video")},
+                           "video_warnings": translated["warnings"], "video_mode": translated.get("mode", "reference_to_video"),
+                           "video_compliance_expected": render_compliance_service.snapshot(db, job_id, shot),
+                           "video_retry_request": (translate(result, shot)["request"] if translated.get("mode") == "video_edit" else translated["request"]),
+                           "video_compliance_retries": 0},
                            replace_token=expected_attempt if regenerate else None)
     for warning in translated["warnings"]:
         job_service.append_event(db, job_id, "video_generation", f"Shot {number}: {warning}")
@@ -243,6 +246,9 @@ def poll(db, job_id, shot):
             if video.read(12)[4:8] != b"ftyp":
                 raise ValueError("Downloaded result is not an MP4 container")
             video.seek(0)
+            if not render_compliance_service.accept(db, job_id, shot, video):
+                return
+            video.seek(0)
             key = f"jobs/{job_id}/videos/{number}-{task}.mp4"
             stored = storage_service.upload_file(key, video, content_type="video/mp4")
         job_service.update_video(db, job_id, number, expected_task_id=task, video_status="done", video_url=stored['url'],
@@ -253,7 +259,7 @@ def poll(db, job_id, shot):
 
 
 def polling_loop(stop):
-    """Persisted task IDs survive process restarts. Never resubmit a POST here."""
+    """Persisted tasks survive restarts; only the CAS-guarded compliance gate may retry."""
     from app.db import SessionLocal
     while not stop.wait(10):
         with SessionLocal() as db:

@@ -15,7 +15,7 @@ import httpx
 from PIL import Image, ImageOps
 
 from app.config import settings
-from app.services import job_service, storage_service
+from app.services import job_service, storage_service, render_compliance_service
 from app.services.still_frame_service import fresh_reference
 from app.services.voice_generation_service import decoded_audio_duration
 
@@ -138,13 +138,16 @@ def start(db, job_id, number, result, shot, *, replace_token=None, hint=""):
         "video_reference_source": translated["reference_source"],
         "video_reference_character_id": translated["character_id"], "video_input_framing": framing,
         "video_aspect_ratio": inputs["aspect_ratio"], "video_resolution": "720p",
-        "video_dialogue_text": shot.get("dialogue_text")}, replace_token=replace_token)
+        "video_dialogue_text": shot.get("dialogue_text"),
+        "video_compliance_expected": render_compliance_service.snapshot(db, job_id, shot),
+        "video_compliance_retries": 0}, replace_token=replace_token)
     try:
         refs = {}
         for name, data, mime in [("start_image", image, "image/jpeg"), ("audio", audio, "audio/wav")]:
             upload = api("POST", "/files", files={"file": (name, data, mime)})
             refs[name] = {"source": "url", "url": upload["url"]}
         request = {"input": {**inputs, **refs}}  # No duration_ms: trim against decoded audio locally.
+        job_service.update_video(db, job_id, number, video_retry_request=request)
         response = api("POST", "/models/" + MODEL, body=request)
         task = response.get("job_id")
         if not isinstance(task, str) or not task:
@@ -237,6 +240,9 @@ def poll(db, job_id, shot):
             rw, rh = map(int, shot["video_aspect_ratio"].split(":"))
             if abs((w / h) / (rw / rh) - 1) > 0.02:
                 raise MediaValidationError("Hedra output aspect ratio does not match the job; review required")
+            with target.open("rb") as media:
+                if not render_compliance_service.accept(db, job_id, shot, media):
+                    return
             key = f"jobs/{job_id}/videos/{number}-{shot['video_task_id']}.mp4"
             raw = target.read_bytes()
             with target.open("rb") as media:
