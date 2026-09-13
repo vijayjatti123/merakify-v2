@@ -112,10 +112,32 @@ def _google(parts, *, aspect_ratio=None):
         raise StillFrameError(f"Google still-frame request failed (HTTP {error.code})") from error
 
 
-def generate_still(visual, references, aspect_ratio, feedback=""):
+def _continuation_parts(continuation, *, checking=False):
+    if continuation is None:
+        return []
+    number, image = continuation
+    instruction = (
+        f"Previous shot {number}'s actual accepted still — same-scene action context, not an identity sheet. "
+        "This is an opening-frame preview, not a video end frame. Use its visible physical state as "
+        "the starting reference for continuity: liquid level, active incoming stream, object positions "
+        "and contact relationships. Carry an active action forward plausibly into the requested moment; "
+        "do not silently replace it with an unrelated completed state, invent a large fill-level jump, "
+        "or remove an active stream without support in the current shot. Follow the current shot's "
+        "camera angle and framing rather than copying the previous composition. Existing vault and "
+        "job-entity references remain authoritative for identity and design."
+    )
+    if checking:
+        instruction += (" Reject clear unexplained state discontinuities relative to this reference, "
+                        "while allowing the action's supported progression and the new camera viewpoint. "
+                        "Do not require pixel-identical pose or composition.")
+    return [{"text": instruction}, _inline(image)]
+
+
+def generate_still(visual, references, aspect_ratio, feedback="", *, continuation=None):
     parts = []
     for name, image in references:
         parts.extend([{"text": f"Locked identity reference for {name}:"}, _inline(image)])
+    parts.extend(_continuation_parts(continuation))
     parts.append({"text": (
         "Generate ONE still image: the opening frame of this compiled film shot. "
         "Freeze the first described physical instant; later motion and transition descriptions are "
@@ -138,7 +160,7 @@ def generate_still(visual, references, aspect_ratio, feedback=""):
     raise StillFrameError("Google returned no usable still image")
 
 
-def check_still(visual, references, image, *, emit=None, entities=None):
+def check_still(visual, references, image, *, emit=None, entities=None, continuation=None):
     parts = [{"text": (
         "Check this single opening-frame preview against the compiled visual description and any "
         "locked character references. Reject clear identity/outfit changes, wrong subject or framing, "
@@ -155,6 +177,7 @@ def check_still(visual, references, image, *, emit=None, entities=None):
                       "designs or location surfaces. Entity catalog: " + json.dumps(entities)})
     for name, reference in references:
         parts.extend([{"text": f"Identity reference: {name}"}, _inline(reference)])
+    parts.extend(_continuation_parts(continuation, checking=True))
     parts.extend([{"text": "Candidate opening frame to check:"}, _inline(image)])
     for attempt in range(2):
         response = _google(parts)
@@ -224,6 +247,25 @@ def match_entities(result, shot, visual):
     return matches
 
 
+def _continuous_pair(previous, shot, result):
+    """Conservative existing-data proxy, not a new action-state classifier.
+
+    Adjacent shots must share a known scene and an ordinary/action-match cut.
+    Cross-scene graphic matches, dissolves, unknown boundaries and explicit time
+    jumps are not evidence of one continuous action. Same-scene cuts can still
+    switch subjects/actions: the current shot remains authoritative in that case.
+    """
+    if previous is None or shot.get("scene_number") is None:
+        return False
+    if previous.get("scene_number") != shot["scene_number"]:
+        return False
+    key = f"{previous['shot_number']}-{shot['shot_number']}"
+    boundary = next((b for b in result.get("assembly", {}).get("transitions", [])
+                     if b.get("between") == key), None)
+    return bool(boundary and boundary.get("type") in {"cut", "match cut"} and not
+                re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I))
+
+
 def generate_still_frames(result, *, job_id, emit):
     """A failed shot remains usable as text; never convert image failures to job errors."""
     characters = {c["name"].strip().casefold(): c for c in result.get("continuity", {}).get("characters", [])}
@@ -231,7 +273,21 @@ def generate_still_frames(result, *, job_id, emit):
     # Rebuild on each full still pass so revised plans cannot inherit stale anchors.
     reference_map = result["entity_references"] = {}
     reference_bytes = {}
-    for shot in sorted(result.get("shots", []), key=lambda s: s["shot_number"]):
+    ordered = sorted(result.get("shots", []), key=lambda s: s["shot_number"])
+    previous_image = None
+    # This loop was already synchronous for Module P. Keep generation, QA and
+    # upload inside it: the next iteration may consume only the accepted image
+    # that produced the preceding shot's stored URL, never an in-flight candidate.
+    for index, shot in enumerate(ordered):
+        previous = ordered[index - 1] if index else None
+        continuation = None
+        if _continuous_pair(previous, shot, result):
+            if previous.get("still_frame_url") and previous_image is not None:
+                continuation = (previous['shot_number'], previous_image)
+            else:
+                emit("still_frame", f"Shot {shot['shot_number']}: previous shot {previous['shot_number']} "
+                     "has no accepted still; continuing without an action anchor.")
+        previous_image = None  # A skipped/failed shot must break the anchor chain.
         shot["still_frame_url"] = None
         shot.pop("still_frame_key", None)
         shot.pop("still_frame_source_hash", None)
@@ -260,10 +316,13 @@ def generate_still_frames(result, *, job_id, emit):
                            "facts identical; follow THIS shot's camera, pose and action. Do not copy the old "
                            "composition or add other subjects from the reference. Matched entities: " + json.dumps(entities))
             emit("still_frame", f"Shot {number}: generating opening still with {len(references)} locked image reference(s).")
+            if continuation:
+                emit("still_frame", f"Shot {number}: adding previous-shot action anchor from shot {continuation[0]} "
+                     f"(image SHA256 {hashlib.sha256(continuation[1].data).hexdigest()}).")
             feedback = ""
             aspect_ratio = result.get("aspect_ratio") or "16:9"
             for attempt in range(2):
-                image = generate_still(visual, references, aspect_ratio, feedback)
+                image = generate_still(visual, references, aspect_ratio, feedback, continuation=continuation)
                 dimensions = check_dimensions(image, aspect_ratio)
                 if not dimensions["matches"]:
                     feedback = (f"Decoded image is {dimensions['width']}x{dimensions['height']}; expected "
@@ -275,8 +334,12 @@ def generate_still_frames(result, *, job_id, emit):
                     continue
                 emit("still_frame", f"Shot {number}: decoded {dimensions['width']}x{dimensions['height']} "
                      f"matches {aspect_ratio} within 2% ratio tolerance.")
-                verdict = check_still(visual, references, image, emit=emit, entities=entities)
+                verdict = check_still(visual, references, image, emit=emit, entities=entities, continuation=continuation)
                 if verdict["approved"]:
+                    if continuation:
+                        emit("still_frame", f"Warning — shot {number}: physical-state QA approval is a model judgment, "
+                             "not proof of an unseen event. A missing stream does not establish that a pour concluded; "
+                             "review the visible state against the explicit planned boundary.")
                     break
                 feedback = verdict["reason"]
                 emit("still_frame", f"Shot {number}: visual check rejected candidate {attempt + 1}; "
@@ -288,6 +351,8 @@ def generate_still_frames(result, *, job_id, emit):
             stored = storage_service.upload_bytes(key=key, body=image.data, content_type=image.content_type)
             shot.update(still_frame_url=stored["url"], still_frame_key=stored["key"],
                         still_frame_source_hash=shot_fingerprint(shot))
+            # Reuse the exact bytes uploaded at this URL; no redundant S3 download.
+            previous_image = image
             observed = verdict.get("visible_entities", [])
             if not isinstance(observed, list):
                 observed = []

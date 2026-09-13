@@ -241,6 +241,16 @@ def compiler_input(result, *, brief="", emit):
         if key not in by_boundary:
             raise ValueError(f"Shot compiler missing Assembler boundary {key}; will not invent a cut")
         boundary = copy.deepcopy(by_boundary[key])
+        end_state, start_state = left.get("state_at_shot_end"), right.get("state_at_shot_start")
+        if (left.get("scene_number") is not None and left.get("scene_number") == right.get("scene_number")
+                and boundary["type"] in {"cut", "match cut"}
+                and not re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I)
+                and (end_state or start_state)):
+            # Never invent or silently reconcile contradictory upstream physical facts.
+            if not isinstance(end_state, str) or not isinstance(start_state, str) or end_state.strip() != start_state.strip():
+                raise ValueError(f"Physical state boundary {key}: end/start must describe the same instant with identical text; replan this boundary")
+            boundary["shared_physical_state"] = end_state.strip()
+            emit("shot_prompt_compiler", f"Physical state boundary {key}: matching end/start supplied to both shots.")
         if boundary["type"] == "cut" and similar_framing(left.get("camera_angle", ""), right.get("camera_angle", "")):
             boundary["similar_framing_risk"] = True
             emit("shot_prompt_compiler", f"Hard-cut similarity risk at {key}: preserving Cinematography; avoid duplicated incidental details.")
@@ -249,7 +259,8 @@ def compiler_input(result, *, brief="", emit):
     continuing_speaker = None
     for shot in shots:
         item = {k: shot.get(k) for k in ("shot_number", "scene_number", "camera_angle", "lens", "lighting",
-                                        "composition_note", "description", "dialogue_text", "has_dialogue", "characters_in_shot")}
+                                        "composition_note", "description", "dialogue_text", "has_dialogue", "characters_in_shot",
+                                        "state_at_shot_start", "state_at_shot_end")}
         move, reduced = first_movement(shot.get("camera_movement"))
         item["camera_movement"] = move
         if not str(shot.get("camera_movement") or "").strip():

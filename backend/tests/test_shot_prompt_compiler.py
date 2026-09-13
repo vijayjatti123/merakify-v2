@@ -29,6 +29,21 @@ def prose():
 
 
 class CompilerTests(unittest.TestCase):
+    def test_shared_physical_state_reaches_both_shots_and_boundary(self):
+        result = source()
+        state = "Glass half-full; stream still entering from above."
+        result['shots'][0]['state_at_shot_end'] = state
+        result['shots'].append({**result['shots'][0], 'shot_number': 2, 'state_at_shot_start': state})
+        result['assembly']['transitions'] = [{'between': '1-2', 'type': 'cut', 'reason': 'continuous pour'}]
+        payload = compiler.compiler_input(result, emit=Mock())
+        self.assertEqual(payload['boundaries'][0]['shared_physical_state'], state)
+        self.assertEqual(payload['shots'][0]['state_at_shot_end'], payload['shots'][1]['state_at_shot_start'])
+        result['shots'][1]['state_at_shot_start'] = 'Full glass; pour finished.'
+        with self.assertRaisesRegex(ValueError, 'Physical state boundary 1-2'):
+            compiler.compiler_input(result, emit=Mock())
+        result['shots'][1]['scene_number'] = 2
+        self.assertNotIn('shared_physical_state', compiler.compiler_input(result, emit=Mock())['boundaries'][0])
+
     def lighting_case(self):
         result = source()
         result['shots'][0]['lighting'] = 'soft diffused overhead, motivated rim highlight'

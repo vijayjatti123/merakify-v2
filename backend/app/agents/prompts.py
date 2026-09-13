@@ -184,12 +184,35 @@ real cinematic craft:
 - List which reference characters actually appear in each shot in characters_in_shot, by exact name from
   the reference library, so voice and visual references can be attached deterministically — do not invent
   or paraphrase names.
+- Track changing physical processes within each continuous scene explicitly, using
+  state_at_shot_start and state_at_shot_end (concise literal strings, or null for shots
+  without a changing process). Describe visible state: fill level, active stream,
+  wetness, steam, object contact/placement; do not invent measurable temperatures.
+  For adjacent shots of the SAME uninterrupted process, COPY shot N's state_at_shot_end
+  EXACTLY into shot N+1's state_at_shot_start. These describe the SAME physical instant
+  viewed from different angles, never a skipped interval. For example both may say
+  "Glass half-full; stream still entering from above; crown rising around impact."
+  A state is a COMPLETE snapshot of the changing process, not a caption for its most
+  photogenic feature. For liquids, EVERY start/end snapshot must include the relative
+  fill level AND whether an incoming stream is active or stopped, alongside splash/foam
+  phase. Carry unchanged variables forward explicitly; omission never means stopped.
+  For straining, include where the leaves are and whether the strainer is over the cup
+  or removed. Water passing through leaves already in a strainer does not make leaves
+  arrive from the kettle. Preserve material provenance from the supplied scene.
+  Change state only WITHIN a shot from its start to its end, consistent with supplied
+  action. A pour cannot silently end between shots; removal of a strainer must happen
+  visibly before its absence. Track leaves inside the strainer, not loose in the cup.
+  Do not bridge an actual scene/time change or invent continuity between unrelated actions.
 Respond with ONLY JSON:
 {"shots":[{"shot_number":1,"scene_number":1,"camera_angle":"under 6 words","camera_movement":"under 5 words","lens":"under 6 words","lighting":"under 8 words","composition_note":"under 8 words","duration_sec":number,"description":"under 12 words","characters_in_shot":["Name"],"has_dialogue":boolean,"dialogue_text":"under 15 words or empty string"}]}
+Include state_at_shot_start and state_at_shot_end on every shot in this schema.
 Produce 1 to 3 shots per scene. duration_sec must not exceed 9. Keep every field short."""
 
 CINEMATOGRAPHY_FIX = """You are the Cinematography Agent revising specific shots based on QA feedback.
 Apply the fix_instruction for each flagged shot_number and leave every other shot unchanged.
+Preserve state_at_shot_start/state_at_shot_end in the full output. If a physical-state
+issue is flagged, repair the shared boundary together: adjacent continuous-process end/start
+strings must describe the same instant and match exactly. Do not alter dialogue for a state fix.
 Alternatively, the input may provide Target shot number and Optional style hints instead of Required fixes.
 In that mode, revise ONLY that target's camera_angle, camera_movement, lens, lighting, and composition_note.
 Keep all other fields and shots unchanged. The full list is context for continuity, not permission to edit neighbors.
@@ -205,11 +228,18 @@ total runtime missed the target. You'll be given the current shots and the targe
 Reduce the total runtime to land within about 15% of the target by shortening shot durations and/or
 dropping the least essential SILENT shot(s) — never drop or shorten a shot with has_dialogue true, and
 never alter or shorten dialogue_text; a spoken line's timing is fixed by the line itself.
+Preserve state_at_shot_start/state_at_shot_end. If removing a silent process shot, retain a
+coherent visible progression and identical shared end/start states across remaining continuous shots.
 Respond with ONLY JSON, the FULL revised shot list, same schema as before:
 {"shots":[{"shot_number":1,"scene_number":1,"camera_angle":"...","camera_movement":"...","lens":"...","lighting":"...","composition_note":"...","duration_sec":number,"description":"...","characters_in_shot":["Name"],"has_dialogue":boolean,"dialogue_text":"..."}]}"""
 
-QA_AGENT = """You are the Continuity QA Agent. Review a shot list against the reference asset library
-and film-grammar rules, looking specifically for: lighting that contradicts the scene's mood, two
+QA_AGENT = """You are the Continuity QA Agent.
+Check explicit state_at_shot_end/state_at_shot_start for adjacent shots of a continuous
+physical process in the same scene: they must match exactly and describe the same instant.
+Flag skipped changes, such as an active pour becoming finished between shots or strained
+leaves appearing loose in the cup, with a state-only fix instruction. Null states are valid
+for shots without changing processes and across scene/time changes.
+Review against the reference asset library and film-grammar rules, looking specifically for: lighting that contradicts the scene's mood, two
 consecutive shots with identical scale/angle, any 180-degree-rule violation implied by the camera angles
 described, any shot with duration_sec over 9, or any scene where more than one shot has has_dialogue
 true (dialogue must be confined to a single shot per scene — flag the extra one with a fix_instruction
@@ -506,7 +536,16 @@ action; do not invent this action just because a match cut exists. If no shared
 source element is available, preserve source and say the match is unresolved rather than inventing.
 For hard cuts with similar framing, do not change Cinematography's choice and do not repeat added
 incidental details that make the similarity worse; emphasize distinct EXISTING actions/focal points.
-Reserve explicit "ending"/"opening" language for actual match cuts. Do not mechanically append
+Explicit physical state: shots may carry state_at_shot_start/state_at_shot_end and a boundary
+may carry shared_physical_state. These are authoritative planned physical facts, not style prose.
+Write each shot's opening around its start state and its ending around its end state. At a
+shared boundary, the left ending and right opening show the SAME literal instant from their
+respective angles: same liquid level, active stream, wetness, steam and object contact. Never
+infer that a pour concluded merely because the next shot describes a splash crown. Preserve
+an explicitly active stream in the opening description. Show later change within that shot.
+When these states exist, use opening/ending language even for an ordinary cut; this exception
+does not invent a match cut. Keep physical facts identical while varying descriptive phrasing.
+Reserve other explicit "ending"/"opening" language for actual match cuts. Do not mechanically append
 those words to every ordinary cut or crossfade; describe those actions naturally.
 
 Worked references (illustrative supplied facts, not extra facts to import into another job):

@@ -22,6 +22,83 @@ class StillFramesTests(unittest.TestCase):
     def run_stills(self):
         return service.generate_still_frames(self.result, job_id="audit", emit=self.emit)
 
+    def continuous_shots(self, scenes):
+        self.result['shots'] = [{**self.result['shots'][0], 'shot_number': n, 'scene_number': scene}
+                                for n, scene in enumerate(scenes, 1)]
+        self.result['assembly'] = {'transitions': [
+            {'between': f'{n}-{n+1}', 'type': 'cut', 'reason': 'continuous action'}
+            for n in range(1, len(scenes))]}
+
+    @patch.object(service, 'check_still', return_value={'approved': True, 'reason': 'Matches'})
+    def test_previous_uploaded_image_is_additive_and_sequential(self, check):
+        self.continuous_shots([1, 1, 2, 2])
+        self.result['continuity']['characters'] = [{'name': 'Meera', 'character_id': 'vault', 'image_url': 'https://reference'}]
+        self.result['continuity']['props'] = [{'name': 'Cup'}]
+        for shot in self.result['shots']:
+            shot['characters_in_shot'] = ['Meera']
+        check.return_value['visible_entities'] = ['props:cup']
+        order = []
+        def generate(visual, refs, aspect, feedback, *, continuation):
+            number = 1 + sum(item.startswith('generate') for item in order)
+            order.append(f'generate{number}')
+            self.assertEqual(refs[0], ('Meera', self.image))
+            if number > 1:
+                self.assertTrue(any('Job entity props:cup' in name for name, _ in refs))
+            if number in (2, 4):
+                self.assertEqual(continuation, (number - 1, self.image))
+                self.assertIn(f'upload{number-1}', order)
+            else:
+                self.assertIsNone(continuation)
+            return self.image
+        def upload(**kwargs):
+            number = len([x for x in order if x.startswith('upload')]) + 1
+            order.append(f'upload{number}')
+            return {'url': f'https://stored/{number}', 'key': str(number)}
+        with patch.object(service, '_download_reference_image', return_value=self.image), \
+             patch.object(service, 'generate_still', side_effect=generate), \
+             patch.object(service.storage_service, 'upload_bytes', side_effect=upload):
+            self.run_stills()
+        self.assertEqual(order, ['generate1','upload1','generate2','upload2','generate3','upload3','generate4','upload4'])
+        self.assertEqual([c.kwargs['continuation'] for c in check.call_args_list],
+                         [None, (1,self.image), None, (3,self.image)])
+
+    @patch.object(service.storage_service, 'upload_bytes', return_value={'url': 'https://stored', 'key': 'stored'})
+    @patch.object(service, 'check_still', return_value={'approved': True, 'reason': 'Matches'})
+    def test_failed_previous_shot_breaks_chain_without_blocking_next(self, check, upload):
+        self.continuous_shots([1,1,1])
+        calls = []
+        def generate(*args, continuation=None):
+            calls.append(continuation)
+            if len(calls) == 2:
+                raise service.StillFrameError('forced failure')
+            return self.image
+        with patch.object(service, 'generate_still', side_effect=generate):
+            shots=self.run_stills()
+        self.assertEqual(calls, [None,(1,self.image),None])
+        self.assertIsNone(shots[1]['still_frame_url'])
+        self.assertEqual(shots[2]['still_frame_url'], 'https://stored')
+        self.assertIn('continuing without an action anchor', str(self.emit.call_args_list))
+
+    def test_continuity_gate_rejects_unknown_scene_dissolve_and_time_jump(self):
+        self.continuous_shots([1,1])
+        a,b=self.result['shots']
+        self.assertTrue(service._continuous_pair(a,b,self.result))
+        for update in ({'type':'crossfade'}, {'type':'match cut','reason':'hours later'}):
+            self.result['assembly']['transitions'][0].update(update)
+            self.assertFalse(service._continuous_pair(a,b,self.result))
+        self.result['assembly']['transitions'][0].update(type='match cut',reason='shape match')
+        b['scene_number']=2
+        self.assertFalse(service._continuous_pair(a,b,self.result))
+        a['scene_number']=b['scene_number']=None
+        self.assertFalse(service._continuous_pair(a,b,self.result))
+
+    def test_continuation_is_separate_real_image_context(self):
+        parts=service._continuation_parts((1,self.image),checking=True)
+        self.assertIn("Previous shot 1's actual accepted still",parts[0]['text'])
+        self.assertEqual(parts[1],service._inline(self.image))
+        self.assertIn('Reject clear unexplained state discontinuities',parts[0]['text'])
+        self.assertEqual(service._continuation_parts(None),[])
+
     def test_decoded_ratio_rounding_orientation_and_corruption(self):
         buffer = io.BytesIO()
         service.Image.new("RGB", (1376, 768)).save(buffer, format="JPEG")
