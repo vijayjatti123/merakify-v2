@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import threading
 
 from app.config import settings
 from app.db import (
@@ -16,7 +18,17 @@ ensure_job_intake_columns()
 ensure_asset_tagging_columns()
 ensure_character_reference_sheet_column()
 
-app = FastAPI(title="Merakify Core")
+@asynccontextmanager
+async def lifespan(app):
+    from app.services.video_generation_service import polling_loop
+    stop = threading.Event()
+    worker = threading.Thread(target=polling_loop, args=(stop,), daemon=True, name="video-task-poller")
+    worker.start()
+    yield
+    stop.set()
+
+
+app = FastAPI(title="Merakify Core", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

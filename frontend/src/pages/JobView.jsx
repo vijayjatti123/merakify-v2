@@ -1,7 +1,7 @@
 import { AlertTriangle, Check, Clapperboard, Clock3, ImageIcon, Loader2, Pencil, RefreshCw, Save, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { approveJob, regenerateShot, reviseJob, streamJob } from "../api/client";
+import { approveJob, regenerateShot, reviseJob, streamJob, getJob, generateShotVideo } from "../api/client";
 import { CAMERA_VOCABULARY } from "../utils/cameraVocabulary";
 
 const COLORS = {
@@ -77,7 +77,7 @@ function FinalVideoPlaceholder() {
       <Clapperboard size={32} />
       <p className="eyebrow">Sequence complete</p>
       <h2>Final video will appear here</h2>
-      <p>Video rendering is not connected in Phase 1.</p>
+      <p>Individual clips can be generated in the shot cards. Dialogue clips include audio; final sequence stitching comes later.</p>
     </section>
   );
 }
@@ -96,6 +96,38 @@ export default function JobView({ jobId, onReset }) {
   const [generationStage, setGenerationStage] = useState("shots");
   const stitchingTimerRef = useRef(null);
   const [streamCycle, setStreamCycle] = useState(0);
+  const [videoSubmitting, setVideoSubmitting] = useState(null);
+  const videoBusy = final?.result?.shots?.some((shot) => ["submitting", "processing"].includes(shot.video_status));
+
+  useEffect(() => {
+    if (!videoBusy) return;
+    let stopped = false;
+    let timer;
+    async function refresh() {
+      try {
+        const job = await getJob(jobId);
+        if (!stopped) setFinal(job);
+      } catch (err) {
+        if (!stopped) setError(err.message);
+      }
+      if (!stopped) timer = setTimeout(refresh, 5000);
+    }
+    timer = setTimeout(refresh, 1000);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [jobId, videoBusy]);
+
+  async function handleVideo(shotNumber) {
+    setVideoSubmitting(shotNumber);
+    setError("");
+    try {
+      await generateShotVideo(jobId, shotNumber);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      try { setFinal(await getJob(jobId)); } catch (err) { setError(err.message); }
+      setVideoSubmitting(null);
+    }
+  }
 
   useEffect(() => {
     const source = streamJob(jobId, {
@@ -350,6 +382,16 @@ export default function JobView({ jobId, onReset }) {
                       </div>
                     )}
                     {shot.still_frame_warning && <p className="audio-warning">{shot.still_frame_warning}</p>}
+                    {shot.video_url && <video controls preload="metadata" src={shot.video_url} className="my-3 w-full rounded-md" aria-label={`Generated video for shot ${shot.shot_number}`} />}
+                    {shot.video_status && <p className="text-xs my-2" role="status">Video: {shot.video_status.replaceAll("_", " ")}{shot.has_dialogue && shot.video_status === "done" ? (shot.video_provider === "hedra" ? " · Hedra dialogue · audio included" : " · Silent clip; Sarvam audio awaits later muxing") : ""}</p>}
+                    {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
+                    {shot.video_error && <p className="panel-error">{shot.video_error}</p>}
+                    {(shot.video_warnings || []).map((warning) => <p className="audio-warning" key={warning}>{warning}</p>)}
+                    {(shot.has_dialogue || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && (shot.still_frame_url || (shot.has_dialogue && result.continuity?.characters?.some((character) => character.character_id && character.image_url && shot.characters_in_shot?.includes(character.name)))) && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
+                      <button type="button" className="card-action my-2" disabled={videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
+                        {videoSubmitting === shot.shot_number ? "Submitting video…" : shot.has_dialogue ? "Generate dialogue video · Hedra · 720p" : `Generate video · ${Math.max(4, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
+                      </button>
+                    )}
                     <div className="shot-technical">
                       <span><Clapperboard size={12} /> {shot.camera_angle} · {shot.camera_movement}</span>
                       <span><Clock3 size={12} /> {shot.duration_sec}s · {shot.lighting}</span>

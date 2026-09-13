@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, Float, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Column, Float, Integer, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -31,6 +31,18 @@ class Job(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     events = relationship("AgentEvent", back_populates="job", cascade="all, delete-orphan")
+
+
+class VideoTask(Base):
+    """A durable, single paid attempt per shot; independent of mutable planning JSON."""
+    __tablename__ = "video_tasks"
+    __table_args__ = (UniqueConstraint("job_id", "shot_number", name="uq_video_job_shot"),)
+    id = Column(String, primary_key=True, default=new_id)
+    job_id = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
+    shot_number = Column(Integer, nullable=False)
+    status = Column(String, nullable=False)
+    data_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Asset(Base):

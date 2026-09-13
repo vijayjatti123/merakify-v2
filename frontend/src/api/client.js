@@ -1,5 +1,20 @@
 const BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
+export async function getJob(jobId) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}`);
+  if (!res.ok) throw new Error("Could not refresh video status; retrying shortly.");
+  return res.json();
+}
+
+export async function generateShotVideo(jobId, shotNumber) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shotNumber}/video`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "Video submission uncertain; refresh the shot status.");
+  }
+  return res.json();
+}
+
 export async function createJob(payload) {
   const res = await fetch(`${BASE_URL}/api/jobs`, {
     method: "POST",

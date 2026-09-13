@@ -23,6 +23,31 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 RETRY_CONTEXT_MARKER = "\n\n--- Retry context ---\n"
 
 
+@router.get("/{job_id}/shots/{shot_number}/video-request")
+def preview_video_request(job_id: str, shot_number: int, db: Session = Depends(get_db)):
+    from app.services import video_generation_service as video
+    try:
+        result, shot = job_service.video_source(db, job_id, shot_number)
+        return video.translate(result, shot)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+
+
+@router.post("/{job_id}/shots/{shot_number}/video", status_code=202)
+def generate_video(job_id: str, shot_number: int, db: Session = Depends(get_db)):
+    from app.services import video_generation_service as video
+    try:
+        return video.start(db, job_id, shot_number)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    except Exception as error:
+        raise HTTPException(502, "Video submission failed or is uncertain. Check the shot status before any further action.") from error
+
+
 def _run_in_background(job_id: str) -> None:
     # Background tasks get their own DB session — the request's session is
     # closed by the time this runs.

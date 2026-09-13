@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     gemini_image_model: str = "gemini-3.1-flash-image"
     sarvam_api_key: str = ""
     elevenlabs_api_key: str = ""
+    evolink_api_key: str = ""
+    hedra_api_key: str = ""
     database_url: str = "sqlite:///./merakify.db"
     allowed_origins: str = "http://localhost:5173"
     aws_access_key_id: str = ""

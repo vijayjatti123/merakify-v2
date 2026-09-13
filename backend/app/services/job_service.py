@@ -3,7 +3,7 @@ from typing import Any, Optional, get_args
 
 from sqlalchemy.orm import Session
 
-from app.models import AgentEvent, Job
+from app.models import AgentEvent, Job, VideoTask
 from app.schemas import ColorGrade, VisualStyle, style_from_brief
 
 
@@ -136,4 +136,60 @@ def job_result(job: Job) -> Optional[Any]:
                     # Reading a job must remain possible during storage outages.
                     shot["still_frame_url"] = None
                     shot["still_frame_warning"] = "Still frame temporarily unavailable: could not refresh image access."
+        # Video attempts live separately: replanning must never lose a paid task.
+        from sqlalchemy.orm import object_session
+        db = object_session(job) if isinstance(job, Job) else None
+        if db:
+            videos = {int(v.shot_number): json.loads(v.data_json) for v in db.query(VideoTask).filter(VideoTask.job_id == job.id)}
+            for shot in result.get("shots", []):
+                fields = videos.get(shot.get("shot_number"))
+                if fields:
+                    shot.update(fields)
+                    if fields.get("video_key"):
+                        try:
+                            shot["video_url"] = storage_service.asset_url(fields["video_key"])
+                        except Exception:
+                            shot["video_url"] = None
+                            shot["video_error"] = "Stored video temporarily inaccessible; refresh later."
+                    from app.services.video_generation_service import source_fingerprint
+                    shot["video_source_changed"] = fields.get("video_source_hash") != source_fingerprint(shot)
     return result
+
+
+def video_source(db, job_id, number):
+    job = get_job(db, job_id)
+    if not job:
+        raise LookupError("Job not found")
+    result = job_result(job) or {}
+    if job.status != "done" or result.get("audio_assembly_pending") or result.get("assembly", {}).get("provisional"):
+        raise ValueError("Finish final shot planning and audio approval first")
+    result.update(ai_model=job.ai_model, quality=job.quality, aspect_ratio=job.aspect_ratio)
+    shot = next((s for s in result.get("shots", []) if s.get("shot_number") == number), None)
+    if shot is None:
+        raise LookupError("Shot not found")
+    return result, shot
+
+
+def claim_video(db, job_id, number, fields):
+    from sqlalchemy.exc import IntegrityError
+    row = VideoTask(job_id=job_id, shot_number=number, status="submitting", data_json=json.dumps(fields))
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ValueError("This shot already has a video attempt; paid resubmission is disabled") from None
+
+
+def update_video(db, job_id, number, **fields):
+    row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).with_for_update().populate_existing().one()
+    data = json.loads(row.data_json)
+    data.update(fields)
+    row.data_json = json.dumps(data)
+    row.status = data["video_status"]
+    db.commit()
+
+
+def pending_videos(db):
+    return [(row.job_id, {**json.loads(row.data_json), "shot_number": int(row.shot_number)})
+            for row in db.query(VideoTask).filter(VideoTask.status.in_(["processing", "submitting"])).all()]

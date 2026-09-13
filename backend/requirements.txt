@@ -10,3 +10,7 @@ python-multipart>=0.0.9,<1.0.0
 httpx>=0.27.0,<1.0.0
 soundfile>=0.13.1,<1.0.0
 Pillow>=12.3.0,<13.0.0
+
+# Dialogue video decoding and portable FFmpeg runtime for verified local trims.
+av==18.1.0
+imageio-ffmpeg==0.6.0
