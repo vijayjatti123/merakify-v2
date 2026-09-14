@@ -1,5 +1,17 @@
 const BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
+export async function listJobs(offset = 0) {
+  const res = await fetch(`${BASE_URL}/api/jobs?limit=30&offset=${offset}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load job history. Please try again.");
+  return res.json();
+}
+
+export async function retryFailedJob(jobId) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/retry-failed`, { method: "POST" });
+  if (!res.ok) throw new Error("Could not restart planning. Please try again.");
+  return res.json();
+}
+
 export async function getJob(jobId) {
   const res = await fetch(`${BASE_URL}/api/jobs/${jobId}`);
   if (!res.ok) throw new Error("Could not refresh video status; retrying shortly.");
@@ -58,7 +70,7 @@ export async function uploadAsset(file, { role = "", label = "" } = {}) {
 }
 
 export async function listCharacters() {
-  const res = await fetch(`${BASE_URL}/api/characters`);
+  const res = await fetch(`${BASE_URL}/api/characters`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to load the Character Vault");
   return res.json();
 }

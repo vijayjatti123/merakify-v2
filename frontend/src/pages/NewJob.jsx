@@ -52,7 +52,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const [quality, setQuality] = useState("720p");
   const [language, setLanguage] = useState("English");
   const [customLanguage, setCustomLanguage] = useState("");
-  const [aiModel, setAiModel] = useState("Seedance 2.5");
+  const [aiModel, setAiModel] = useState("Seedance 2.0");
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [assets, setAssets] = useState([]);
   const [selectedAsset, setSelectedAsset] = useState(null);

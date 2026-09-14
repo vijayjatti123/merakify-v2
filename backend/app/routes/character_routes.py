@@ -1,7 +1,7 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Response
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -161,5 +161,12 @@ def approve_character(character_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[CharacterOut])
-def list_characters(db: Session = Depends(get_db)):
-    return character_service.list_approved_characters(db)
+def list_characters(response: Response, db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return [
+        CharacterOut.model_validate(character).model_copy(update={
+            "image_url": storage_service.refresh_asset_url(character.image_url),
+            "reference_sheet_url": storage_service.refresh_asset_url(character.reference_sheet_url),
+        })
+        for character in character_service.list_approved_characters(db)
+    ]

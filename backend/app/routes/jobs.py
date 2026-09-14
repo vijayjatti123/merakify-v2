@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, ConfigDict
@@ -216,6 +216,24 @@ def _retry_brief(job, change_request: str | None) -> str:
     )
 
     return f"{original_brief}{RETRY_CONTEXT_MARKER}{' '.join(context)}"
+
+
+@router.get("")
+def list_jobs(limit: int = Query(30, ge=1, le=100), offset: int = Query(0, ge=0), db: Session = Depends(get_db)):
+    return job_service.list_job_summaries(db, limit, offset)
+
+
+@router.post("/{job_id}/retry-failed", response_model=JobOut)
+def retry_failed_job(job_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Retry failed planning with the same inputs, not a contrasting creative premise."""
+    job = job_service.get_job(db, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.status != "error":
+        raise HTTPException(409, "Only a failed job can be retried here")
+    retried = job_service.copy_job_for_retry(db, job)
+    background_tasks.add_task(_run_in_background, retried.id)
+    return _job_out(retried)
 
 
 @router.post("", response_model=JobOut)

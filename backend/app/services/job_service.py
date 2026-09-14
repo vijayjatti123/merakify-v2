@@ -56,6 +56,29 @@ def get_job(db: Session, job_id: str) -> Optional[Job]:
     return db.query(Job).filter(Job.id == job_id).first()
 
 
+def list_job_summaries(db: Session, limit: int, offset: int) -> dict:
+    rows = (db.query(Job.id, Job.brief, Job.status, Job.created_at)
+            .order_by(Job.created_at.desc(), Job.id.desc()).offset(offset).limit(limit + 1).all())
+    return {
+        "jobs": [{"id": row.id, "brief": row.brief.split("\n\n")[0][:200],
+                  "status": row.status, "created_at": row.created_at} for row in rows[:limit]],
+        "has_more": len(rows) > limit,
+    }
+
+
+def copy_job_for_retry(db: Session, source: Job) -> Job:
+    # Already-validated intake must survive recovery byte-for-byte, including
+    # source script and vault resolutions. Do not re-fold style prose.
+    job = Job(**{field: getattr(source, field) for field in (
+        "brief", "aspect_ratio", "visual_style", "color_grade", "quality",
+        "language", "ai_model", "script_text", "resolutions_json",
+    )}, status="queued")
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def set_status(db: Session, job_id: str, status: str, error_message: Optional[str] = None) -> None:
     job = get_job(db, job_id)
     if not job:

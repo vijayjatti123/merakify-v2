@@ -1,5 +1,7 @@
 import { AlertTriangle, Check, Clapperboard, Clock3, ImageIcon, Loader2, Pencil, RefreshCw, Save, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Alert, AlertTitle, Button } from "@mui/material";
+import { retryFailedJob } from "../api/client";
 
 import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, assembleFinalVideo } from "../api/client";
 import FaceEnhancement, { ShotVideo } from "../components/FaceEnhancement";
@@ -81,9 +83,13 @@ function FinalVideo({ data, shots, busy, onAssemble }) {
   );
 }
 
-export default function JobView({ jobId, onReset }) {
+const isCompilerTimeout = (text) => /Shot Prompt Compiler.*(?:deadline exceeded|timed?\s*out)/i.test(text || "");
+
+export default function JobView({ jobId, onReset, initialJob = null, onRetry }) {
   const [trace, setTrace] = useState([]);
-  const [final, setFinal] = useState(null);
+  const [final, setFinal] = useState(initialJob);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState("");
   const [error, setError] = useState("");
   const [approving, setApproving] = useState(false);
   const [editingShot, setEditingShot] = useState(null);
@@ -169,6 +175,15 @@ export default function JobView({ jobId, onReset }) {
   const shots = result?.shots || [];
   const approved = Boolean(result?.generation_approved);
   const latestTrace = trace[trace.length - 1];
+  const compilerTimeout = errored && isCompilerTimeout(final?.error_message);
+  const progressNote = isCompilerTimeout(latestTrace?.note) ? "This shot is taking longer than expected." : latestTrace?.note;
+
+  async function handleTimeoutRetry() {
+    setRetrying(true); setRetryError("");
+    try { onRetry(await retryFailedJob(jobId)); }
+    catch (err) { setRetryError(err.message); }
+    finally { setRetrying(false); }
+  }
   const castingWarnings = [...new Set([
     ...trace.filter((event) => event.agent_key === "casting_warning").map((event) => event.note),
     ...(result?.continuity?.characters || []).map((character) => character.casting_warning).filter(Boolean),
@@ -255,12 +270,12 @@ export default function JobView({ jobId, onReset }) {
         ) : (
           <div className="director-progress-card">
             <div className="director-progress-icon">
-              {done ? <Check size={19} /> : <Loader2 size={19} className="animate-spin" />}
+              {compilerTimeout ? <AlertTriangle size={19} /> : done ? <Check size={19} /> : <Loader2 size={19} className="animate-spin" />}
             </div>
             <div>
               <p className="eyebrow">{done ? "Ready for review" : "Director pipeline"}</p>
-              <h2>{done ? "Your shot plan is ready" : "Building your shot plan"}</h2>
-              <p>{latestTrace?.note || "Preparing the creative direction…"}</p>
+              <h2>{compilerTimeout ? "Planning paused" : done ? "Your shot plan is ready" : "Building your shot plan"}</h2>
+              <p>{progressNote || "Preparing the creative direction…"}</p>
             </div>
           </div>
         )}
@@ -270,7 +285,7 @@ export default function JobView({ jobId, onReset }) {
         <div className="shot-panel-header">
           <div>
             <p className="eyebrow">Shot plan</p>
-            <h2>{done ? `${shots.length} shots` : "In progress"}</h2>
+            <h2>{compilerTimeout ? "Ready to retry" : done ? `${shots.length} shots` : "In progress"}</h2>
           </div>
           <button type="button" onClick={onReset} className="icon-button" aria-label="Start over"><X size={17} /></button>
         </div>
@@ -298,11 +313,15 @@ export default function JobView({ jobId, onReset }) {
         {!done && !errored && (
           <div className="panel-waiting">
             <Loader2 size={22} className="animate-spin" />
-            <p>{latestTrace?.note || "The first shots will appear here when the plan is complete."}</p>
+            <p>{progressNote || "The first shots will appear here when the plan is complete."}</p>
           </div>
         )}
 
-        {errored && <p className="panel-error">{final.error_message || "Something went wrong."}</p>}
+        {compilerTimeout ? <Alert severity="warning" sx={{ m: 2 }} action={<Button color="inherit" disabled={retrying} onClick={handleTimeoutRetry}>{retrying ? "Retrying…" : "Retry"}</Button>}>
+          <AlertTitle>This shot is taking longer than expected.</AlertTitle>
+          Planning stopped before it could finish. Retry starts a new attempt with the same brief, script and settings. Your original job stays in history.
+        </Alert> : errored && <p className="panel-error">{final.error_message || "Something went wrong."}</p>}
+        {retryError && <Alert severity="error" sx={{ m: 2 }}>{retryError}</Alert>}
 
         {done && result && (
           <>

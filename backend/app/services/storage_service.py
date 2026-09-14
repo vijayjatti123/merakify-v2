@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import BinaryIO, Optional, Union
+from urllib.parse import unquote, urlsplit
 
 import boto3
 from botocore.client import BaseClient
@@ -58,6 +59,21 @@ def asset_url(key: str, expires_in: Optional[int] = None) -> str:
         Params={"Bucket": _bucket(), "Key": normalized_key},
         ExpiresIn=ttl,
     )
+
+
+def refresh_asset_url(url: Optional[str]) -> Optional[str]:
+    """Renew access to our own S3 objects without changing stored identity URLs."""
+    if not url:
+        return url
+    parsed = urlsplit(url)
+    bucket = settings.aws_s3_bucket.strip()
+    region = settings.aws_region.strip()
+    if bucket and parsed.scheme == "https" and parsed.hostname in {
+        f"{bucket}.s3.amazonaws.com", f"{bucket}.s3.{region}.amazonaws.com",
+    }:
+        return asset_url(unquote(parsed.path).lstrip("/"))
+    # External references are not objects we own or can sign.
+    return url
 
 
 def upload_bytes(

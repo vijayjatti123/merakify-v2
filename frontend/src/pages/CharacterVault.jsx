@@ -1,5 +1,6 @@
 import { ArrowLeft, Check, ImagePlus, Loader2, RefreshCw, Sparkles, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Alert, Box, Button, Card, CardContent, CardMedia, Chip, Skeleton, Typography } from "@mui/material";
 
 import {
   approveCharacter,
@@ -47,24 +48,43 @@ function CharacterImages({ character, compact = false }) {
   );
 }
 
+function VaultImage({ src, label }) {
+  const [state, setState] = useState("loading");
+  useEffect(() => setState("loading"), [src]);
+  return <Box sx={{ position: "relative", bgcolor: "#0F1019", minHeight: 160 }}>
+    {state === "loading" && <Skeleton variant="rectangular" height={200} aria-label={`Loading ${label}`} />}
+    {state === "error" ? <Alert severity="warning">Image unavailable. Try Refresh references.</Alert> :
+      <CardMedia component="img" image={src} alt={label} onLoad={() => setState("loaded")} onError={() => setState("error")}
+        sx={{ width: "100%", height: 240, objectFit: "contain", display: state === "loaded" ? "block" : "none" }} />}
+  </Box>;
+}
+
 export default function CharacterVault({ onBack }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [draft, setDraft] = useState(null);
   const [voiceId, setVoiceId] = useState("");
   const [approvedCharacters, setApprovedCharacters] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [libraryError, setLibraryError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     refreshApproved();
+    const timer = setInterval(refreshApproved, 5 * 60 * 1000);
+    window.addEventListener("focus", refreshApproved);
+    return () => { clearInterval(timer); window.removeEventListener("focus", refreshApproved); };
   }, []);
 
   async function refreshApproved() {
+    setLoading(true); setLibraryError("");
     try {
       setApprovedCharacters(await listCharacters());
     } catch (loadError) {
-      setError(loadError.message);
+      setLibraryError(loadError.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -232,21 +252,29 @@ export default function CharacterVault({ onBack }) {
             <p className="eyebrow">Approved only</p>
             <h2>Your characters</h2>
           </div>
-          {approvedCharacters.length ? (
-            <div className="vault-grid">
+          <Button size="small" disabled={loading} onClick={refreshApproved}>Refresh references</Button>
+          {libraryError && <Alert severity="error">{libraryError}</Alert>}
+          {loading && !approvedCharacters.length ? <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 2 }}>
+            {[0, 1, 2, 3].map((index) => <Skeleton key={index} variant="rounded" height={280} aria-label="Loading character" />)}
+          </Box> : approvedCharacters.length ? (
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
               {approvedCharacters.map((character) => (
-                <article key={character.id} className="vault-character-card">
-                  <CharacterImages character={character} />
-                  <div>
-                    <h3>{character.name}</h3>
-                    <p>{character.description}</p>
-                    <span>{character.voice_id} · {character.image_source}</span>
-                  </div>
-                </article>
+                <Card key={character.id} component="article" variant="outlined" sx={{ minWidth: 0 }}>
+                  <VaultImage src={character.image_url} label={`${character.name} approved character`} />
+                  <CardContent>
+                    <Typography component="h3" variant="h6" sx={{ overflowWrap: "anywhere" }}>{character.name}</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ my: 1 }}>{character.description}</Typography>
+                    <Chip size="small" label={`${character.voice_id} · ${character.image_source}`} />
+                  </CardContent>
+                  {character.reference_sheet_url && <Box sx={{ px: 2, pb: 2 }}>
+                    <Typography variant="caption">Reference sheet</Typography>
+                    <VaultImage src={character.reference_sheet_url} label={`${character.name} reference sheet`} />
+                  </Box>}
+                </Card>
               ))}
-            </div>
+            </Box>
           ) : (
-            <div className="vault-empty"><ImagePlus size={28} /><p>No approved characters yet.</p></div>
+            !libraryError && <div className="vault-empty"><ImagePlus size={28} /><p>No approved characters yet.</p></div>
           )}
         </section>
       </section>
