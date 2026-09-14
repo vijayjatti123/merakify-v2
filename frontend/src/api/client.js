@@ -190,3 +190,11 @@ export async function regenerateShotVideo(jobId, shot, hint = "") {
   if (!res.ok) throw new Error(data.detail || "Failed to regenerate video");
   return data;
 }
+
+
+export async function assembleFinalVideo(jobId) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/assemble`, { method: "POST" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Failed to assemble final video");
+  return data;
+}

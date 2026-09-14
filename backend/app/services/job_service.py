@@ -3,7 +3,7 @@ from typing import Any, Optional, get_args
 
 from sqlalchemy.orm import Session
 
-from app.models import AgentEvent, Job, VideoTask
+from app.models import AgentEvent, Job, VideoTask, FinalAssembly
 from app.schemas import ColorGrade, VisualStyle, style_from_brief
 
 
@@ -157,6 +157,22 @@ def job_result(job: Job) -> Optional[Any]:
                             shot["video_error"] = "Stored video temporarily inaccessible; refresh later."
                     from app.services.video_generation_service import source_fingerprint
                     shot["video_source_changed"] = fields.get("video_source_hash") != source_fingerprint(shot)
+        if db:
+            row = db.query(FinalAssembly).filter_by(job_id=job.id).populate_existing().one_or_none()
+            if row:
+                data = json.loads(row.data_json)
+                from app.services.final_assembly_service import fingerprint
+                data["stale"] = data.get("source_hash") != fingerprint(result, job.aspect_ratio, job.quality)
+                if data.get("key"):
+                    try:
+                        data["url"] = storage_service.asset_url(data["key"])
+                    except Exception:
+                        data["url"] = None
+                        data["error"] = "Final video temporarily inaccessible; refresh later."
+                if data.get("status") == "running" and final_assembly_expired(data):
+                    data["status"] = "failed"
+                    data["error"] = "Assembly worker did not finish within 30 minutes. You can assemble again."
+                result["final_video"] = data
     return result
 
 
@@ -257,3 +273,51 @@ def video_check_state(db, job_id, number, task, *, check=None, claim_retry=False
     db.commit()
     db.expire_all()
     return data
+
+
+
+def final_assembly_expired(data):
+    from datetime import datetime, timezone
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(data["started_at"])).total_seconds() > 1800
+
+
+def claim_final_assembly(db, job_id, plan):
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    from sqlalchemy.exc import IntegrityError
+    token = str(uuid4())
+    data = {"token": token, "status": "running", "source_hash": plan["source_hash"],
+            "started_at": datetime.now(timezone.utc).isoformat(), "plan": plan}
+    row = db.query(FinalAssembly).filter_by(job_id=job_id).populate_existing().one_or_none()
+    if row:
+        old_json = row.data_json
+        old = json.loads(old_json)
+        if row.status == "running" and not final_assembly_expired(old):
+            raise ValueError("Final assembly is already running for this job.")
+        changed = db.query(FinalAssembly).filter(FinalAssembly.job_id == job_id, FinalAssembly.data_json == old_json).update(
+            {FinalAssembly.status: "running", FinalAssembly.data_json: json.dumps(data)}, synchronize_session=False)
+        if changed != 1:
+            db.rollback()
+            raise ValueError("Another request already started final assembly.")
+    else:
+        db.add(FinalAssembly(job_id=job_id, status="running", data_json=json.dumps(data)))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ValueError("Another request already started final assembly.") from None
+    db.expire_all()
+    return token
+
+
+def finish_final_assembly(db, job_id, token, **fields):
+    row = db.query(FinalAssembly).filter_by(job_id=job_id).with_for_update().populate_existing().one()
+    data = json.loads(row.data_json)
+    if data["token"] != token:
+        db.rollback()
+        return False
+    data.update(fields)
+    row.data_json = json.dumps(data)
+    row.status = data["status"]
+    db.commit()
+    return True

@@ -1,7 +1,7 @@
 import { AlertTriangle, Check, Clapperboard, Clock3, ImageIcon, Loader2, Pencil, RefreshCw, Save, Sparkles, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo } from "../api/client";
+import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, assembleFinalVideo } from "../api/client";
 import { CAMERA_VOCABULARY } from "../utils/cameraVocabulary";
 
 const COLORS = {
@@ -60,24 +60,22 @@ function GenerationGrid({ shots, statuses }) {
   );
 }
 
-function StitchingPlaceholder() {
+function FinalVideo({ data, shots, busy, onAssemble }) {
+  const missing = shots.filter((shot) => !shot.video_url || shot.video_status !== "done" || shot.video_source_changed).map((shot) => shot.shot_number);
   return (
-    <section className="generation-stage generation-placeholder" aria-live="polite">
-      <Loader2 size={30} className="animate-spin" />
-      <p className="eyebrow">All shots generated</p>
-      <h2>Stitching...</h2>
-      <p>Assembling the finished shots into one sequence.</p>
-    </section>
-  );
-}
-
-function FinalVideoPlaceholder() {
-  return (
-    <section className="generation-stage generation-placeholder generation-placeholder--final" aria-label="Final video placeholder">
-      <Clapperboard size={32} />
-      <p className="eyebrow">Sequence complete</p>
-      <h2>Final video will appear here</h2>
-      <p>Individual clips can be generated in the shot cards. Dialogue clips include audio; final sequence stitching comes later.</p>
+    <section className="generation-stage generation-placeholder generation-placeholder--final" aria-label="Final video assembly" aria-live="polite">
+      {busy ? <Loader2 size={30} className="animate-spin" /> : <Clapperboard size={32} />}
+      <p className="eyebrow">Final timeline</p>
+      <h2>{busy ? "Assembling final video…" : data?.url ? "Your assembled video" : "Assemble your finished shots"}</h2>
+      {data?.url && <video controls preload="metadata" src={data.url} className="w-full rounded-md my-3" style={{ maxHeight: "60vh" }} aria-label="Final assembled video" />}
+      {data?.url && <a href={data.url} target="_blank" rel="noreferrer" className="underline">Open final video</a>}
+      {data?.stale && <p className="audio-warning">Shot videos or transitions have changed. Assemble again to update the final video.</p>}
+      {data?.error && <p className="panel-error" role="alert">{data.error}</p>}
+      {missing.length > 0 && <p>Generate or regenerate video for shot(s) {missing.join(", ")} before final assembly.</p>}
+      <button type="button" className="approve-button mt-4 disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy || !shots.length || missing.length > 0} onClick={onAssemble}>
+        {busy ? "Assembling…" : data?.url ? "Reassemble final video" : "Assemble final video"}
+      </button>
+      <p>Uses the existing shot audio and planned cuts or crossfades.</p>
     </section>
   );
 }
@@ -92,12 +90,11 @@ export default function JobView({ jobId, onReset }) {
   const [savingShot, setSavingShot] = useState(null);
   const [regeneratingShot, setRegeneratingShot] = useState(null);
   const [shotStatuses, setShotStatuses] = useState({});
-  const [generationStage, setGenerationStage] = useState("shots");
-  const stitchingTimerRef = useRef(null);
+  const [assembling, setAssembling] = useState(false);
   const [streamCycle, setStreamCycle] = useState(0);
   const [videoSubmitting, setVideoSubmitting] = useState(null);
   const [videoHints, setVideoHints] = useState({});
-  const videoBusy = final?.result?.shots?.some((shot) => ["submitting", "processing"].includes(shot.video_status));
+  const videoBusy = final?.result?.shots?.some((shot) => ["submitting", "processing"].includes(shot.video_status)) || final?.result?.final_video?.status === "running";
 
   useEffect(() => {
     if (!videoBusy) return;
@@ -165,10 +162,6 @@ export default function JobView({ jobId, onReset }) {
     return () => source.close();
   }, [jobId, streamCycle]);
 
-  useEffect(() => () => {
-    clearTimeout(stitchingTimerRef.current);
-  }, []);
-
   const done = final?.status === "done";
   const errored = final?.status === "error";
   const result = final?.result;
@@ -180,20 +173,20 @@ export default function JobView({ jobId, onReset }) {
     ...(result?.continuity?.characters || []).map((character) => character.casting_warning).filter(Boolean),
   ])];
 
-  useEffect(() => {
-    if (!approved || !shots.length || generationStage !== "shots") return;
-    const everyShotDone = shots.every(
-      (shot) => (shotStatuses[shot.shot_number] || shot.status || "pending") === "done",
-    );
-    if (!everyShotDone || result?.audio_assembly_pending || result?.assembly?.provisional) return;
+  const audioReady = shots.length > 0 && shots.every((shot) => (shotStatuses[shot.shot_number] || shot.status) === "done") && !result?.audio_assembly_pending && !result?.assembly?.provisional;
 
-    setGenerationStage("stitching");
-    clearTimeout(stitchingTimerRef.current);
-    stitchingTimerRef.current = setTimeout(() => {
-      setGenerationStage("final");
-      stitchingTimerRef.current = null;
-    }, 1600);
-  }, [approved, generationStage, shotStatuses, shots, result]);
+  async function handleAssemble() {
+    setAssembling(true);
+    setError("");
+    try {
+      await assembleFinalVideo(jobId);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      try { setFinal(await getJob(jobId)); } catch (err) { setError(err.message); }
+      setAssembling(false);
+    }
+  }
 
   function beginEdit(shot) {
     setEditingShot(shot.shot_number);
@@ -207,7 +200,6 @@ export default function JobView({ jobId, onReset }) {
     try {
       const job = await reviseJob(jobId, [{ shot_number: shotNumber, ...editValues }]);
       setShotStatuses({});
-      setGenerationStage("shots");
       setFinal({ status: job.status, error_message: job.error_message, result: job.result });
       setEditingShot(null);
     } catch (saveError) {
@@ -224,7 +216,6 @@ export default function JobView({ jobId, onReset }) {
       const job = await approveJob(jobId);
       setTrace([]);
       setShotStatuses(Object.fromEntries(job.result.shots.map((shot) => [shot.shot_number, shot.status])));
-      setGenerationStage("shots");
       setFinal({ status: job.status, error_message: job.error_message, result: job.result });
       setStreamCycle((current) => current + 1);
     } catch (approveError) {
@@ -255,10 +246,8 @@ export default function JobView({ jobId, onReset }) {
     <>
       <section className="generation-area">
         {approved ? (
-          generationStage === "stitching" ? (
-            <StitchingPlaceholder />
-          ) : generationStage === "final" ? (
-            <FinalVideoPlaceholder />
+          audioReady ? (
+            <FinalVideo data={result?.final_video} shots={shots} busy={assembling || result?.final_video?.status === "running"} onAssemble={handleAssemble} />
           ) : (
             <GenerationGrid shots={shots} statuses={shotStatuses} />
           )

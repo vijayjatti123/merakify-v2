@@ -102,3 +102,11 @@ class AgentEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     job = relationship("Job", back_populates="events")
+
+
+class FinalAssembly(Base):
+    """Explicit job-level stitching attempt, independent of mutable planning results."""
+    __tablename__ = "final_assemblies"
+    job_id = Column(String, ForeignKey("jobs.id"), primary_key=True)
+    status = Column(String, nullable=False)
+    data_json = Column(Text, nullable=False)

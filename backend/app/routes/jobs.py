@@ -24,6 +24,27 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 RETRY_CONTEXT_MARKER = "\n\n--- Retry context ---\n"
 
 
+def _run_final_assembly(job_id, token, plan):
+    from app.services import final_assembly_service
+    with SessionLocal() as db:
+        final_assembly_service.run(db, job_id, token, plan)
+
+
+@router.post("/{job_id}/assemble", status_code=202)
+def assemble_final_video(job_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    from app.services import final_assembly_service
+    job = job_service.get_job(db, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    try:
+        plan = final_assembly_service.prepare(job, job_service.job_result(job) or {})
+        token = job_service.claim_final_assembly(db, job_id, plan)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    background_tasks.add_task(_run_final_assembly, job_id, token, plan)
+    return {"job_id": job_id, "assembly_token": token, "status": "running"}
+
+
 class VideoRegenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     hint: str = Field(default="", max_length=1000)
