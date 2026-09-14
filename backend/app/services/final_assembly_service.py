@@ -304,6 +304,64 @@ def apply_color_pipeline(source, target, timeline, grade, emit=lambda note: None
             'graded': analyze_color(target, timeline)}
 
 
+def apply_deflicker(source, target, timeline, emit=lambda note: None):
+    """Module AH: transition-isolated windows AFTER grading; audio is stream-copied.
+
+    FFmpeg defaults (five frames, arithmetic mean). This normalizes luminance,
+    not arbitrary chromatic flicker or motion. Already-blended crossfade frames
+    have no single-shot ownership: bypass them, isolating both surrounding shots.
+    No transitions are recreated, and no source shots are processed pre-stitch.
+    """
+    filters = 'deflicker=size=5:mode=am'
+    original = probe(source)
+    fps = timeline['fps']
+    edges = {0, original['frames']}
+    fades = []
+    for boundary in timeline['boundaries']:
+        start = max(0, min(original['frames'], round(boundary['start'] * fps)))
+        end = max(start, min(original['frames'], round((boundary['start'] + boundary['overlap_sec']) * fps)))
+        edges.update((start, end))
+        if end > start:
+            fades.append((start, end))
+    edges = sorted(edges)
+    segments = [{'start_frame': start, 'end_frame': end,
+                 'filtered': end - start >= 5 and not any(a <= start < b for a, b in fades)}
+                for start, end in zip(edges, edges[1:])]
+    parts = ['[0:v:0]split=' + str(len(segments)) + ''.join(f'[s{i}]' for i in range(len(segments)))]
+    for i, segment in enumerate(segments):
+        parts.append(f"[s{i}]trim=start_frame={segment['start_frame']}:end_frame={segment['end_frame']},"
+                     'setpts=PTS-STARTPTS' + (',' + filters if segment['filtered'] else '') + f'[d{i}]')
+    parts.append(''.join(f'[d{i}]' for i in range(len(segments)))
+                 + f'concat=n={len(segments)}:v=1:a=0,fps={fps}[deflickered]')
+    graph = ';'.join(parts)
+    command = [ffmpeg(), '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source),
+               '-filter_complex', graph, '-map', '[deflickered]', '-map', '0:a:0', '-c:v', 'libx264',
+               '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy',
+               '-movflags', '+faststart', str(target)]
+    emit('Creative grading complete. Starting transition-isolated final timeline deflicker: ' + filters
+         + '; audio stream-copy. Crossfade intervals and spans shorter than five frames bypassed. '
+         + json.dumps(segments))
+    for attempt in range(2):
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=900)
+            if result.returncode:
+                raise AssemblyError('Deflicker failed: ' + result.stderr.decode(errors='replace')[-1000:])
+            actual = probe(target)
+            if (actual['frames'] != original['frames'] or actual['dimensions'] != original['dimensions']
+                    or actual['audio_samples'] != original['audio_samples'] or any(
+                        abs(actual[k] - original[k]) > .05 for k in ('video_duration', 'audio_duration'))):
+                raise AssemblyError('Deflicker changed timeline, dimensions or audio; refusing the result.')
+            emit('Final timeline deflicker complete; frame count, dimensions and audio duration verified. Ready for S3 storage.')
+            return {'filter': filters, 'filter_graph': graph, 'segments': segments,
+                    'before': original, 'after': actual, 'audio': 'stream-copy',
+                    'local_attempts': attempt + 1, 'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+                    'final_sha256': hashlib.sha256(target.read_bytes()).hexdigest()}
+        except (AssemblyError, subprocess.TimeoutExpired):
+            if attempt:
+                raise
+            emit('WARNING: Deflicker verification failed; retrying the local pass once.')
+
+
 def run(db, job_id, token, plan):
     """Run only from the explicit assemble action; never called by per-shot regeneration."""
     def emit(note):
@@ -332,10 +390,12 @@ def run(db, job_id, token, plan):
                 paths.append(path)
             emit('Stitching hard cuts and paired video/audio crossfades before technical correction and creative grading.')
             target = Path(folder) / 'final.mp4'
+            graded = Path(folder) / 'graded.mp4'
             stitched = Path(folder) / 'stitched.mp4'
             evidence = render(paths, stitched, plan, emit)
             evidence['stitched_final'] = evidence['final']
-            evidence['color_pipeline'] = apply_color_pipeline(stitched, target, evidence['timeline'], plan['color_grade'], emit)
+            evidence['color_pipeline'] = apply_color_pipeline(stitched, graded, evidence['timeline'], plan['color_grade'], emit)
+            evidence['deflicker'] = apply_deflicker(graded, target, evidence['timeline'], emit)
             evidence['final'] = probe(target)
             current_job = job_service.get_job(db, job_id)
             current = job_service.job_result(current_job)
