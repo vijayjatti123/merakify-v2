@@ -2,6 +2,7 @@ import { AlertTriangle, Check, Clapperboard, Clock3, ImageIcon, Loader2, Pencil,
 import { useEffect, useState } from "react";
 
 import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, assembleFinalVideo } from "../api/client";
+import FaceEnhancement, { ShotVideo } from "../components/FaceEnhancement";
 import { CAMERA_VOCABULARY } from "../utils/cameraVocabulary";
 
 const COLORS = {
@@ -94,7 +95,7 @@ export default function JobView({ jobId, onReset }) {
   const [streamCycle, setStreamCycle] = useState(0);
   const [videoSubmitting, setVideoSubmitting] = useState(null);
   const [videoHints, setVideoHints] = useState({});
-  const videoBusy = final?.result?.shots?.some((shot) => ["submitting", "processing"].includes(shot.video_status)) || final?.result?.final_video?.status === "running";
+  const videoBusy = final?.result?.shots?.some((shot) => (["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
 
   useEffect(() => {
     if (!videoBusy) return;
@@ -369,7 +370,8 @@ export default function JobView({ jobId, onReset }) {
                       </div>
                     )}
                     {shot.still_frame_warning && <p className="audio-warning">{shot.still_frame_warning}</p>}
-                    {shot.video_url && <video controls preload="metadata" src={shot.video_url} className="my-3 w-full rounded-md" aria-label={`Generated video for shot ${shot.shot_number}`} />}
+                    {shot.video_url && <ShotVideo shot={shot} />}
+                    <FaceEnhancement jobId={jobId} shot={shot} onRefresh={async () => setFinal(await getJob(jobId))} />
                     {shot.video_status && <p className="text-xs my-2" role="status">Video: {shot.video_status.replaceAll("_", " ")}{shot.has_dialogue && shot.video_status === "done" ? (shot.video_provider === "hedra" ? " · Hedra dialogue · audio included" : " · Silent clip; Sarvam audio awaits later muxing") : ""}</p>}
                     {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
                     {shot.video_error && <p className="panel-error">{shot.video_error}</p>}

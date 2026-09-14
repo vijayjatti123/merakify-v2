@@ -110,3 +110,20 @@ class FinalAssembly(Base):
     job_id = Column(String, ForeignKey("jobs.id"), primary_key=True)
     status = Column(String, nullable=False)
     data_json = Column(Text, nullable=False)
+
+
+class FaceEnhancement(Base):
+    __tablename__ = "face_enhancements"
+    id = Column(String, primary_key=True, default=new_id)
+    job_id = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
+    shot_number = Column(Integer, nullable=False)
+    status = Column(String, nullable=False)
+    data_json = Column(Text, nullable=False)
+    heartbeat = Column(Float, nullable=False)
+    __table_args__ = (UniqueConstraint("job_id", "shot_number", name="uq_face_job_shot"),)
+
+
+class ProviderSubmissionGate(Base):
+    __tablename__ = "provider_submission_gates"
+    provider = Column(String, primary_key=True)
+    next_at = Column(Float, nullable=False, default=0)

@@ -3,7 +3,7 @@ from typing import Any, Optional, get_args
 
 from sqlalchemy.orm import Session
 
-from app.models import AgentEvent, Job, VideoTask, FinalAssembly
+from app.models import AgentEvent, Job, VideoTask, FinalAssembly, FaceEnhancement, ProviderSubmissionGate
 from app.schemas import ColorGrade, VisualStyle, style_from_brief
 
 
@@ -157,6 +157,13 @@ def job_result(job: Job) -> Optional[Any]:
                             shot["video_error"] = "Stored video temporarily inaccessible; refresh later."
                     from app.services.video_generation_service import source_fingerprint
                     shot["video_source_changed"] = fields.get("video_source_hash") != source_fingerprint(shot)
+        if db:
+            enhancements = {v.shot_number: v for v in db.query(FaceEnhancement).filter_by(job_id=job.id).populate_existing()}
+            for shot in result.get("shots", []):
+                enhancement = enhancements.get(shot.get("shot_number"))
+                if enhancement:
+                    data = json.loads(enhancement.data_json)
+                    shot["face_enhancement"] = {k: data.get(k) for k in ("status", "completed_frames", "total_frames", "warning")}
         if db:
             row = db.query(FinalAssembly).filter_by(job_id=job.id).populate_existing().one_or_none()
             if row:
@@ -321,3 +328,119 @@ def finish_final_assembly(db, job_id, token, **fields):
     row.status = data["status"]
     db.commit()
     return True
+
+
+# Module V persistence is separate from Module R/S's video attempt lifecycle.
+def claim_face_enhancement(db, job_id, number, expected_key):
+    import time
+    from sqlalchemy.exc import IntegrityError
+    _, shot = video_source(db, job_id, number)
+    if not (shot.get("has_dialogue") and shot.get("video_provider") == "hedra"
+            and shot.get("video_status") == "done" and shot.get("video_key")
+            and shot.get("video_url") and not shot.get("video_source_changed")):
+        raise ValueError("Enhance Face requires a current, completed Hedra dialogue video.")
+    if shot["video_key"] != expected_key:
+        raise ValueError("Video changed; refresh before enhancing.")
+    if shot.get("video_face_enhanced"):
+        raise ValueError("This video is already face-enhanced; repeated restoration is disabled.")
+    video = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).populate_existing().one()
+    from uuid import uuid4
+    data = {"run_token": str(uuid4()), "status": "queued", "source_json": video.data_json, "source_key": expected_key,
+            "completed_frames": 0, "total_frames": None}
+    row = db.query(FaceEnhancement).filter_by(job_id=job_id, shot_number=number).populate_existing().one_or_none()
+    if row:
+        if row.status in {"queued", "running"}:
+            raise ValueError("Face enhancement is already queued or running for this shot.")
+        changed = db.query(FaceEnhancement).filter_by(id=row.id, data_json=row.data_json).update(
+            {FaceEnhancement.status: "queued", FaceEnhancement.data_json: json.dumps(data), FaceEnhancement.heartbeat: time.time()}, synchronize_session=False)
+        if changed != 1:
+            db.rollback(); raise ValueError("Another request already started enhancement.")
+    else:
+        row = FaceEnhancement(job_id=job_id, shot_number=number, status="queued", data_json=json.dumps(data), heartbeat=time.time())
+        db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback(); raise ValueError("Another request already started enhancement.") from None
+    db.refresh(row)
+    append_event(db, job_id, "face_enhancement", f"Shot {number}: face enhancement queued; current video remains available.")
+    return {"status": "queued", "enhancement_id": row.id}
+
+
+def next_face_enhancement(db):
+    import time
+    # Interrupted workers fail closed; never blindly resubmit an uncertain paid frame.
+    for row in db.query(FaceEnhancement).filter(FaceEnhancement.status == "running", FaceEnhancement.heartbeat < time.time()-300).all():
+        face_progress(db, row.id, status="failed", warning="Face enhancement worker stopped or timed out; original video preserved.")
+        append_event(db, row.job_id, "face_enhancement", f"WARNING: Shot {row.shot_number}: enhancement interrupted; original video preserved.")
+    row = db.query(FaceEnhancement).filter_by(status="queued").order_by(FaceEnhancement.heartbeat).first()
+    if not row:
+        return None
+    data = json.loads(row.data_json); data["status"] = "running"
+    changed = db.query(FaceEnhancement).filter_by(id=row.id, status="queued").update(
+        {FaceEnhancement.status: "running", FaceEnhancement.data_json: json.dumps(data), FaceEnhancement.heartbeat: time.time()}, synchronize_session=False)
+    db.commit()
+    return row.id if changed == 1 else None
+
+
+def face_progress(db, task_id, *, expected_run_token=None, **fields):
+    import time
+    row = db.query(FaceEnhancement).filter_by(id=task_id).populate_existing().one()
+    if row.status not in {"running", "queued"}:
+        raise ValueError("Enhancement attempt no longer active.")
+    old = row.data_json; data = json.loads(old)
+    if expected_run_token is not None and data.get("run_token") != expected_run_token:
+        raise ValueError("Enhancement attempt was superseded.")
+    data.update(fields)
+    changed = db.query(FaceEnhancement).filter_by(id=task_id, data_json=old).update(
+        {FaceEnhancement.data_json: json.dumps(data), FaceEnhancement.status: data["status"], FaceEnhancement.heartbeat: time.time()}, synchronize_session=False)
+    if changed != 1:
+        db.rollback(); raise ValueError("Enhancement attempt changed.")
+    db.commit()
+
+
+def finish_face_enhancement(db, task_id, stored, digest, *, expected_run_token=None):
+    import time
+    task = db.query(FaceEnhancement).filter_by(id=task_id).populate_existing().one()
+    data = json.loads(task.data_json)
+    if expected_run_token is not None and data.get("run_token") != expected_run_token:
+        raise ValueError("Enhancement attempt was superseded.")
+    _, shot = video_source(db, task.job_id, task.shot_number)
+    if task.status != "running" or shot.get("video_source_changed"):
+        raise ValueError("Shot changed during enhancement; enhanced result was not applied.")
+    original = json.loads(data["source_json"])
+    updated = {**original, "video_key": stored["key"], "video_url": stored["url"],
+               "video_sha256": digest, "video_face_enhanced": True,
+               "video_unenhanced_key": data["source_key"]}
+    changed = db.query(VideoTask).filter_by(job_id=task.job_id, shot_number=task.shot_number,
+                                           data_json=data["source_json"], status="done").update(
+        {VideoTask.data_json: json.dumps(updated)}, synchronize_session=False)
+    if changed != 1:
+        db.rollback(); raise ValueError("Video changed during enhancement; current result was preserved.")
+    data.update(status="done", output_key=stored["key"])
+    changed = db.query(FaceEnhancement).filter_by(id=task_id, status="running").update(
+        {FaceEnhancement.status: "done", FaceEnhancement.data_json: json.dumps(data), FaceEnhancement.heartbeat: time.time()}, synchronize_session=False)
+    if changed != 1:
+        db.rollback(); raise ValueError("Enhancement was interrupted; original result preserved.")
+    db.commit()
+
+
+def face_submission_slot(db, *, defer_seconds=None):
+    """Shared account-wide CAS gate: no burst, one request per >=10.5 seconds."""
+    import time
+    from sqlalchemy.exc import IntegrityError
+    now = time.time()
+    row = db.get(ProviderSubmissionGate, "replicate-gfpgan", populate_existing=True)
+    if row is None:
+        db.add(ProviderSubmissionGate(provider="replicate-gfpgan", next_at=0))
+        try: db.commit()
+        except IntegrityError: db.rollback()
+        return 0.1
+    old = row.next_at
+    if defer_seconds is None and old > now:
+        return min(old-now, 5)
+    target = max(old, now + defer_seconds) if defer_seconds is not None else now + 10.5
+    changed = db.query(ProviderSubmissionGate).filter_by(provider=row.provider, next_at=old).update(
+        {ProviderSubmissionGate.next_at: target}, synchronize_session=False)
+    db.commit()
+    return 0 if changed == 1 else 0.1

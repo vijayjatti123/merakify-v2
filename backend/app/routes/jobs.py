@@ -45,6 +45,24 @@ def assemble_final_video(job_id: str, background_tasks: BackgroundTasks, db: Ses
     return {"job_id": job_id, "assembly_token": token, "status": "running"}
 
 
+class FaceEnhanceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_video_key: str = Field(min_length=1, max_length=1024)
+
+
+@router.post("/{job_id}/shots/{shot_number}/enhance-face", status_code=202)
+def enhance_face(job_id: str, shot_number: int, payload: FaceEnhanceRequest, db: Session = Depends(get_db)):
+    from app.config import settings
+    if not settings.replicate_api_token:
+        raise HTTPException(503, "Face enhancement is not configured.")
+    try:
+        return job_service.claim_face_enhancement(db, job_id, shot_number, payload.expected_video_key)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+
+
 class VideoRegenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     hint: str = Field(default="", max_length=1000)

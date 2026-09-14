@@ -198,3 +198,13 @@ export async function assembleFinalVideo(jobId) {
   if (!res.ok) throw new Error(data.detail || "Failed to assemble final video");
   return data;
 }
+
+export async function enhanceShotFace(jobId, shot) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shot.shot_number}/enhance-face`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_video_key: shot.video_key }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not start face enhancement");
+  return data;
+}

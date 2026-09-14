@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = ""
     evolink_api_key: str = ""
     hedra_api_key: str = ""
+    replicate_api_token: str = ""
     database_url: str = "sqlite:///./merakify.db"
     allowed_origins: str = "http://localhost:5173"
     aws_access_key_id: str = ""

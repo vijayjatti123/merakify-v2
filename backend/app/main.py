@@ -24,6 +24,9 @@ async def lifespan(app):
     stop = threading.Event()
     worker = threading.Thread(target=polling_loop, args=(stop,), daemon=True, name="video-task-poller")
     worker.start()
+    from app.services.face_enhancement_service import polling_loop as face_polling_loop
+    face_worker = threading.Thread(target=face_polling_loop, args=(stop,), daemon=True, name="face-enhancement-worker")
+    face_worker.start()
     yield
     stop.set()
 
