@@ -144,6 +144,12 @@ def model_family(ai_model):
     raise ValueError(f"Shot compiler: unsupported ai_model {ai_model!r}")
 
 
+def word_range(payload, shot):
+    # Dialogue renders route to Hedra even when the job selects Kling for silent
+    # shots. Only actual Kling targets receive Module X's narrower range.
+    return (50, 100) if payload["model_family"] == "kling" and not shot.get("has_dialogue") else (100, 150)
+
+
 def first_movement(value):
     """Reduce compound instructions in compiler input only; never edit the shot."""
     value = str(value or "static").strip()
@@ -399,8 +405,9 @@ def validate_compiled(response, payload):
             continue
         problems = []
         words = value.split()
-        if not 100 <= len(words) <= 150:
-            problems.append(f"word count {len(words)}; requires 100-150")
+        minimum, maximum = word_range(payload, source)
+        if not minimum <= len(words) <= maximum:
+            problems.append(f"word count {len(words)}; requires {minimum}-{maximum}")
         opening_tokens = set(re.findall(r"\w+", " ".join(words[:30]).casefold()))
         anchor_tokens = set(re.findall(r"\w+", source["subject_anchor"].casefold())) - {"a", "an", "the"}
         # Subject facts may be separated by articles or grounded modifiers:
@@ -571,6 +578,10 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
     deadline = started + COMPILER_DEADLINE_SEC
     payload = compiler_input(result, brief=brief, emit=emit)
     groups = list(shot_batches(payload))
+    from app.services.prompt_technique_service import shot_knowledge, knowledge_addendum
+    knowledge = shot_knowledge(payload, emit)
+    systems = {index: prompts.SHOT_PROMPT_COMPILER + knowledge_addendum(group, knowledge)
+               for index, group in enumerate(groups, 1)}
     emit("shot_prompt_compiler", f"Compiling {len(payload['shots'])} shots in {len(groups)} batches of at most {COMPILER_BATCH_SIZE} after real Assembly; text only, {payload['model_family']} syntax.")
     model_input = copy.deepcopy(payload)
     for source, item in zip(payload["shots"], model_input["shots"]):
@@ -581,8 +592,10 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
         if item.get("speaker_reference"):
             item["speaker_reference"].pop("image_url", None)
         item.pop("dialogue_text", None)
-        item["visual_word_target"] = [120 - reserved, 130 - reserved]
-        item["visual_word_range"] = [max(1, 100 - reserved), 150 - reserved]
+        minimum, maximum = word_range(payload, source)
+        target = (70, 80) if maximum == 100 else (120, 130)
+        item["visual_word_target"] = [max(1, n - reserved) for n in target]
+        item["visual_word_range"] = [max(1, minimum - reserved), maximum - reserved]
         item["programmatic_reserved_words"] = reserved
         item["visual_sentence_max"] = 6 - int(bool(reference)) - int(bool(reference_insert(source)))
     raw_done, rendered_done, pending = [], [], {}
@@ -610,8 +623,8 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
                 body = json.dumps(input_for(index), ensure_ascii=False)
                 budget = max(0.001, deadline - time.monotonic())
                 pending[index] = {"started": attempt_started, "claimed": False,
-                                  "completed": _start_provider_call(lambda body=body, budget=budget: call_agent(
-                                      prompts.SHOT_PROMPT_COMPILER, body, max_tokens=16000, request_timeout=budget))}
+                                  "completed": _start_provider_call(lambda body=body, budget=budget, system=systems[index]: call_agent(
+                                      system, body, max_tokens=16000, request_timeout=budget))}
             numbers = {s["shot_number"] for s in group}
             prefix_numbers = {s["shot_number"] for s in rendered_done} | numbers
             targets = {**payload, "shots": group}
@@ -621,7 +634,7 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
             raw, rendered = _compile_batch(targets, input_for(batch_index), validation_payload=validation_payload,
                                           rendered_done=rendered_done, started=started, deadline=deadline,
                                           batch_index=batch_index, emit=emit, call_agent=call_agent,
-                                          initial=pending[batch_index])
+                                          initial=pending[batch_index], system=systems[batch_index])
             raw_done.extend(raw)
             rendered_done.extend(rendered)
     except Exception:
@@ -637,7 +650,7 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
 
 
 def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
-                   started, deadline, batch_index, emit, call_agent, initial):
+                   started, deadline, batch_index, emit, call_agent, initial, system):
     content = json.dumps(model_input, ensure_ascii=False)
     errors = []
     # Strong reasoning model is deliberate: immutable identities, model-specific
@@ -658,7 +671,7 @@ def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
             request_timeout = max(0.001, deadline - time.monotonic())
             response = _await_provider(initial["completed"], deadline=deadline) if attempt == 0 else _attempt_before_deadline(
                 lambda body=request_content, budget=request_timeout: call_agent(
-                    prompts.SHOT_PROMPT_COMPILER, body,
+                    system, body,
                     max_tokens=max(16000, len(payload["shots"]) * 1800), request_timeout=budget),
                 deadline=deadline)
             errors = []

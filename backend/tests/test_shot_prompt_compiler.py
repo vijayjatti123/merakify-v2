@@ -197,7 +197,9 @@ class CompilerTests(unittest.TestCase):
         compiled = compiler.compile_shot_prompts(result, emit=Mock(), call_agent=call)
         self.assertEqual(result, original)
         self.assertEqual({k:v for k,v in compiled[0].items() if k != "compiled_prompt"}, original["shots"][0])
-        self.assertEqual(call.call_args.args[0], prompts.SHOT_PROMPT_COMPILER)
+        self.assertTrue(call.call_args.args[0].startswith(prompts.SHOT_PROMPT_COMPILER + "\n\nPROMPT-TECHNIQUE KNOWLEDGE ADDENDUM"))
+        self.assertIn("x-identity-reinforcement", call.call_args.args[0])
+        self.assertNotIn("x-kling-word-count", call.call_args.args[0])
         self.assertNotIn("fast", call.call_args.kwargs)
 
     def test_bad_output_retries_once_then_fails_visibly(self):

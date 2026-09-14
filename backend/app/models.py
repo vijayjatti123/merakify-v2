@@ -127,3 +127,14 @@ class ProviderSubmissionGate(Base):
     __tablename__ = "provider_submission_gates"
     provider = Column(String, primary_key=True)
     next_at = Column(Float, nullable=False, default=0)
+
+
+class PromptTechnique(Base):
+    __tablename__ = "prompt_techniques"
+    id = Column(String, primary_key=True, default=new_id)
+    content_type = Column(String, nullable=True, index=True)
+    ai_model = Column(String, nullable=True, index=True)
+    technique_type = Column(String, nullable=False)
+    guidance_text = Column(Text, nullable=False)
+    source = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

@@ -17,6 +17,8 @@ Base.metadata.create_all(bind=engine)
 ensure_job_intake_columns()
 ensure_asset_tagging_columns()
 ensure_character_reference_sheet_column()
+from app.services.prompt_technique_service import seed_techniques
+seed_techniques()
 
 @asynccontextmanager
 async def lifespan(app):
