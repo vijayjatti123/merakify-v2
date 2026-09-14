@@ -65,7 +65,10 @@ def preview(result, shot):
     return {"provider": "hedra", "request": {"input": {
                 "start_image": {"source": "url", "url": fresh_reference(image)},
                 "audio": {"source": "url", "url": fresh_reference(shot["dialogue_audio_url"])},
-                "prompt": PROMPT, "aspect_ratio": ratio, "resolution": "720p"}},
+                # Keep Module R's identity/audio guard, then pass the Compiler's
+                # actual shot direction verbatim, including expression guidance.
+                "prompt": PROMPT + "\n\n" + shot["compiled_prompt"],
+                "aspect_ratio": ratio, "resolution": "720p"}},
             "reference_source": "vault_style_resolved" if vault else "module_o_still",
             "character_id": character.get("character_id"),
             "warnings": ["Hedra dialogue video uses approved audio; final duration is verified after local trimming.",
