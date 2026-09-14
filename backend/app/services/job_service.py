@@ -162,7 +162,7 @@ def job_result(job: Job) -> Optional[Any]:
             if row:
                 data = json.loads(row.data_json)
                 from app.services.final_assembly_service import fingerprint
-                data["stale"] = data.get("source_hash") != fingerprint(result, job.aspect_ratio, job.quality)
+                data["stale"] = data.get("source_hash") != fingerprint(result, job.aspect_ratio, job.quality, job.color_grade)
                 if data.get("key"):
                     try:
                         data["url"] = storage_service.asset_url(data["key"])

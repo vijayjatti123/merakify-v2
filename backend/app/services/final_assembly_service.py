@@ -2,6 +2,8 @@
 import hashlib
 import json
 import math
+import re
+from statistics import median, mean
 from pathlib import Path
 import shutil
 import subprocess
@@ -22,13 +24,13 @@ class AssemblyError(ValueError):
     pass
 
 
-def fingerprint(result, aspect_ratio, quality):
+def fingerprint(result, aspect_ratio, quality, color_grade='None'):
     def identity(shot):
         url = urlsplit(shot.get("video_url") or "")
         return [shot.get("shot_number"), shot.get("video_key") or urlunsplit((url.scheme, url.netloc, url.path, "", "")),
                 shot.get("video_sha256"), shot.get("video_task_id"), shot.get("video_status"), shot.get("video_source_changed", False)]
     value = [sorted([identity(s) for s in result.get("shots", [])], key=lambda s: s[0]),
-             result.get("assembly", {}), result.get("audio_assembly_pending", False), aspect_ratio, quality]
+             result.get("assembly", {}), result.get("audio_assembly_pending", False), aspect_ratio, quality, color_grade or 'None']
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
@@ -63,7 +65,10 @@ def prepare(job, result):
         if kind not in {"cut", "match cut", "crossfade"}:
             raise AssemblyError(f"Missing or unsupported Assembly transition for shots {key}: {kind!r}.")
         transitions.append({"between": key, "type": kind})
-    return {"source_hash": fingerprint(result, job.aspect_ratio, job.quality),
+    grade = getattr(job, 'color_grade', 'None') or 'None'
+    if grade not in CREATIVE_GRADES:
+        raise AssemblyError(f'Unsupported color grade: {grade!r}.')
+    return {"source_hash": fingerprint(result, job.aspect_ratio, job.quality, grade), "color_grade": grade,
             "aspect_ratio": job.aspect_ratio, "quality": job.quality, "transitions": transitions,
             "shots": [{k: s.get(k) for k in ("shot_number", "video_url", "video_key", "video_sha256", "video_provider", "has_dialogue")} for s in shots]}
 
@@ -165,6 +170,140 @@ def render(paths, target, plan, emit=lambda note: None):
             emit('Local stitch verification failed; retrying FFmpeg once. No media provider or TTS calls are made.')
 
 
+# Module W uses reproducible filter recipes, not third-party LUT assets.
+CREATIVE_GRADES = {
+    'None': '',
+    'Warm': 'colorbalance=rm=0.035:bm=-0.025:pl=1,eq=saturation=1.04',
+    'Cool': 'colorbalance=rm=-0.025:bm=0.035:pl=1,eq=saturation=0.98',
+    'Vintage': 'colorbalance=rm=0.025:bm=-0.025:pl=1,eq=saturation=0.78:contrast=0.94:brightness=0.015',
+    'Neon': 'colorbalance=rs=0.025:bs=0.04:pl=1,vibrance=intensity=0.25,eq=contrast=1.06',
+    'Black & white': 'hue=s=0',
+    'Vibrant': 'vibrance=intensity=0.2,eq=saturation=1.12:contrast=1.04',
+}
+
+
+def analyze_color(path, timeline):
+    """Analyze the stitched timeline, excluding blended boundaries from shot averages."""
+    with tempfile.TemporaryDirectory() as folder:
+        cmd = [ffmpeg(), '-nostdin', '-hide_banner', '-loglevel', 'error', '-i', str(Path(path).resolve()),
+               '-an', '-vf', 'scale=160:-2,format=yuv420p,signalstats,metadata=print:file=stats.txt', '-f', 'null', '-']
+        result = subprocess.run(cmd, cwd=folder, capture_output=True, timeout=900)
+        if result.returncode:
+            raise AssemblyError('Color analysis failed: ' + result.stderr.decode(errors='replace')[-1000:])
+        frames = []
+        for line in (Path(folder) / 'stats.txt').read_text().splitlines():
+            match = re.search(r'pts_time:([0-9.eE+-]+)', line)
+            if match:
+                frames.append({'time': float(match[1])})
+            elif frames and line.startswith('lavfi.signalstats.'):
+                key, value = line.split('=', 1)
+                if key.rsplit('.', 1)[-1] in {'YAVG', 'UAVG', 'VAVG', 'SATAVG'}:
+                    frames[-1][key.rsplit('.', 1)[-1]] = float(value)
+    shots = []
+    for i, shot in enumerate(timeline['shots']):
+        start = shot['start'] + (timeline['boundaries'][i-1]['overlap_sec'] if i else 0)
+        end = shot['start'] + shot['duration'] - (timeline['boundaries'][i]['overlap_sec'] if i < len(timeline['boundaries']) else 0)
+        selected = [f for f in frames if start <= f['time'] < end]
+        if not selected:
+            raise AssemblyError(f"No unblended color samples for shot {shot['shot_number']}.")
+        values = {k: mean(f[k] for f in selected) for k in ('YAVG', 'UAVG', 'VAVG', 'SATAVG')}
+        shots.append({**shot, **values, 'samples': len(selected), 'analysis_start': start, 'analysis_end': end})
+    return shots
+
+
+def correction_plan(stats):
+    # Image averages are content-dependent proxies, NOT measured Kelvin/white balance.
+    # Intentional scene color can look like drift. Conservative caps limit that risk;
+    # this does not recover clipped detail or replace a colorist's review.
+    baseline = {k: median(s[k] for s in stats) for k in ('YAVG', 'UAVG', 'VAVG', 'SATAVG')}
+    clamp = lambda v, limit: max(-limit, min(limit, v))
+    adjustments = []
+    for shot in stats:
+        dy = baseline['YAVG'] - shot['YAVG']
+        du, dv = baseline['UAVG'] - shot['UAVG'], baseline['VAVG'] - shot['VAVG']
+        ratio = baseline['SATAVG'] / max(shot['SATAVG'], 1)
+        saturation = 1 + clamp((ratio - 1) * .7, .15) if abs(ratio - 1) > .20 else 1
+        chroma_outlier = math.hypot(du, dv) > 6
+        adjustments.append({'shot_number': shot['shot_number'],
+                            'y': clamp(dy * .7, 16) if abs(dy) > 10 else 0,
+                            'u': clamp(baseline['UAVG'] - (128 + (shot['UAVG'] - 128) * saturation), 6) if chroma_outlier else 0,
+                            'v': clamp(baseline['VAVG'] - (128 + (shot['VAVG'] - 128) * saturation), 6) if chroma_outlier else 0,
+                            'saturation': saturation})
+    return baseline, adjustments
+
+
+def correction_filter(timeline, adjustments):
+    """Blend correction coefficients during existing dissolves; never edit the transition."""
+    terms = {k: [] for k in ('y', 'u', 'v', 'saturation')}
+    for i, (shot, adj) in enumerate(zip(timeline['shots'], adjustments)):
+        start, end = shot['start'], shot['start'] + shot['duration']
+        incoming = timeline['boundaries'][i-1]['overlap_sec'] if i else 0
+        outgoing = timeline['boundaries'][i]['overlap_sec'] if i < len(timeline['boundaries']) else 0
+        weight = f'gte(T,{start:.9f})*lt(T,{end:.9f})'
+        if incoming:
+            weight += f'*clip((T-{start:.9f})/{incoming:.9f},0,1)'
+        if outgoing:
+            weight += f'*clip(({end:.9f}-T)/{outgoing:.9f},0,1)'
+        for key in terms:
+            value = adj[key] - (1 if key == 'saturation' else 0)
+            if value:
+                terms[key].append(f'({value:.9f})*({weight})')
+    if not any(terms.values()):
+        return ''
+    values = {k: '+'.join(v) or '0' for k, v in terms.items()}
+    sat = f"(1+({values['saturation']}))"
+    return (f"geq=lum='clip(lum(X,Y)+({values['y']}),0,255)':"
+            f"cb='clip(128+(cb(X,Y)-128)*{sat}+({values['u']}),0,255)':"
+            f"cr='clip(128+(cr(X,Y)-128)*{sat}+({values['v']}),0,255)'")
+
+
+def color_encode(source, target, filters, emit):
+    if not filters:
+        shutil.copyfile(source, target)
+        return
+    cmd = [ffmpeg(), '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source),
+           '-vf', filters, '-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'fast',
+           '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart', str(target)]
+    original = probe(source)
+    for attempt in range(2):
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=900)
+            if result.returncode:
+                raise AssemblyError('Color pass failed: ' + result.stderr.decode(errors='replace')[-1000:])
+            actual = probe(target)
+            if actual['frames'] != original['frames'] or actual['audio_samples'] != original['audio_samples'] or any(
+                    abs(actual[k] - original[k]) > .05 for k in ('video_duration', 'audio_duration')):
+                raise AssemblyError('Color pass changed timeline or audio; refusing the result.')
+            return
+        except (AssemblyError, subprocess.TimeoutExpired):
+            if attempt:
+                raise
+            emit('WARNING: Color-pass verification failed; retrying the local pass once.')
+
+
+def apply_color_pipeline(source, target, timeline, grade, emit=lambda note: None):
+    if grade not in CREATIVE_GRADES:
+        raise AssemblyError(f'Unsupported color grade: {grade!r}.')
+    before = analyze_color(source, timeline)
+    baseline, adjustments = correction_plan(before)
+    filters = correction_filter(timeline, adjustments)
+    emit('Technical color correction: bounded sequence-median normalization on the stitched timeline. '
+         'Image statistics are content-dependent; intentional scene color may also be affected. '
+         + json.dumps(adjustments))
+    with tempfile.TemporaryDirectory() as folder:
+        corrected = Path(folder) / 'corrected.mp4'
+        color_encode(source, corrected, filters, emit)
+        after = analyze_color(corrected, timeline)
+        emit(f'Technical correction complete. Applying uniform creative grade: {grade}.'
+             + (' Creative pass is a byte-for-byte copy.' if grade == 'None' else ''))
+        color_encode(corrected, target, CREATIVE_GRADES[grade], emit)
+        corrected_hash = hashlib.sha256(corrected.read_bytes()).hexdigest()
+    return {'baseline': baseline, 'before': before, 'corrected': after, 'adjustments': adjustments,
+            'correction_filter': filters, 'grade': grade, 'grade_filter': CREATIVE_GRADES[grade],
+            'corrected_sha256': corrected_hash, 'final_sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
+            'graded': analyze_color(target, timeline)}
+
+
 def run(db, job_id, token, plan):
     """Run only from the explicit assemble action; never called by per-shot regeneration."""
     def emit(note):
@@ -191,12 +330,16 @@ def run(db, job_id, token, plan):
                 if shot.get('video_sha256') and digest.hexdigest() != shot['video_sha256']:
                     raise AssemblyError(f'Shot {number}: downloaded video hash does not match the accepted video.')
                 paths.append(path)
-            emit('Stitching hard cuts and paired video/audio crossfades. No grading or audio regeneration.')
+            emit('Stitching hard cuts and paired video/audio crossfades before technical correction and creative grading.')
             target = Path(folder) / 'final.mp4'
-            evidence = render(paths, target, plan, emit)
+            stitched = Path(folder) / 'stitched.mp4'
+            evidence = render(paths, stitched, plan, emit)
+            evidence['stitched_final'] = evidence['final']
+            evidence['color_pipeline'] = apply_color_pipeline(stitched, target, evidence['timeline'], plan['color_grade'], emit)
+            evidence['final'] = probe(target)
             current_job = job_service.get_job(db, job_id)
             current = job_service.job_result(current_job)
-            if fingerprint(current, current_job.aspect_ratio, current_job.quality) != plan['source_hash']:
+            if fingerprint(current, current_job.aspect_ratio, current_job.quality, current_job.color_grade) != plan['source_hash']:
                 raise AssemblyError('Shot videos or Assembly transitions changed during stitching. Assemble again when all shots are ready.')
             key = f'jobs/{job_id}/final/{token}.mp4'
             digest = hashlib.sha256(target.read_bytes()).hexdigest()
