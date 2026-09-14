@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from array import array
 from urllib.parse import urlsplit, urlunsplit
 
 import av
@@ -34,7 +35,7 @@ def fingerprint(result, aspect_ratio, quality, color_grade='None'):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def prepare(job, result):
+def prepare(job, result, *, audio_offsets=None):
     """No network, disk media access, or FFmpeg before ALL shot videos pass this gate."""
     shots = sorted(result.get("shots", []), key=lambda s: s["shot_number"])
     if not shots:
@@ -57,14 +58,25 @@ def prepare(job, result):
         between = item.get("between")
         if between in boundaries:
             raise AssemblyError(f"Duplicate Assembly transition for {between}.")
-        boundaries[between] = item.get("type")
+        boundaries[between] = item.get('type')
+    # Explicit caller input ONLY. Never consume offsets from raw model output.
+    # No production caller supplies this argument; dialogue timing stays unchanged.
+    offsets = {} if audio_offsets is None else audio_offsets
+    valid_pairs = {f'{left}-{right}' for left, right in zip(numbers, numbers[1:])}
+    if not isinstance(offsets, dict) or any(key not in valid_pairs for key in offsets):
+        raise AssemblyError('Explicit audio_offsets must map existing adjacent shot pairs to milliseconds.')
     transitions = []
     for left, right in zip(numbers, numbers[1:]):
         key = f"{left}-{right}"
         kind = boundaries.get(key)
         if kind not in {"cut", "match cut", "crossfade"}:
             raise AssemblyError(f"Missing or unsupported Assembly transition for shots {key}: {kind!r}.")
-        transitions.append({"between": key, "type": kind})
+        transition = {"between": key, "type": kind}
+        offset = offsets.get(key, 0)
+        validate_audio_offset(kind, offset)
+        if offset:
+            transition['audio_offset_ms'] = offset
+        transitions.append(transition)
     grade = getattr(job, 'color_grade', 'None') or 'None'
     if grade not in CREATIVE_GRADES:
         raise AssemblyError(f'Unsupported color grade: {grade!r}.')
@@ -104,6 +116,49 @@ def probe(path):
     return {"video_duration": end, "audio_duration": audio_end, "frames": count, "audio_samples": samples, "dimensions": dimensions}
 
 
+def validate_audio_offset(kind, offset):
+    # Only prepare's separate keyword argument can opt into these plan values.
+    if type(offset) is not int or (offset and (kind != 'cut' or not 200 <= abs(offset) <= 500)):
+        raise AssemblyError('audio_offset_ms must be 0, or an integer from -500 to -200 (J) '
+                            'or 200 to 500 (L), on a cut transition only.')
+
+
+def verify_offset_audio(paths, plan, measured, emit):
+    """Check actual decoded sound, not merely the existence of audio streams."""
+    evidence, cache = [], {}
+    def pcm(index):
+        if index not in cache:
+            result = subprocess.run([ffmpeg(), '-nostdin', '-v', 'error', '-i', str(paths[index]),
+                                     '-vn', '-ac', '1', '-ar', '48000', '-f', 's16le', '-'],
+                                    capture_output=True, timeout=900)
+            if result.returncode:
+                raise AssemblyError('Could not verify audio for the requested J/L-cut.')
+            samples = array('h'); samples.frombytes(result.stdout)
+            cache[index] = samples
+        return cache[index]
+    for i, transition in enumerate(plan['transitions'], 1):
+        offset = transition.get('audio_offset_ms', 0)
+        validate_audio_offset(transition['type'], offset)
+        if not offset:
+            continue
+        seconds = abs(offset) / 1000
+        if min(measured[i-1]['audio_duration'], measured[i]['audio_duration']) <= seconds * 2:
+            raise AssemblyError(f"Shots {transition['between']}: clips too short for requested audio offset.")
+        left, right = pcm(i-1), pcm(i)
+        count = round(seconds * 48000)
+        def dbfs(samples):
+            rms = math.sqrt(sum(float(x) ** 2 for x in samples) / max(1, len(samples))) / 32768
+            return 20 * math.log10(max(rms, 1e-12))
+        levels = [dbfs(left[-count:]), dbfs(right[:count])]
+        if min(levels) < -50 or hashlib.sha256(left.tobytes()).digest() == hashlib.sha256(right.tobytes()).digest():
+            raise AssemblyError(f"Shots {transition['between']}: J/L-cut requires distinct audio with both boundary windows above -50 dBFS; measured {levels}.")
+        evidence.append({'between': transition['between'], 'audio_offset_ms': offset, 'boundary_dbfs': levels})
+        emit(f"Explicit {'J' if offset < 0 else 'L'}-cut at {transition['between']}: {abs(offset)}ms; "
+             f"boundary audio levels {levels} dBFS. Video cut unchanged. WARNING: existing audio is shifted "
+             "without additional source handles; on-camera dialogue sync may change. Review before use.")
+    return evidence
+
+
 def filter_graph(plan, measured):
     short = 480 if plan["quality"] == "480p" else 720
     w, h = map(int, plan["aspect_ratio"].split(":"))
@@ -119,6 +174,8 @@ def filter_graph(plan, measured):
     timeline = [{"shot_number": plan['shots'][0]['shot_number'], "start": 0.0, "duration": durations[0]}]
     boundaries = []
     for i, transition in enumerate(plan['transitions'], 1):
+        offset_ms = transition.get('audio_offset_ms', 0)
+        validate_audio_offset(transition['type'], offset_ms)
         nv, na = f'joinedv{i}', f'joineda{i}'
         fade = 0.0
         if transition['type'] == 'crossfade':
@@ -129,6 +186,32 @@ def filter_graph(plan, measured):
             offset = total - fade
             parts.append(f"[{v}][v{i}]xfade=transition=fade:duration={fade:.9f}:offset={offset:.9f}[{nv}]")
             parts.append(f"[{a}][a{i}]acrossfade=d={fade:.9f}:c1=tri:c2=tri[{na}]")
+        elif offset_ms:
+            # Visual hard cut is unchanged. Only the audio edit straddles it.
+            # J advances incoming audio and pads its vacated end; L delays only
+            # the outgoing shot (not earlier shots) and pads its vacated start.
+            delta = abs(offset_ms) / 1000
+            # Keep U's combined concat as the video clock: video-only concat
+            # can cut earlier when decoded video/audio endpoints differ.
+            parts.append(f"[{a}]asplit=2[clockleft{i}][editleft{i}]")
+            parts.append(f"[a{i}]asplit=2[clockright{i}][editright{i}]")
+            parts.append(f"[{v}][clockleft{i}][v{i}][clockright{i}]concat=n=2:v=1:a=1[{nv}][clockaudio{i}]")
+            if offset_ms < 0:
+                parts.append(f"[editright{i}]apad,atrim=duration={durations[i]+delta:.9f}[jpad{i}]")
+                parts.append(f"[editleft{i}][jpad{i}]acrossfade=d={delta:.9f}:c1=tri:c2=tri[editedaudio{i}]")
+            else:
+                prefix = total - durations[i-1]
+                if prefix > 0:
+                    parts.append(f"[editleft{i}]asplit=2[lprefix{i}][ltail{i}]")
+                    parts.append(f"[lprefix{i}]atrim=end={prefix:.9f},asetpts=PTS-STARTPTS[lp{i}]")
+                    parts.append(f"[ltail{i}]atrim=start={prefix:.9f},asetpts=PTS-STARTPTS,adelay={offset_ms}:all=1[lt{i}]")
+                    parts.append(f"[lp{i}][lt{i}]concat=n=2:v=0:a=1[ldelay{i}]")
+                else:
+                    parts.append(f"[editleft{i}]adelay={offset_ms}:all=1[ldelay{i}]")
+                parts.append(f"[ldelay{i}][editright{i}]acrossfade=d={delta:.9f}:c1=tri:c2=tri[editedaudio{i}]")
+            # Keep the clock branch connected to a demanded output. An anullsink
+            # here can trigger FFmpeg 7's best_input scheduling assertion.
+            parts.append(f"[clockaudio{i}][editedaudio{i}]amix=inputs=2:weights='0 1':normalize=0:duration=longest[{na}]")
         else:
             parts.append(f"[{v}][{a}][v{i}][a{i}]concat=n=2:v=1:a=1[{nv}][{na}]")
         start = total - fade
@@ -150,6 +233,7 @@ def render(paths, target, plan, emit=lambda note: None):
         if abs(media['video_duration'] - media['audio_duration']) > 0.25:
             raise AssemblyError(f"Shot {shot['shot_number']}: source audio/video durations differ by more than 250ms; review the source before stitching.")
         measured.append(media)
+    offset_evidence = verify_offset_audio(paths, plan, measured, emit)
     graph, v, a, timeline = filter_graph(plan, measured)
     command = [ffmpeg(), '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-filter_complex_threads', '1']
     for path in paths:
@@ -163,7 +247,8 @@ def render(paths, target, plan, emit=lambda note: None):
             final = probe(target)
             if any(abs(final[k] - timeline['duration']) > 0.10 for k in ('video_duration', 'audio_duration')):
                 raise AssemblyError('Stitched audio/video duration failed the 100ms timeline check.')
-            return {'timeline': timeline, 'sources': measured, 'final': final, 'filter_graph': graph, 'local_attempts': attempt + 1}
+            return {'timeline': timeline, 'sources': measured, 'final': final, 'filter_graph': graph,
+                    'audio_offsets': offset_evidence, 'local_attempts': attempt + 1}
         except (AssemblyError, subprocess.TimeoutExpired):
             if attempt:
                 raise
