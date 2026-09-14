@@ -23,6 +23,10 @@ class StillFrameError(RuntimeError):
 
 # Allow provider resolution rounding (e.g. 1376x768 for 16:9), not wrong orientation.
 ASPECT_RATIO_TOLERANCE = 0.02
+MAX_REQUEST_IMAGES = 8
+# Reserve QA's candidate slot in both paths so it checks the same references
+# generation saw. This is a conservative budget, not the provider's maximum.
+MAX_REFERENCE_IMAGES = MAX_REQUEST_IMAGES - 1
 
 
 def check_dimensions(image, aspect_ratio):
@@ -90,6 +94,8 @@ def _inline(image):
 
 
 def _google(parts, *, aspect_ratio=None):
+    if sum("inlineData" in part for part in parts) > MAX_REQUEST_IMAGES:
+        raise StillFrameError("Internal still-frame image budget exceeded")
     if not settings.google_ai_api_key.strip():
         raise StillFrameError("Google image credentials are not configured")
     config = {"responseModalities": ["IMAGE" if aspect_ratio else "TEXT"]}
@@ -115,7 +121,7 @@ def _google(parts, *, aspect_ratio=None):
 def _continuation_parts(continuation, *, checking=False):
     if continuation is None:
         return []
-    number, image = continuation
+    number, image = continuation[:2]
     instruction = (
         f"Previous shot {number}'s actual accepted still — same-scene action context, not an identity sheet. "
         "This is an opening-frame preview, not a video end frame. Use its visible physical state as "
@@ -133,11 +139,50 @@ def _continuation_parts(continuation, *, checking=False):
     return [{"text": instruction}, _inline(image)]
 
 
-def generate_still(visual, references, aspect_ratio, feedback="", *, continuation=None):
+def _reference_parts(references, continuation, *, checking=False, emit=None):
+    """Deduplicate source URLs, then select vault > newest entity > anchor.
+
+    Production entries carry (label, image, source_url, priority, established_shot).
+    Legacy two-tuples have no URL; byte identity is the conservative fallback.
+    Distinct external URLs are not assumed to identify the same image.
+    """
+    entries = []
+    for reference in references:
+        name, image = reference[:2]
+        source, priority, established = reference[2:] if len(reference) > 2 else (
+            "sha256:" + hashlib.sha256(image.data).hexdigest(), 0, 0)
+        prefix = "Identity reference: " if checking else "Locked identity reference for "
+        entries.append((source, priority, established, name, image, prefix + name + ":"))
+    if continuation:
+        number, image = continuation[:2]
+        source = continuation[2] if len(continuation) > 2 else "sha256:" + hashlib.sha256(image.data).hexdigest()
+        entries.append((source, 2, 0, f"continuation shot {number}", image,
+                        _continuation_parts(continuation, checking=checking)[0]["text"]))
+    groups = {}
+    for source, priority, established, name, image, instruction in sorted(entries, key=lambda e: (e[1], -e[2])):
+        # Compare the original URL, before fresh_reference renews its signature.
+        # Never print signed URLs in traces; labels identify omissions instead.
+        if source not in groups:
+            groups[source] = {"image": image, "names": [], "instructions": []}
+        groups[source]["names"].append(name)
+        groups[source]["instructions"].append(instruction)
+    selected = list(groups.values())[:MAX_REFERENCE_IMAGES]
+    dropped = list(groups.values())[MAX_REFERENCE_IMAGES:]
+    if emit and (len(entries) != len(groups) or dropped):
+        emit("still_frame", f"Reference budget ({'QA' if checking else 'generation'}): "
+             f"{len(entries)} requested, {len(groups)} unique source URLs, {len(selected)} attached "
+             f"(+{1 if checking else 0} candidate; total cap {MAX_REQUEST_IMAGES}). "
+             f"{len(entries) - len(groups)} duplicate image attachment(s) merged with all labels retained. "
+             + ("WARNING: Dropped references: " + "; ".join(
+                 ", ".join(group["names"]) for group in dropped) if dropped else "No unique references dropped."))
     parts = []
-    for name, image in references:
-        parts.extend([{"text": f"Locked identity reference for {name}:"}, _inline(image)])
-    parts.extend(_continuation_parts(continuation))
+    for group in selected:
+        parts.extend([{"text": "\n".join(group["instructions"])}, _inline(group["image"])])
+    return parts
+
+
+def generate_still(visual, references, aspect_ratio, feedback="", *, continuation=None, emit=None):
+    parts = _reference_parts(references, continuation, emit=emit)
     parts.append({"text": (
         "Generate ONE still image: the opening frame of this compiled film shot. "
         "Freeze the first described physical instant; later motion and transition descriptions are "
@@ -175,9 +220,7 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
                       "entities. For job references compare ONLY the named entity's identity/design/material; "
                       "allow the new framing, pose, action and lighting. Reject changed faces, garments, prop "
                       "designs or location surfaces. Entity catalog: " + json.dumps(entities)})
-    for name, reference in references:
-        parts.extend([{"text": f"Identity reference: {name}"}, _inline(reference)])
-    parts.extend(_continuation_parts(continuation, checking=True))
+    parts.extend(_reference_parts(references, continuation, checking=True, emit=emit))
     parts.extend([{"text": "Candidate opening frame to check:"}, _inline(image)])
     for attempt in range(2):
         response = _google(parts)
@@ -283,7 +326,7 @@ def generate_still_frames(result, *, job_id, emit):
         continuation = None
         if _continuous_pair(previous, shot, result):
             if previous.get("still_frame_url") and previous_image is not None:
-                continuation = (previous['shot_number'], previous_image)
+                continuation = (previous['shot_number'], previous_image, previous['still_frame_url'])
             else:
                 emit("still_frame", f"Shot {shot['shot_number']}: previous shot {previous['shot_number']} "
                      "has no accepted still; continuing without an action anchor.")
@@ -304,25 +347,27 @@ def generate_still_frames(result, *, job_id, emit):
                 if character.get("character_id"):
                     if not character.get("image_url"):
                         raise StillFrameError("Locked character has no reference image")
-                    references.append((name, _download_reference_image(fresh_reference(character["image_url"]))))
+                    references.append((name, _download_reference_image(fresh_reference(character["image_url"])),
+                                       character["image_url"], 0, 0))
             for entity_id in entities:
                 if entity_id in reference_map:
                     references.append(("Job entity " + entity_id + "; preserve only this entity, not the old shot layout",
-                                       reference_bytes[entity_id]))
+                                       reference_bytes[entity_id], reference_map[entity_id]["url"],
+                                       1, reference_map[entity_id]["shot_number"]))
                     emit("still_frame", f"Shot {number}: conditioning {entity_id} from job reference shot {reference_map[entity_id]['shot_number']}.")
             if entities:
                 visual += ("\nJob-scoped consistency: reference frames lock ONLY each labeled entity's face, hair, "
                            "garment construction, object geometry/material/color or location surfaces. Keep those "
                            "facts identical; follow THIS shot's camera, pose and action. Do not copy the old "
                            "composition or add other subjects from the reference. Matched entities: " + json.dumps(entities))
-            emit("still_frame", f"Shot {number}: generating opening still with {len(references)} locked image reference(s).")
+            emit("still_frame", f"Shot {number}: considering {len(references)} locked image reference(s) before budget selection.")
             if continuation:
-                emit("still_frame", f"Shot {number}: adding previous-shot action anchor from shot {continuation[0]} "
-                     f"(image SHA256 {hashlib.sha256(continuation[1].data).hexdigest()}).")
+                emit("still_frame", f"Shot {number}: considering previous-shot action anchor from shot {continuation[0]} "
+                     f"subject to reference budget (image SHA256 {hashlib.sha256(continuation[1].data).hexdigest()}).")
             feedback = ""
             aspect_ratio = result.get("aspect_ratio") or "16:9"
             for attempt in range(2):
-                image = generate_still(visual, references, aspect_ratio, feedback, continuation=continuation)
+                image = generate_still(visual, references, aspect_ratio, feedback, continuation=continuation, emit=emit)
                 dimensions = check_dimensions(image, aspect_ratio)
                 if not dimensions["matches"]:
                     feedback = (f"Decoded image is {dimensions['width']}x{dimensions['height']}; expected "
