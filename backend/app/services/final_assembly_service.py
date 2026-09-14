@@ -106,7 +106,9 @@ def filter_graph(plan, measured):
     durations = [math.ceil(max(m["video_duration"], m["audio_duration"]) * FPS - 1e-6) / FPS for m in measured]
     parts = []
     for i, duration in enumerate(durations):
-        parts.append(f"[{i}:v:0]fps={FPS},scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=0.35,trim=duration={duration:.9f}[v{i}]")
+        # FFmpeg 7 setpts clears link frame_rate (1/0), even for CFR sources.
+        # Restore explicit CFR after all timestamp/padding/trim filters, before xfade.
+        parts.append(f"[{i}:v:0]fps={FPS},scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=0.35,trim=duration={duration:.9f},fps={FPS},settb=AVTB[v{i}]")
         parts.append(f"[{i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS,apad,atrim=duration={duration:.9f}[a{i}]")
     v, a, total = 'v0', 'a0', durations[0]
     timeline = [{"shot_number": plan['shots'][0]['shot_number'], "start": 0.0, "duration": durations[0]}]
