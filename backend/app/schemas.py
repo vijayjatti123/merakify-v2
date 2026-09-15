@@ -89,6 +89,7 @@ class JobCreate(BaseModel):
     )
     script_text: Optional[str] = None
     resolutions: Optional[ScriptResolutionMap] = None
+    character_mentions: dict[str, str] = Field(default_factory=dict, max_length=20)
 
     @model_validator(mode="after")
     def validate_request(self):
@@ -162,6 +163,14 @@ class CharacterGenerate(BaseModel):
     name: str
     description: str
     character_id: Optional[str] = None
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    catalog_status: Literal["customer", "test", "review_required"] = "review_required"
+
+
+class CharacterPresentation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    display_name: str = Field(min_length=1, max_length=80)
+    catalog_status: Literal["customer", "test", "review_required"]
 
 
 class CharacterVoice(BaseModel):
@@ -173,6 +182,8 @@ class CharacterVoice(BaseModel):
 class CharacterOut(BaseModel):
     id: str
     name: str
+    display_name: Optional[str] = None
+    catalog_status: Literal["customer", "test", "review_required"] = "review_required"
     description: str
     image_url: str
     reference_sheet_url: Optional[str] = None

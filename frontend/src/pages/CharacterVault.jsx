@@ -12,12 +12,7 @@ import {
   uploadCharacter,
 } from "../api/client";
 
-const SARVAM_VOICES = [
-  "shubh", "aditya", "rahul", "rohan", "amit", "dev", "ratan", "varun", "manan", "sumit",
-  "kabir", "aayan", "ashutosh", "advait", "anand", "tarun", "sunny", "mani", "gokul", "vijay",
-  "mohit", "rehan", "soham", "ritu", "priya", "neha", "pooja", "simran", "kavya", "ishita",
-  "shreya", "roopa", "tanya", "shruti", "suhani", "kavitha", "rupali",
-];
+import { SARVAM_VOICES } from "../utils/voices";
 
 function voiceLabel(voiceId) {
   return `${voiceId.charAt(0).toUpperCase()}${voiceId.slice(1)}`;
@@ -31,12 +26,12 @@ function CharacterImages({ character, compact = false }) {
   return (
     <div className={`vault-character-images${compact ? " is-compact" : ""}`}>
       <figure>
-        <img src={character.image_url} alt={`${character.name} approved character`} />
+        <img src={character.image_url} alt={`${character.display_name} approved character`} />
         <figcaption>Character</figcaption>
       </figure>
       {character.reference_sheet_url ? (
         <figure>
-          <img src={character.reference_sheet_url} alt={`${character.name} character views`} />
+          <img src={character.reference_sheet_url} alt={`${character.display_name} character views`} />
           <figcaption>Character views</figcaption>
         </figure>
       ) : (
@@ -191,7 +186,7 @@ export default function CharacterVault({ onBack }) {
             <h2>Create a character</h2>
           </div>
 
-          <TextField fullWidth label="Name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Meera" />
+          <TextField fullWidth label="Display name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Meera" />
           <TextField fullWidth multiline label="Description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Age, appearance, wardrobe, personality, and distinctive details" minRows={4} />
           {busy && <ActionProgress label={{ generate: "Creating your character image…", upload: "Uploading your character image…", voice: "Saving your voice choice…", approve: "Saving your character and creating character views…" }[busyAction]} />}
 
@@ -263,15 +258,15 @@ export default function CharacterVault({ onBack }) {
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
               {approvedCharacters.map((character) => (
                 <Card key={character.id} component="article" variant="outlined" sx={{ minWidth: 0 }}>
-                  <VaultImage src={character.image_url} label={`${character.name} approved character`} />
+                  <VaultImage src={character.image_url} label={`${character.display_name} approved character`} />
                   <CardContent>
-                    <Typography component="h3" variant="h6" sx={{ overflowWrap: "anywhere" }}>{character.name}</Typography>
+                    <Typography component="h3" variant="h6" sx={{ overflowWrap: "anywhere" }}>{character.display_name}</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ my: 1 }}>{character.description}</Typography>
                     <Chip size="small" label={`${character.voice_id} · ${character.image_source}`} />
                   </CardContent>
                   {character.reference_sheet_url && <Box sx={{ px: 2, pb: 2 }}>
                     <Typography variant="caption">Character views</Typography>
-                    <VaultImage src={character.reference_sheet_url} label={`${character.name} character views`} />
+                    <VaultImage src={character.reference_sheet_url} label={`${character.display_name} character views`} />
                   </Box>}
                 </Card>
               ))}

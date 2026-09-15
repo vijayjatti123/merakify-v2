@@ -6,6 +6,8 @@ import { friendlyMessage } from "../utils/presentation";
 
 import { extractScript, listAssets, listCharacters, uploadAsset } from "../api/client";
 import ScriptResolutionPanel from "../components/ScriptResolutionPanel";
+import BriefCharacterInput from "../components/BriefCharacterInput";
+import { activeMentions, recordMentionJob } from "../utils/characterMentions";
 
 const COLORS = {
   bg: "var(--mui-palette-background-default)",
@@ -30,6 +32,7 @@ function SelectField({ label, note, value, onChange, children }) {
 
 export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "" }) {
   const [brief, setBrief] = useState("");
+  const [characterSelections, setCharacterSelections] = useState({});
   const [scriptMode, setScriptMode] = useState(false);
   const [extraction, setExtraction] = useState(null);
   const [approvedCharacters, setApprovedCharacters] = useState([]);
@@ -124,6 +127,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     try {
       await onSubmit({
         brief: briefParts.join("\n\n"),
+        character_mentions: activeMentions(brief, characterSelections),
         aspect_ratio: aspectRatio,
         visual_style: visualStyle,
         color_grade: colorGrade,
@@ -131,6 +135,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
         language: effectiveLanguage,
         ai_model: aiModel,
       });
+      recordMentionJob();
     } catch (submitError) {
       setError(submitError.message);
     } finally {
@@ -186,14 +191,16 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
 
         <div className="intake-collapse" aria-hidden={collapsed}>
           <fieldset disabled={collapsed} className="intake-collapse-inner flex flex-col gap-5">
-            <TextField multiline fullWidth label={scriptMode ? "Your script" : "Your idea"}
+            {scriptMode ? <TextField multiline fullWidth label={scriptMode ? "Your script" : "Your idea"}
               value={brief}
               onChange={(event) => setBrief(event.target.value)}
               placeholder={scriptMode ? "Paste your full script or scene breakdown here" : "A joyful jewellery ad about a daughter surprising her mother"}
               minRows={5}
               autoFocus
               sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7 } }}
-            />
+            /> :
+              <BriefCharacterInput value={brief} onChange={setBrief} selections={characterSelections}
+                onSelections={setCharacterSelections} disabled={collapsed || submitting} />}
             <Button
               type="button"
               className="script-mode-toggle"

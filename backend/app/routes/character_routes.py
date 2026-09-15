@@ -1,11 +1,12 @@
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Response
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.schemas import CharacterGenerate, CharacterOut, CharacterVoice
+from app.schemas import CharacterGenerate, CharacterOut, CharacterVoice, CharacterPresentation
 from app.services import character_image_service, character_service, storage_service
 
 router = APIRouter(prefix="/api/characters", tags=["characters"])
@@ -41,6 +42,10 @@ def generate_character(payload: CharacterGenerate, db: Session = Depends(get_db)
     name = _required_text(payload.name, "name")
     description = _required_text(payload.description, "description")
     character = _replaceable_character(db, payload.character_id)
+    try:
+        character_service.validate_presentation(payload.display_name, payload.catalog_status)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
     try:
         image = character_image_service.generate_character_image(name, description)
@@ -62,6 +67,8 @@ def generate_character(payload: CharacterGenerate, db: Session = Depends(get_db)
             description=description,
             image_url=uploaded["url"],
             image_source="generated",
+            display_name=payload.display_name,
+            catalog_status=payload.catalog_status,
         )
     except Exception:
         storage_service.delete_object(uploaded["key"])
@@ -74,11 +81,17 @@ def upload_character(
     description: str = Form(...),
     file: UploadFile = File(...),
     character_id: str | None = Form(None),
+    display_name: str | None = Form(None),
+    catalog_status: Literal["customer", "test", "review_required"] = Form("review_required"),
     db: Session = Depends(get_db),
 ):
     normalized_name = _required_text(name, "name")
     normalized_description = _required_text(description, "description")
     character = _replaceable_character(db, character_id)
+    try:
+        character_service.validate_presentation(display_name, catalog_status)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
     if not file.content_type or not file.content_type.lower().startswith("image/"):
         raise HTTPException(status_code=400, detail="file must be an image")
 
@@ -98,6 +111,8 @@ def upload_character(
             description=normalized_description,
             image_url=uploaded["url"],
             image_source="uploaded",
+            display_name=display_name,
+            catalog_status=catalog_status,
         )
     except Exception:
         storage_service.delete_object(uploaded["key"])
@@ -168,5 +183,16 @@ def list_characters(response: Response, db: Session = Depends(get_db)):
             "image_url": storage_service.refresh_asset_url(character.image_url),
             "reference_sheet_url": storage_service.refresh_asset_url(character.reference_sheet_url),
         })
-        for character in character_service.list_approved_characters(db)
+        for character in character_service.list_customer_characters(db)
     ]
+
+
+@router.patch("/{character_id}/presentation", response_model=CharacterOut)
+def update_presentation(character_id: str, payload: CharacterPresentation, db: Session = Depends(get_db)):
+    character = character_service.get_character(db, character_id)
+    if character is None:
+        raise HTTPException(404, "character not found")
+    try:
+        return character_service.set_presentation(db, character, payload.display_name, payload.catalog_status)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error

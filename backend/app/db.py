@@ -45,7 +45,28 @@ ASSET_COLUMN_DDL = {
 
 CHARACTER_COLUMN_DDL = {
     "reference_sheet_url": "TEXT",
+    "display_name": "VARCHAR(80)",
+    "catalog_status": "VARCHAR NOT NULL DEFAULT 'review_required'",
 }
+
+# Explicitly reviewed legacy IDs, not runtime name-pattern filtering.
+# Meera/Tara were approved for customer use by the user; fixtures stay hidden.
+REVIEWED_CHARACTER_CATALOG = {
+    "0eacb44a-3b89-4598-b89d-492073a16051": ("Meera", "customer"),
+    "e0e41b06-539b-40a0-b9e1-f8b73cf2aee9": ("Tara", "customer"),
+    "53e9e215-e9a6-4213-ac2e-1e0c25d8c292": (None, "test"),
+    "7afd9d42-49ee-4066-abfd-81c0bf3cc177": (None, "test"),
+    "e9ce4d42-eabc-4385-92ad-6cbf6303e691": (None, "test"),
+    "9d35e156-2c07-4290-99ad-1e3a85cf5c0e": (None, "test"),
+}
+
+
+def apply_reviewed_character_catalog(connection) -> None:
+    for character_id, (display_name, catalog_status) in REVIEWED_CHARACTER_CATALOG.items():
+        connection.execute(text(
+            "UPDATE characters SET display_name=:display_name, catalog_status=:catalog_status "
+            "WHERE id=:id AND catalog_status='review_required' AND display_name IS NULL"
+        ), {"id": character_id, "display_name": display_name, "catalog_status": catalog_status})
 
 
 def ensure_job_intake_columns() -> None:
@@ -87,7 +108,11 @@ def ensure_asset_tagging_columns() -> None:
 
 
 def ensure_character_reference_sheet_column() -> None:
-    """Add the nullable reference-sheet URL to existing character vaults."""
+    """Add vault metadata idempotently; legacy identities stay hidden until reviewed.
+
+    Approval only records the image/voice workflow. It is not evidence that an
+    old record is customer content, so never infer eligibility from its name.
+    """
     inspector = inspect(engine)
     if "characters" not in inspector.get_table_names():
         return
@@ -96,6 +121,8 @@ def ensure_character_reference_sheet_column() -> None:
         for name, definition in CHARACTER_COLUMN_DDL.items():
             if name not in existing:
                 connection.exec_driver_sql(f"ALTER TABLE characters ADD COLUMN {name} {definition}")
+        if "catalog_status" not in existing:
+            apply_reviewed_character_catalog(connection)
 
 
 def get_db():

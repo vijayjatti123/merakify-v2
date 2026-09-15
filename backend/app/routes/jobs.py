@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -236,14 +237,53 @@ def retry_failed_job(job_id: str, background_tasks: BackgroundTasks, db: Session
     return _job_out(retried)
 
 
+def _resolve_brief_mentions(payload: JobCreate, db: Session):
+    """Translate selected mention IDs into the existing explicit resolution map.
+
+    Never infer a vault identity from a typed name or trust client descriptions.
+    No pipeline/schema of stored resolutions changes are needed.
+    """
+    from app.services import character_service
+    brief = payload.brief.strip()
+    script = payload.script_text.strip() if payload.script_text is not None else None
+    resolutions = payload.resolutions.model_dump() if payload.resolutions else None
+    if not payload.character_mentions:
+        return brief, script, resolutions
+    resolutions = resolutions or {"characters": {}, "locations": {}}
+    replacements = {}
+    for token, character_id in payload.character_mentions.items():
+        if not re.fullmatch(r"@[\w-]{1,120}", token):
+            raise HTTPException(422, "Invalid character mention. Please select the character again.")
+        pattern = r"(?<![\w@])" + re.escape(token) + r"(?![\w-])"
+        if not re.search(pattern, brief):
+            raise HTTPException(422, "A selected character is no longer mentioned. Please select it again.")
+        character = character_service.get_character(db, character_id)
+        if character is None or not character_service.is_customer_selectable(character):
+            raise HTTPException(422, "A selected character is no longer available. Please choose another.")
+        resolution = {"mode": "vault", "character_id": character.id}
+        for name, existing in resolutions["characters"].items():
+            if name.strip().casefold() == character.display_name.strip().casefold() and existing != resolution:
+                raise HTTPException(422, "Two selections use the same character name. Please choose one.")
+        resolutions["characters"][character.display_name] = resolution
+        replacements[token] = character.display_name
+    # One replacement pass avoids changing text introduced by another replacement.
+    pattern = r"(?<![\w@])(" + "|".join(re.escape(t) for t in sorted(replacements, key=len, reverse=True)) + r")(?![\w-])"
+    brief = re.sub(pattern, lambda m: replacements[m[0]], brief)
+    if script is not None:
+        script = re.sub(pattern, lambda m: replacements[m[0]], script)
+    return brief, script, resolutions
+
+
+
 @router.post("", response_model=JobOut)
 def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     if not payload.brief.strip():
         raise HTTPException(status_code=400, detail="brief cannot be empty")
     if not payload.language.strip():
         raise HTTPException(status_code=400, detail="language cannot be empty")
+    brief, script, resolutions = _resolve_brief_mentions(payload, db)
     return _create_and_start_job(
-        payload.brief.strip(),
+        brief,
         background_tasks,
         db,
         aspect_ratio=payload.aspect_ratio,
@@ -252,8 +292,8 @@ def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Sessio
         quality=payload.quality,
         language=payload.language.strip(),
         ai_model=payload.ai_model,
-        script_text=payload.script_text.strip() if payload.script_text is not None else None,
-        resolutions=payload.resolutions.model_dump() if payload.resolutions is not None else None,
+        script_text=script,
+        resolutions=resolutions,
     )
 
 

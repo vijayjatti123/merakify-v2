@@ -136,7 +136,7 @@ function CharacterResolutionRow({ item, characters, resolution, onResolve, onApp
         <select aria-label={`Choose character ${item.displayName}`} value={choice} onChange={handleChoice}>
           <option value="">Choose a reference</option>
           {characters.map((character) => (
-            <option key={character.id} value={`vault:${character.id}`}>Vault: {character.name}</option>
+            <option key={character.id} value={`vault:${character.id}`}>Vault: {character.display_name}</option>
           ))}
           <option value="create">Create a new character here</option>
           <option value="invent">Let the AI invent this one</option>

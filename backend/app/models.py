@@ -62,6 +62,8 @@ class Character(Base):
 
     id = Column(String, primary_key=True, default=new_id)
     name = Column(String, nullable=False)
+    display_name = Column(String(80), nullable=True)
+    catalog_status = Column(String, nullable=False, default="review_required", server_default="review_required")
     description = Column(Text, nullable=False)
     image_url = Column(Text, nullable=False)
     reference_sheet_url = Column(Text, nullable=True)

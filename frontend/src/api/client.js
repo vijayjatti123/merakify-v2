@@ -33,7 +33,11 @@ export async function createJob(payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error("Failed to create job");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const mentionError = typeof data.detail === "string" && /^(A selected character|Two selections|Invalid character mention)/.test(data.detail);
+    throw new Error(mentionError ? `Please review your character selection. ${data.detail}` : "Failed to create job");
+  }
   return res.json();
 }
 
@@ -79,7 +83,7 @@ export async function generateCharacter({ name, description, characterId }) {
   const res = await fetch(`${BASE_URL}/api/characters/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, description, character_id: characterId || null }),
+    body: JSON.stringify({ name, display_name: name.trim(), catalog_status: "customer", description, character_id: characterId || null }),
   });
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
@@ -91,6 +95,8 @@ export async function generateCharacter({ name, description, characterId }) {
 export async function uploadCharacter({ name, description, file, characterId }) {
   const body = new FormData();
   body.append("name", name);
+  body.append("display_name", name.trim());
+  body.append("catalog_status", "customer");
   body.append("description", description);
   body.append("file", file);
   if (characterId) body.append("character_id", characterId);

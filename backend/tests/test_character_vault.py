@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
+from app.models import Character
 from app.routes.character_routes import router as characters_router
 from app.services.character_image_service import CharacterImageGenerationError, GeneratedCharacterImage
 
@@ -91,7 +92,7 @@ class CharacterVaultTests(unittest.TestCase):
         ]
         draft = self.client.post(
             "/api/characters/generate",
-            json={"name": "Meera", "description": "An architect in a linen jacket"},
+            json={"name": "Meera", "display_name": "Meera", "catalog_status": "customer", "description": "An architect in a linen jacket"},
         ).json()
 
         self.assertEqual(self.client.get("/api/characters").json(), [])
@@ -173,7 +174,7 @@ class CharacterVaultTests(unittest.TestCase):
         )
         draft = self.client.post(
             "/api/characters/upload",
-            data={"name": "Leela", "description": "A detective in a charcoal coat"},
+            data={"name": "Leela", "catalog_status": "test", "description": "A detective in a charcoal coat"},
             files={"file": ("broken.png", b"not-an-image", "image/png")},
         ).json()
         self.client.post(f"/api/characters/{draft['id']}/voice", json={"voice_id": "neha"})
@@ -187,9 +188,10 @@ class CharacterVaultTests(unittest.TestCase):
             approved.json()["reference_sheet_error"],
             "Google returned no reference-sheet image",
         )
-        persisted = self.client.get("/api/characters").json()[0]
-        self.assertEqual(persisted["status"], "approved")
-        self.assertIsNone(persisted["reference_sheet_url"])
+        self.assertEqual(self.client.get("/api/characters").json(), [])
+        persisted = self.db.get(Character, draft["id"])
+        self.assertEqual(persisted.status, "approved")
+        self.assertIsNone(persisted.reference_sheet_url)
 
 
 if __name__ == "__main__":
