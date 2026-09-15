@@ -388,7 +388,8 @@ def generate_still_frames(result, *, job_id, emit):
                     break
                 feedback = verdict["reason"]
                 emit("still_frame", f"Shot {number}: visual check rejected candidate {attempt + 1}; "
-                     + ("retrying once." if attempt == 0 else "using text fallback."))
+                     + ("retrying once." if attempt == 0 else "using text fallback.")
+                     + f" Reason: {feedback}")
             else:
                 raise StillFrameError("Still-frame visual check rejected both candidates")
             ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[image.content_type]
