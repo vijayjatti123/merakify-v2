@@ -191,7 +191,7 @@ export default function CharacterVault({ onBack }) {
           {busy && <ActionProgress label={{ generate: "Creating your character image…", upload: "Uploading your character image…", voice: "Saving your voice choice…", approve: "Saving your character and creating character views…" }[busyAction]} />}
 
           <div className="vault-image-actions">
-            <Button type="button" onClick={handleGenerate} disabled={busy} className="vault-primary">
+            <Button type="button" onClick={handleGenerate} disabled={busy} variant="contained" className="vault-primary">
               {busyAction === "generate" ? <Loader2 size={15} className="animate-spin" /> : draft ? <RefreshCw size={15} /> : <Sparkles size={15} />}
               {draft ? "Retry image" : "Generate image"}
             </Button>
@@ -235,7 +235,7 @@ export default function CharacterVault({ onBack }) {
                 {draft.voice_id && !voiceSelectionSaved && (
                   <p role="status" className="vault-error">Save your voice selection before approving.</p>
                 )}
-                <Button type="button" onClick={handleApprove} disabled={busy || !voiceSelectionSaved} className="vault-primary">
+                <Button type="button" onClick={handleApprove} disabled={busy || !voiceSelectionSaved} variant="contained" className="vault-primary">
                   {busyAction === "approve" ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Approve character
                 </Button>
               </div>
@@ -245,27 +245,27 @@ export default function CharacterVault({ onBack }) {
           {error && <Alert severity="error">{friendlyMessage(error, "Your character could not be saved. Please try again.")}</Alert>}
         </Card>
 
-        <Card component="section" className="vault-library">
+        <Box component="section" className="vault-library">
           <div>
             <p className="eyebrow">Approved only</p>
             <h2>Your characters</h2>
           </div>
-          <Button size="small" disabled={loading} onClick={refreshApproved}>Refresh references</Button>
+          <Button startIcon={<RefreshCw size={18} />} disabled={loading} onClick={refreshApproved}>Refresh references</Button>
           {libraryError && <Alert severity="error">{friendlyMessage(libraryError, "Your characters could not be loaded. Please refresh.")}</Alert>}
-          {loading && !approvedCharacters.length ? <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 2 }}>
+          {loading && !approvedCharacters.length ? <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 3 }}>
             {[0, 1, 2, 3].map((index) => <Skeleton key={index} variant="rounded" height={280} aria-label="Loading character" />)}
           </Box> : approvedCharacters.length ? (
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" }, gap: 3 }}>
               {approvedCharacters.map((character) => (
-                <Card key={character.id} component="article" variant="outlined" sx={{ minWidth: 0 }}>
+                <Card key={character.id} component="article" className="character-portrait-card" sx={{ minWidth: 0 }}>
                   <VaultImage src={character.image_url} label={`${character.display_name} approved character`} />
                   <CardContent>
                     <Typography component="h3" variant="h6" sx={{ overflowWrap: "anywhere" }}>{character.display_name}</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ my: 1 }}>{character.description}</Typography>
                     <Chip size="small" label={`${character.voice_id} · ${character.image_source}`} />
                   </CardContent>
-                  {character.reference_sheet_url && <Box sx={{ px: 2, pb: 2 }}>
-                    <Typography variant="caption">Character views</Typography>
+                  {character.reference_sheet_url && <Box component="details" className="character-views" sx={{ px: 3.5, pb: 3.5 }}>
+                    <Typography component="summary" variant="body2">Explore character views</Typography>
                     <VaultImage src={character.reference_sheet_url} label={`${character.display_name} character views`} />
                   </Box>}
                 </Card>
@@ -274,7 +274,7 @@ export default function CharacterVault({ onBack }) {
           ) : (
             !libraryError && <div className="vault-empty"><ImagePlus size={28} /><p>No approved characters yet.</p></div>
           )}
-        </Card>
+        </Box>
       </section>
     </Box>
   );

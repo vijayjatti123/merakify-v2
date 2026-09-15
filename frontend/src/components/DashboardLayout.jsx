@@ -26,7 +26,7 @@ export default function DashboardLayout({ screen, onNavigate, onNew, children })
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigation = <>
     <Stack direction="row" spacing={1.5} sx={{ p: 3, alignItems: "center" }}>
-      <Clapperboard size={25} /><Box><Typography fontWeight={700}>Merakify</Typography><Typography variant="caption" color="text.secondary">Your video workspace</Typography></Box>
+      <span className="brand-mark"><Clapperboard size={25} /></span><Box><Typography fontWeight={800} fontSize={22}>Merakify</Typography><Typography variant="caption" color="text.secondary">Your creative space</Typography></Box>
     </Stack>
     <Divider />
     <Box component="nav" aria-label="Workspace navigation" sx={{ p: 2, flex: 1 }}>

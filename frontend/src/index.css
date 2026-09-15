@@ -1210,3 +1210,68 @@ input {
 
 /* Leave room for MUI's floating field label inside the collapsible form. */
 .intake-collapse-inner { padding-top: 8px; }
+
+/* Creator surfaces: quiet depth, generous controls, and a secondary lavender accent. */
+.creator-eyebrow { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 16px; border-radius: 12px; font-size: .75rem; font-weight: 600; color: var(--mui-palette-secondary-main); background: rgba(113,98,166,.08); }
+.intake-card.MuiCard-root { border: 0; border-radius: 24px; background-image: radial-gradient(ellipse at top right, rgba(181,162,217,.13), transparent 55%); }
+.intake-header h1 { font-weight: 600; letter-spacing: -.035em; line-height: 1.2; }
+.intake-header { margin-bottom: 4px; }
+.intake-options { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 24px 20px; padding-top: 8px; }
+.intake-options .MuiFormControl-root { min-width: 0; }
+.intake-options .reference-toggle { min-height: 56px; }
+.intake-card .script-mode-toggle { align-self: flex-start; }
+.vault-workspace { grid-template-columns: minmax(280px,340px) minmax(0,1fr); gap: 36px; }
+.vault-editor.MuiCard-root { padding: 28px; gap: 28px; border: 0; border-radius: 24px; }
+.vault-library { padding: 0; border: 0; background: transparent; }
+.vault-library > .MuiButton-root { margin: 16px 0 24px; }
+.vault-header { margin-bottom: 40px; gap: 24px; }
+.vault-header h1 { font-weight: 600; letter-spacing: -.035em; }
+.vault-header > div > p:last-child { font-size: .95rem; line-height: 1.7; max-width: 640px; }
+.vault-editor h2, .vault-library h2 { font-size: 1.2rem; font-weight: 600; }
+.vault-image-actions { gap: 16px; }
+.vault-upload { min-height: 46px; border-radius: 16px; padding: 10px 18px; gap: 8px; }
+.vault-upload:focus-within { outline: 2px solid var(--mui-palette-primary-main); outline-offset: 3px; }
+.history-card { display: flex; flex-direction: column; }
+.history-card .MuiCardActions-root { margin-top: auto; }
+.history-card-top { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
+.history-card-top .MuiChip-root { margin-bottom: 0; }
+.creator-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 16px; background: rgba(113,98,166,.09); color: var(--mui-palette-secondary-main); }
+.shot-card-list { gap: 24px; }
+.shot-card.MuiCard-root { padding: 24px; border: 0; border-radius: 24px; }
+.generation-stage.MuiCard-root, .script-resolution-panel.MuiCard-root { border: 0; border-radius: 24px; }
+.lucide { stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+@media (max-width: 1100px) { .vault-workspace { grid-template-columns: minmax(0,1fr); } }
+@media (max-width: 600px) {
+  .intake-options { grid-template-columns: minmax(0,1fr); gap: 22px; }
+  .vault-editor.MuiCard-root { padding: 24px; }
+  .vault-header { margin-bottom: 28px; }
+}
+/* Violet studio surfaces and functional visual selectors. */
+.brand-mark { display:inline-flex;padding:12px;border-radius:16px;color:white;background:linear-gradient(140deg,#6D42E5,#B056DF);box-shadow:0 8px 22px -8px #6D42E5; }
+.MuiDrawer-paper .MuiListItemButton-root.Mui-selected { background:var(--mui-palette-primary-main);color:var(--mui-palette-primary-contrastText); }
+.MuiDrawer-paper .MuiListItemButton-root.Mui-selected .MuiListItemIcon-root { color:inherit; }
+.intake-card.MuiCard-root { background-image:radial-gradient(ellipse at 95% 0,rgba(170,122,250,.20),transparent 48%),radial-gradient(ellipse at 0 0,rgba(255,159,155,.12),transparent 40%); }
+.intake-header h1 { font-size:clamp(2.2rem,4vw,3.5rem);letter-spacing:-.055em;font-weight:750;line-height:1.08;margin-bottom:18px; }
+.hero-accent { color:var(--mui-palette-primary-main); }
+.intake-header .intake-summary { font-size:1rem; }
+.creative-widgets { display:grid;grid-template-columns:1.3fr 1fr;gap:20px; }
+.creative-widgets section { border-radius:22px;padding:20px;background:rgba(109,66,229,.055);min-width:0; }
+.creative-widgets .duration-widget { background:rgba(8,127,131,.07); }
+.creative-widgets h2 { display:flex;align-items:center;gap:8px;font-size:.85rem;font-weight:650;margin:0 0 16px; }
+.creative-widgets .MuiToggleButtonGroup-root { display:flex;gap:8px; }
+.creative-widgets .MuiToggleButton-root { border:0!important;border-radius:14px!important;flex:1;text-transform:none;padding:12px 10px;gap:10px;line-height:1.3;color:var(--mui-palette-text-secondary); }
+.creative-widgets .MuiToggleButton-root.Mui-selected { background:var(--mui-palette-background-paper);color:var(--mui-palette-primary-main);box-shadow:0 4px 14px rgba(71,39,121,.12); }
+.creative-widgets .MuiToggleButton-root span { text-align:left;font-weight:650; }
+.creative-widgets small { display:block;font-size:.63rem;font-weight:400;margin-top:5px; }
+.duration-widget p { font-size:.72rem;color:var(--mui-palette-text-secondary);margin:15px 0 0; }
+.history-card.MuiCard-root { border-top:5px solid #A787F2;background-image:linear-gradient(145deg,rgba(109,66,229,.065),transparent 65%); }
+.history-card.history-tone-1 { border-top-color:#EFA79B;background-image:linear-gradient(145deg,rgba(239,167,155,.13),transparent 65%); }
+.history-card.history-tone-2 { border-top-color:#74C8BC;background-image:linear-gradient(145deg,rgba(116,200,188,.13),transparent 65%); }
+.history-card .creator-icon { width:60px;height:60px;background:rgba(109,66,229,.1);color:var(--mui-palette-primary-main);border-radius:20px; }
+.character-portrait-card { align-self:start; }
+.character-portrait-card .MuiCardContent-root { padding:24px; }
+.character-portrait-card h3 { font-size:1.05rem;font-weight:650;line-height:1.4; }
+.character-views summary { cursor:pointer;color:var(--mui-palette-primary-main);padding-top:4px; }
+.character-views[open] summary { margin-bottom:16px; }
+@media(max-width:800px) { .creative-widgets { grid-template-columns:1fr; } }
+@media(max-width:600px) { .creative-widgets section { padding:16px; } .intake-header h1 { font-size:2.4rem; } }

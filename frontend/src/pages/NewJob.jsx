@@ -1,11 +1,12 @@
-import { ChevronUp, ImagePlus, Loader2, Plus, X } from "lucide-react";
+import { Sparkles, FileText, ChevronUp, ImagePlus, Loader2, Plus, X, Smartphone, Monitor, Clock3 } from "lucide-react";
 import { useState } from "react";
-import { Alert, Button, Card, TextField } from "@mui/material";
+import { Alert, Button, Card, TextField, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import ActionProgress from "../components/ActionProgress";
 import { friendlyMessage } from "../utils/presentation";
 
 import { extractScript, listAssets, listCharacters, uploadAsset } from "../api/client";
 import ScriptResolutionPanel from "../components/ScriptResolutionPanel";
+
 import BriefCharacterInput from "../components/BriefCharacterInput";
 import { activeMentions, recordMentionJob } from "../utils/characterMentions";
 
@@ -174,36 +175,31 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   }
 
   return (
-    <Card component="section" className={`intake-card ${collapsed ? "intake-card--collapsed" : ""}`} aria-label="Creative brief input" sx={{ p: { xs: 2, md: 4 } }}>
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+    <Card component="section" className={`intake-card ${collapsed ? "intake-card--collapsed" : ""}`} aria-label="Creative brief input" sx={{ p: { xs: 3, md: 5 } }}>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-8">
         <header className="intake-header">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] mb-2" style={{ color: COLORS.marigold }}>Your next video</p>
+            <p className="creator-eyebrow" style={{ color: COLORS.marigold }}><Sparkles size={16} aria-hidden="true" /> IDEA TO VIDEO</p>
             <h1 className="text-3xl md:text-4xl mb-2" style={{ fontFamily: "inherit" }}>
-              {collapsed ? "Brief submitted" : "What should we make?"}
+              {collapsed ? "Brief submitted" : <>Small idea.<br /><span className="hero-accent">Big screen energy.</span></>}
             </h1>
             <p className="text-sm intake-summary" style={{ color: COLORS.muted }}>
-              {collapsed ? submittedBrief : "One sentence is enough. The defaults below are ready to go."}
+              {collapsed ? submittedBrief : "Tell your story. Set your style. We’ll bring the shots together."}
             </p>
           </div>
           {collapsed && <ChevronUp size={18} aria-hidden="true" style={{ color: COLORS.marigold }} />}
         </header>
 
         <div className="intake-collapse" aria-hidden={collapsed}>
-          <fieldset disabled={collapsed} className="intake-collapse-inner flex flex-col gap-5">
-            {scriptMode ? <TextField multiline fullWidth label={scriptMode ? "Your script" : "Your idea"}
-              value={brief}
-              onChange={(event) => setBrief(event.target.value)}
-              placeholder={scriptMode ? "Paste your full script or scene breakdown here" : "A joyful jewellery ad about a daughter surprising her mother"}
-              minRows={5}
-              autoFocus
-              sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7 } }}
-            /> :
+          <fieldset disabled={collapsed} className="intake-collapse-inner flex flex-col gap-7">
+            {scriptMode ? <TextField multiline fullWidth label="Your script" value={brief}
+              onChange={event => setBrief(event.target.value)} placeholder="Paste your full script or scene breakdown here"
+              minRows={3} autoFocus sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7 } }} /> :
               <BriefCharacterInput value={brief} onChange={setBrief} selections={characterSelections}
                 onSelections={setCharacterSelections} disabled={collapsed || submitting} />}
             <Button
               type="button"
-              className="script-mode-toggle"
+              className="script-mode-toggle" startIcon={<FileText size={18} />}
               aria-pressed={scriptMode}
               onClick={() => {
                 setScriptMode((current) => !current);
@@ -214,14 +210,21 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               {scriptMode ? "Use an idea instead" : "Paste a script instead"}
             </Button>
 
-            <div className="flex flex-wrap items-start gap-3">
-              <SelectField label="Duration" value={duration} onChange={(event) => setDuration(event.target.value)}>
-                <option value="15 seconds">15s</option><option value="30 seconds">30s</option>
-                <option value="60 seconds">60s</option><option value="Custom">Custom</option>
-              </SelectField>
-              <SelectField label="Aspect ratio" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}>
-                <option value="9:16">Portrait (9:16)</option><option value="16:9">Landscape (16:9)</option>
-              </SelectField>
+            <div className="creative-widgets">
+              <section className="format-widget"><h2><Monitor size={17} /> Make it fit</h2>
+                <ToggleButtonGroup exclusive value={aspectRatio} onChange={(_, value) => value && setAspectRatio(value)} aria-label="Aspect ratio">
+                  <ToggleButton value="9:16"><Smartphone size={27} /><span>Portrait<small>9:16 · Social & stories</small></span></ToggleButton>
+                  <ToggleButton value="16:9"><Monitor size={27} /><span>Landscape<small>16:9 · The big picture</small></span></ToggleButton>
+                </ToggleButtonGroup>
+              </section>
+              <section className="duration-widget"><h2><Clock3 size={17} /> Set the pace</h2>
+                <ToggleButtonGroup exclusive value={duration} onChange={(_, value) => value && setDuration(value)} aria-label="Duration">
+                  {[['15 seconds','15s'],['30 seconds','30s'],['60 seconds','60s'],['Custom','Custom']].map(([value,label]) => <ToggleButton key={value} value={value}>{label}</ToggleButton>)}
+                </ToggleButtonGroup>
+                <p>A quick moment or a little more story.</p>
+              </section>
+            </div>
+            <div className="intake-options">
               <SelectField label="Content type" value={contentType} onChange={(event) => setContentType(event.target.value)}>
                 <option>Ad</option><option>Short story</option><option>Documentary</option><option>Product hero</option><option>UGC</option><option>Other</option>
               </SelectField>
@@ -244,8 +247,8 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
                   </optgroup>
                 ))}
               </SelectField>
-              <Button type="button" onClick={toggleAssetPanel} aria-label="Add reference image" className="mt-5 h-9 w-9 rounded-md flex items-center justify-center" style={{ background: assetPanelOpen ? COLORS.marigold : COLORS.panel, border: `1px solid ${assetPanelOpen ? COLORS.marigold : COLORS.border}`, color: assetPanelOpen ? COLORS.bg : COLORS.text }}>
-                {assetPanelOpen ? <X size={17} /> : <Plus size={17} />}
+              <Button type="button" onClick={toggleAssetPanel} aria-label="Add reference image" variant="outlined" color="secondary" className="reference-toggle">
+                {assetPanelOpen ? <X size={18} /> : <ImagePlus size={18} />} Reference image
               </Button>
             </div>
 
@@ -303,7 +306,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
             {error && <Alert severity="error">{friendlyMessage(error, "We couldn't start your video. Please try again.")}</Alert>}
             {submitting && <ActionProgress label={scriptMode ? "Reading your script…" : "Starting your video plan…"} />}
             {uploading && <ActionProgress label="Uploading your reference image…" />}
-            <Button type="submit" disabled={!canSubmit} className="self-start px-6 py-3 rounded-md text-sm font-semibold flex items-center gap-2" style={{ background: canSubmit ? COLORS.marigold : COLORS.border, color: canSubmit ? COLORS.bg : COLORS.muted, cursor: canSubmit ? "pointer" : "not-allowed" }}>
+            <Button type="submit" disabled={!canSubmit} variant="contained" className="self-start" startIcon={!submitting ? <Sparkles size={18} /> : undefined}>
               {submitting && <Loader2 size={15} className="animate-spin" />}
               {submitting ? (scriptMode ? "Reading your script…" : "Starting...") : (scriptMode ? "Choose characters and places" : "Create shot list")}
             </Button>
