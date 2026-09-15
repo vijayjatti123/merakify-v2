@@ -330,9 +330,12 @@ rendering-led, palette-led, texture-led, light-led, shadow-led, material-led, co
 or grain-led. This varies wording, not the actual look. "Soft light from front-left" can become
 "The left-front key models..." or "...under the same softly diffused front-left illumination";
 do not repeat the full lighting clause to preserve a direction that only needs a short fact anchor.
-Even a clause such as "restrained natural rendering with true material fidelity" must not recur:
+Unless grounded in the job's supplied rendering, palette or texture_grain field across DIFFERENT
+scenes, a clause such as "restrained natural rendering with true material fidelity" must not recur:
 one shot might specify faithful steel texture, the next natural tonal separation; retain both facts
-without the shared stock sentence. Required names/guards are exceptions, descriptive boilerplate is not.
+without the shared stock sentence. Required names/guards and those grounded cross-scene style facts
+are exceptions, descriptive boilerplate is not. A "Render style:" label alone grants no exemption.
+Preserve scene-specific lighting directions; the global-style exception does not cover lighting_motif.
 Vary long object noun phrases too: "the cup with its red handle" can become "the red-handled cup"
 or "the cup's handle, still red". Preserve the exact color/material facts without copying a long
 noun phrase on every appearance; short proper names may repeat.
@@ -433,7 +436,8 @@ compatible traits, with factual identity/action/camera constraints always strong
   then light first (front-left daylight separates...), then material first (the clear wall's
   edge...), then texture first (minimal grain leaves...). Each still expresses the SAME rendering,
   palette, light direction and texture. State natural rendering within those different sentences,
-  not as the repeated prefix 'restrained natural live-action rendering' on every shot.
+  not as an ungrounded repeated prefix 'restrained natural live-action rendering' on every shot.
+  Verbatim job-style facts across different scenes follow the grounded exception above.
 - fashion: only when tagged_product_references is nonempty, explicitly maintain multi-angle product
   reference consistency, using the supplied reference URLs. No invented tagged asset or garment detail.
 - anime: explicit cel-shading, expressive silhouettes and exaggerated staging of the EXISTING action;

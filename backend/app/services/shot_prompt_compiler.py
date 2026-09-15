@@ -277,7 +277,13 @@ def compiler_input(result, *, brief="", emit):
         for name in shot.get("characters_in_shot", []):
             if _name(name) not in characters:
                 raise ValueError(f"Shot compiler cannot resolve character {name!r}")
-            refs.append({k: characters[_name(name)].get(k) for k in ("name", "description", "gender", "character_id", "image_url", "voice_id")})
+            character = characters[_name(name)]
+            ref = {k: character.get(k) for k in ("name", "description", "gender", "character_id", "image_url", "voice_id")}
+            # Director replaces this description from the selected Vault row.
+            # Do not treat the job style bible or an invented character as Vault facts.
+            if character.get("character_id") and character.get("voice_assignment") == "vault":
+                ref["locked_vault_description"] = character.get("description")
+            refs.append(ref)
         item["character_references"] = refs
         item["subject_anchor"] = refs[0]["name"] if refs else shot.get("description", "").rstrip(".!?। ")
         # An upstream cast tag is not necessarily the visible foreground subject:
@@ -385,6 +391,58 @@ def _lighting_setup_phrases(prose):
                       and set(phrase) <= _LIGHT_PHYSICAL_WORDS}
         contexts[phrase] = contexts[phrase] & signatures if phrase in contexts else signatures
     return contexts
+
+
+def _vault_fact_tokens(text):
+    # Ignore grammatical list glue, never synonyms or reordered content words.
+    return tuple(word for word in re.findall(r"\w+", text.casefold())
+                 if word not in {"a", "an", "the", "her", "his", "their", "its", "and"})
+
+
+def _vault_fact_ids(phrase, source, *, boundary=True):
+    needle = _vault_fact_tokens(" ".join(phrase))
+    if len(needle) < 6:
+        return set()
+    ids = set()
+    for ref in source.get("character_references", []):
+        locked = ref.get("locked_vault_description")
+        if not ref.get("character_id") or not isinstance(locked, str):
+            continue
+        words = _vault_fact_tokens(str(ref.get("name") or "") + " " + locked)
+        if any(words[i:i + len(needle)] == needle for i in range(len(words) - len(needle) + 1)):
+            ids.add(ref["character_id"])
+    if boundary:
+        # Sliding windows can straddle a locked fact and its neighboring prose.
+        # Permit at most two edge words around >=6 grounded content words; an
+        # eight-word generic/action clause still has its own unexempted window.
+        for left, right in ((0, 1), (1, 0), (0, 2), (2, 0), (1, 1)):
+            edge = phrase[:left] + (phrase[-right:] if right else ())
+            if not set(edge) <= {"sits", "stands", "walks", "holds", "looks", "turns", "pauses", "smiles"}:
+                continue
+            fragment = phrase[left:len(phrase)-right if right else None]
+            ids.update(_vault_fact_ids(fragment, source, boundary=False))
+    return ids
+
+
+def _job_style_fact(phrase, bible):
+    """Ground in one supplied global style field, never the output's style label.
+
+    Lighting motifs may contain scene-specific source positions; those remain
+    subject to the existing physical-lighting continuity check instead.
+    """
+    if not isinstance(bible, dict):
+        return False
+    needle = _vault_fact_tokens(" ".join(phrase))
+    if len(needle) < 6:
+        return False
+    for field in ("rendering", "palette", "texture_grain"):
+        value = bible.get(field)
+        if not isinstance(value, str):
+            continue
+        words = _vault_fact_tokens(value)
+        if any(words[i:i + len(needle)] == needle for i in range(len(words) - len(needle) + 1)):
+            return True
+    return False
 
 
 def validate_compiled(response, payload):
@@ -527,19 +585,36 @@ def validate_compiled(response, payload):
             if literal:
                 prose = prose.replace(literal, " ")
         prose = re.sub(r"https?://\S+|\[Shot[^\]]*\]", " ", prose)
+        # A fully grounded style sentence must not create false repeated windows
+        # with unrelated words on either side (e.g. "before her. Render style:").
+        # Keep its interior words checked, including for same-scene repetition.
+        def style_boundary(match):
+            body = match.group(1)
+            if not _job_style_fact(tuple(re.findall(r"\w+", body.casefold())), payload.get("style_bible")):
+                return match.group(0)
+            boundary = f"styleboundary{source['shot_number']}"
+            return f" {boundary} {body} {boundary} "
+        prose = re.sub(r"\bRender style:\s*([^.!?]+)[.!?]", style_boundary, prose, flags=re.I)
+        # Required structural label, not descriptive prose or evidence of grounding.
+        prose = re.sub(r"\bRender style:\s*", " ", prose, flags=re.I)
         # Reference-consistency instructions are technical guards, not descriptive
         # boilerplate; exclude their fixed introductory wording, just like URLs.
         prose = re.sub(r"(?:maintain(?:ing)?|preserv(?:e|ing)) visual consistency with (?:the supplied |the |this )?reference(?: image)?(?: at)?", " ", prose, flags=re.I)
         words = re.findall(r"\w+", prose.casefold())
         phrases = {tuple(words[i:i+8]) for i in range(len(words)-7)}
         setups = _lighting_setup_phrases(prose)
+        vault_facts = {phrase: _vault_fact_ids(phrase, source) for phrase in phrases}
+        style_facts = {phrase for phrase in phrases if _job_style_fact(phrase, payload.get("style_bible"))}
+        scene = source.get("scene_number")
         repeats = [phrase for phrase in phrases if phrase in seen and not all(
-            group == lighting_group and signatures & setups.get(phrase, set())
-            for group, signatures in seen[phrase])]
+            (group == lighting_group and signatures & setups.get(phrase, set()))
+            or (scene is not None and prior_scene is not None and scene != prior_scene
+                and (prior_ids & vault_facts[phrase] or phrase in style_facts))
+            for group, signatures, prior_scene, prior_ids in seen[phrase])]
         if repeats:
             errors.append(f"Shot {source['shot_number']}: repeated descriptive clause; vary phrasing: {' '.join(sorted(repeats)[0])}")
         for phrase in phrases:
-            seen.setdefault(phrase, []).append((lighting_group, setups.get(phrase, set())))
+            seen.setdefault(phrase, []).append((lighting_group, setups.get(phrase, set()), scene, vault_facts[phrase]))
     for boundary in payload["boundaries"]:
         if boundary["type"] == "match cut":
             left, right = (int(n) for n in boundary["between"].split("-"))
@@ -589,8 +664,10 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
         reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split())
         for ref in item["character_references"]:
             ref["has_image_reference"] = bool(ref.pop("image_url", None))
+            ref.pop("locked_vault_description", None)  # Validator provenance, not new model instructions.
         if item.get("speaker_reference"):
             item["speaker_reference"].pop("image_url", None)
+            item["speaker_reference"].pop("locked_vault_description", None)
         item.pop("dialogue_text", None)
         minimum, maximum = word_range(payload, source)
         target = (70, 80) if maximum == 100 else (120, 130)
