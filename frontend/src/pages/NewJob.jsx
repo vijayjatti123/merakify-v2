@@ -8,6 +8,7 @@ import { extractScript, listAssets, listCharacters, uploadAsset } from "../api/c
 import ScriptResolutionPanel from "../components/ScriptResolutionPanel";
 
 import BriefCharacterInput from "../components/BriefCharacterInput";
+import ClarifierPanel from "../components/ClarifierPanel";
 import { activeMentions, recordMentionJob } from "../utils/characterMentions";
 
 const COLORS = {
@@ -197,6 +198,9 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               minRows={3} autoFocus sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7 } }} /> :
               <BriefCharacterInput value={brief} onChange={setBrief} selections={characterSelections}
                 onSelections={setCharacterSelections} disabled={collapsed || submitting} />}
+            <ClarifierPanel brief={brief} onUse={setBrief} disabled={collapsed || scriptMode || submitting}
+              knownFields={{ duration: effectiveDuration, aspect_ratio: aspectRatio, content_type: contentType,
+                color_grade: colorGrade, visual_style: visualStyle, quality, language: effectiveLanguage, ai_model: aiModel }} />
             <Button
               type="button"
               className="script-mode-toggle" startIcon={<FileText size={18} />}
