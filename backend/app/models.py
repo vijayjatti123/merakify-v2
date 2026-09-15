@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, Float, Integer, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Column, Float, Integer, DateTime, ForeignKey, String, Text, UniqueConstraint, JSON
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -9,6 +9,22 @@ from app.db import Base
 
 def new_id() -> str:
     return str(uuid.uuid4())
+
+
+class ClarifierSession(Base):
+    """Independent intake record; a nullable user_id can be added with future auth."""
+    __tablename__ = "clarifier_sessions"
+    session_id = Column(String, primary_key=True, default=new_id)
+    raw_brief = Column(Text, nullable=False)
+    known_fields = Column(JSON, nullable=False, default=dict)
+    turns = Column(JSON, nullable=False, default=list)
+    gathered = Column(JSON, nullable=False, default=dict)
+    confidence = Column(Float, nullable=False, default=0.0)
+    status = Column(String, nullable=False, default="active")
+    refined_prompt = Column(Text, nullable=True)
+    revision = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class Job(Base):

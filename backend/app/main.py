@@ -12,7 +12,7 @@ from app.db import (
     ensure_character_reference_sheet_column,
     ensure_job_intake_columns,
 )
-from app.routes import asset_routes, character_routes, jobs, script_routes
+from app.routes import asset_routes, character_routes, jobs, script_routes, clarifier_routes
 
 Base.metadata.create_all(bind=engine)
 ensure_job_intake_columns()
@@ -48,6 +48,7 @@ app.include_router(asset_routes.router)
 app.include_router(character_routes.router)
 app.include_router(script_routes.router)
 app.include_router(voice_preview_routes.router)
+app.include_router(clarifier_routes.router)
 
 
 @app.get("/api/health")

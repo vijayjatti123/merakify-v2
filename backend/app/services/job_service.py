@@ -1,10 +1,41 @@
 import json
+from datetime import datetime
 from typing import Any, Optional, get_args
 
 from sqlalchemy.orm import Session
 
 from app.models import AgentEvent, Job, VideoTask, FinalAssembly, FaceEnhancement, ProviderSubmissionGate
 from app.schemas import ColorGrade, VisualStyle, style_from_brief
+
+
+def create_clarifier_session(db, raw_brief, known_fields):
+    from app.models import ClarifierSession
+    row = ClarifierSession(raw_brief=raw_brief, known_fields=known_fields)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_clarifier_session(db, session_id):
+    from app.models import ClarifierSession
+    return db.get(ClarifierSession, session_id, populate_existing=True)
+
+
+def update_clarifier_session(db, session_id, revision, changes):
+    """Atomic compare-and-swap: a second writer cannot overwrite a newer turn."""
+    from app.models import ClarifierSession
+    count = db.query(ClarifierSession).filter(
+        ClarifierSession.session_id == session_id,
+        ClarifierSession.revision == revision,
+    ).update({**changes, "revision": revision + 1, "updated_at": datetime.utcnow()},
+             synchronize_session=False)
+    if count != 1:
+        db.rollback()
+        raise ValueError("Session changed; reload it before retrying.")
+    db.commit()
+    db.expire_all()
+    return get_clarifier_session(db, session_id)
 
 
 def create_job(
