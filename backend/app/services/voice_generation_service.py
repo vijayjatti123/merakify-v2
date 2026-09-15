@@ -285,8 +285,9 @@ async def _generate_dialogue_shot(
         final_duration = measured if abs(measured-target)/target > .10 else target
         if final_duration != target:
             job_service.append_event(db, job_id, "voice_generation", f"Shot {shot_number}: duration_sec corrected {target:.3f}s -> decoded audio {measured:.3f}s; no further pace retries. Assembly/duration check follows audio correction.")
-        if measured > 9:
-            job_service.append_event(db, job_id, "voice_generation", f"Warning: shot {shot_number} audio is {measured:.3f}s, exceeding the current 9-second video-model limit; dialogue was preserved and requires review.")
+        # Hedra dialogue video follows this decoded audio duration. Nine seconds
+        # remains a silent-shot planning constraint, not an audio review threshold.
+        # Provider duration validation and exact trim verification stay in Module R.
         object_key = f"jobs/{job_id}/shots/{shot_number}/dialogue-{uuid.uuid4()}{generated.extension}"
         uploaded = await asyncio.to_thread(
             storage_service.upload_bytes,

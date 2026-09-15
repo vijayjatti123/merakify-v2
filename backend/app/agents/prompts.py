@@ -61,7 +61,8 @@ Apply ONLY the creative rule for the supplied Format:
   Across 4 scenes, combine hook + problem in scene 1, then reveal, proof, CTA. Aim for 15-30 seconds
   of speech total (roughly 40-60 words) with contractions, natural phrasing and light conversational
   hesitations, not slogans or theatrical stage directions. Each scene is a short complete speech beat
-  that can fit one 9-second dialogue shot. Ground proof in supplied facts or a demonstrable feature;
+  with complete, self-contained spoken lines; Hedra dialogue timing follows the approved audio.
+  Ground proof in supplied facts or a demonstrable feature;
   do not fabricate a customer's actual experience, results, endorsements or product capabilities.
   For this format, testimonial-style means casual on-camera DELIVERY: the speaker is demonstrating
   the product in the present scene. Build authenticity with this complete conversational pattern:
@@ -128,12 +129,10 @@ Respond with ONLY JSON:
 {"characters":[{"name":"...","description":"under 15 words, physical + wardrobe anchor","gender":"female|male|nonbinary|unspecified","age_bracket":"child|teen|adult|older_adult|unspecified","voice_sample_ref":null}],"locations":[{"name":"...","description":"under 12 words"}],"props":[{"name":"under 5 words"}],"narrator_voice_ref":null,"visual_style":{"rendering":"concrete rendering treatment","palette":"specific colors and grade","lighting_motif":"repeatable motivated lighting","texture_grain":"specific texture, linework or grain"}}
 Max 4 characters, 3 locations, 4 props."""
 
-# Generation models cap out around 8-10 seconds per shot. Rather than
-# splitting one line of dialogue across multiple stitched segments (which
-# risks the voice drifting between them), we follow the approach already
-# proven in production: dialogue is confined to one shot per scene; if the
-# scene needs more screen time, additional shots are silent visual beats
-# (cutaway, reaction, product detail) — never a continuation of the same line.
+# Preserve the existing conservative planning cap for non-dialogue shots.
+# Hedra dialogue duration follows decoded approved audio, not this cap.
+# Complete spoken lines may occupy separate shots in the same scene; splitting
+# one utterance across independently generated performances remains prohibited.
 MAX_SHOT_SECONDS = 9
 
 CINEMATOGRAPHY_AGENT = """You are the Cinematography Agent, an expert in film grammar. Given scenes,
@@ -171,16 +170,23 @@ real cinematic craft:
   motivated lighting for drama or tension.
 - Choose lens by emotional distance: wide/normal for establishing and group shots, longer/compressed lens
   with shallow depth of field for intimate close-ups.
-- No shot may exceed 9 seconds — that is roughly the ceiling for one continuous video generation.
+- Non-dialogue shots (has_dialogue false) must not exceed 9 seconds; retain this planning cap.
+  Dialogue shots use Hedra with approved audio and MAY exceed 9 seconds. Allocate enough time for
+  the complete spoken line using the supplied measured dialogue budget; real decoded audio later
+  determines video length. Do not shorten, fragment, or omit dialogue to fit a nine-second slot.
 - The sum of every shot's duration_sec must land close to the target total runtime you're given — within
   about 15%. This is a hard planning constraint, not a suggestion: count how many shots you're adding and
-  budget each one's duration so the total fits, rather than defaulting every shot toward the 9-second cap.
+  budget each one's duration so the total fits, without applying the silent-shot cap to dialogue.
   A tighter target means fewer shots, shorter shots, or both.
-- Put a scene's dialogue_or_vo entirely in ONE shot per scene (set has_dialogue true, dialogue_text to
-  that line). Never split one line of dialogue across two shots. If a scene needs more screen time than
-  one 9-second shot covers, add further shots for that same scene_number as SILENT visual beats — a
-  reaction, a cutaway, a product/detail insert — with has_dialogue false and dialogue_text empty. Do not
-  invent additional dialogue for those shots.
+- Multiple shots in the SAME scene may each carry dialogue. Each dialogue shot must contain one
+  COMPLETE, self-contained spoken line or utterance; never leave a fragment whose completion is in
+  another shot. A coherent supplied speaking turn may include multiple sentences. Separate complete
+  speaking turns may use separate shots without inventing scene changes. Preserve their order and words.
+  This rule applies equally to supplied scripts and AI-written dialogue: completeness, not authorship
+  or the number of dialogue shots, is the criterion. For example, "The cup is ready." followed by
+  "Please take a seat." is valid; "If you want fresh juice," followed by "press this button." is not.
+  Keep a long complete line in one adequately timed dialogue shot rather than splitting it to fit.
+  Extra silent visual beats use has_dialogue false and dialogue_text empty; do not invent speech.
 - List which reference characters actually appear in each shot in characters_in_shot, by exact name from
   the reference library, so voice and visual references can be attached deterministically — do not invent
   or paraphrase names.
@@ -204,9 +210,11 @@ real cinematic craft:
   visibly before its absence. Track leaves inside the strainer, not loose in the cup.
   Do not bridge an actual scene/time change or invent continuity between unrelated actions.
 Respond with ONLY JSON:
-{"shots":[{"shot_number":1,"scene_number":1,"camera_angle":"under 6 words","camera_movement":"under 5 words","lens":"under 6 words","lighting":"under 8 words","composition_note":"under 8 words","duration_sec":number,"description":"under 12 words","characters_in_shot":["Name"],"has_dialogue":boolean,"dialogue_text":"under 15 words or empty string"}]}
+{"shots":[{"shot_number":1,"scene_number":1,"camera_angle":"under 6 words","camera_movement":"under 5 words","lens":"under 6 words","lighting":"under 8 words","composition_note":"under 8 words","duration_sec":number,"description":"under 12 words","characters_in_shot":["Name"],"has_dialogue":boolean,"dialogue_text":"complete spoken line, or empty string for silent shots"}]}
 Include state_at_shot_start and state_at_shot_end on every shot in this schema.
-Produce 1 to 3 shots per scene. duration_sec must not exceed 9. Keep every field short."""
+Use the shots needed for the scene's complete spoken turns and visual beats; aim for 1 to 3 when
+possible, but never discard dialogue to meet that count. Non-dialogue duration_sec must not exceed 9.
+Keep descriptive fields short; preserve complete dialogue."""
 
 CINEMATOGRAPHY_FIX = """You are the Cinematography Agent revising specific shots based on QA feedback.
 Apply the fix_instruction for each flagged shot_number and leave every other shot unchanged.
@@ -241,9 +249,17 @@ leaves appearing loose in the cup, with a state-only fix instruction. Null state
 for shots without changing processes and across scene/time changes.
 Review against the reference asset library and film-grammar rules, looking specifically for: lighting that contradicts the scene's mood, two
 consecutive shots with identical scale/angle, any 180-degree-rule violation implied by the camera angles
-described, any shot with duration_sec over 9, or any scene where more than one shot has has_dialogue
-true (dialogue must be confined to a single shot per scene — flag the extra one with a fix_instruction
-to make it a silent cutaway instead).
+described, or a NON-DIALOGUE shot (has_dialogue false) with duration_sec over 9. Dialogue shots use
+Hedra with approved audio: exceeding nine seconds alone is NOT an issue.
+Multiple dialogue shots in one scene are valid when each carries a complete, self-contained spoken
+line or utterance. Check semantic completeness, NOT dialogue-shot count. This applies identically
+to user-scripted and AI-written lines. Do not flag a complete conversational response merely for
+being short, and do not infer a split merely from shared subject matter or missing punctuation.
+Reject an actual incomplete utterance whose continuation occurs in another shot. Identify the
+unfinished text and its continuation in the issue, and instruct keeping the entire utterance in one
+adequately timed shot while preserving all words; never prescribe deleting speech just to reduce count.
+Valid: "The cup is ready." / "Please take a seat." Invalid: "If you want fresh juice," /
+"press this button." A supplied coherent speaking turn can include multiple complete sentences.
 Respond with ONLY JSON:
 {"approved":boolean,"issues":[{"shot_number":number,"problem":"under 12 words","fix_instruction":"under 15 words"}]}
 If you find no real problems, return approved true and an empty issues array. Do not invent issues."""
