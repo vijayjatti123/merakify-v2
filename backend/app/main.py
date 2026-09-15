@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import threading
 
 from app.config import settings
+from app.routes import voice_preview_routes
 from app.db import (
     Base,
     engine,
@@ -46,6 +47,7 @@ app.include_router(jobs.router)
 app.include_router(asset_routes.router)
 app.include_router(character_routes.router)
 app.include_router(script_routes.router)
+app.include_router(voice_preview_routes.router)
 
 
 @app.get("/api/health")

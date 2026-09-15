@@ -12,7 +12,7 @@ import {
   uploadCharacter,
 } from "../api/client";
 
-import { SARVAM_VOICES } from "../utils/voices";
+import VoicePreviewPicker from "../components/VoicePreviewPicker";
 
 function voiceLabel(voiceId) {
   return `${voiceId.charAt(0).toUpperCase()}${voiceId.slice(1)}`;
@@ -207,13 +207,7 @@ export default function CharacterVault({ onBack }) {
               <img src={draft.image_url} alt={`${draft.name} character reference`} />
               <div className="vault-draft-details">
                 <span className="vault-source">{draft.image_source}</span>
-                <label>
-                  Character voice
-                  <select value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>
-                    <option value="">Choose a voice</option>
-                    {SARVAM_VOICES.map((voice) => <option key={voice} value={voice}>{voice}</option>)}
-                  </select>
-                </label>
+                <VoicePreviewPicker value={voiceId} onChange={setVoiceId} disabled={busy} />
                 <Button type="button" onClick={handleSaveVoice} disabled={busy || !voiceId} className="vault-secondary">
                   {busyAction === "voice" && <Loader2 size={14} className="animate-spin" />} Save voice
                 </Button>

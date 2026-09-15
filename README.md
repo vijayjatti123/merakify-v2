@@ -139,3 +139,35 @@ are separate checks; neither replaces reviewing the actual images.
   generative call with a UI around it. Any future pipeline change should
   preserve a real agent inspecting another agent's output and being able to
   act on what it finds, without a human in that specific loop.
+
+## Module AQ: cached voice previews
+
+Character creation offers cached previews for the existing 37 Sarvam voices in English,
+Hindi, Tamil, Telugu, and Bengali (the five named language choices on the job form).
+The free-text Other choice has no implied preview support. Preview language does not
+change character identity, voice assignment, or a job's language. Preview playback
+never synthesizes audio; it fetches private S3 WAV files using freshly signed URLs.
+
+Run this explicit maintenance command from backend with the existing SARVAM_API_KEY
+and AWS settings in .env (or environment):
+
+    python -m app.services.generate_voice_previews --output ./preview-audit
+
+It uses bulbul:v3, pace=1, 24 kHz WAV, with three concurrent requests and one bounded
+retry on failure. It writes voice-previews/v1/<language>/<voice_id>.wav and per-language
+manifests. Completed entries are skipped on rerun. Do not run concurrent batch processes.
+No application startup or preview endpoint calls this command.
+
+For one newly added catalog voice (after updating the existing backend/frontend catalogs):
+
+    python -m app.services.generate_voice_previews --voices NEW_ID --output ./preview-audit
+
+To extend languages, add a native-script PREVIEW_TEXT entry and the UI language choice,
+then run with --languages LANGUAGE. Use a new VERSION for changes to existing sample
+text/model/parameters so already-cached samples are not silently replaced.
+
+GET /api/voice-previews?language=English only reads the S3 manifest and signs URLs.
+URLs expire after 30 minutes; the picker refreshes them before playback after 25 minutes.
+Missing previews disable only the play icon, not voice selection or Save voice.
+Samples are reusable object-storage assets; no per-preview TTS charge applies.
+This extends character review, not the generation pipeline or voice calibration.
