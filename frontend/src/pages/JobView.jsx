@@ -24,9 +24,24 @@ const COLORS = {
 const STATUS_LABELS = {
   pending: "Pending",
   generating: "Generating",
-  done: "Done",
+  done: "Audio ready",
   error: "Error",
 };
+
+const videoReady = (shot) => Boolean(shot.video_url && shot.video_status === "done" && !shot.video_source_changed);
+
+function shotOutputStatus(shot, audioStatus) {
+  if (["submitting", "processing"].includes(shot.video_status)) return ["generating", "Generating video"];
+  if (shot.video_status === "submission_unknown") return ["pending", "Checking video request"];
+  if (shot.video_source_changed) return ["pending", "Video needs regeneration"];
+  if (shot.video_status === "error") return ["error", "Video generation failed"];
+  if (videoReady(shot)) return ["done", "Video ready"];
+  if (shot.still_frame_status === "generating") return ["generating", "Generating preview"];
+  if (shot.still_frame_status === "failed" && !shot.still_frame_url) return ["error", "No usable output"];
+  if (shot.has_dialogue && audioStatus === "error") return ["error", "Audio preparation failed"];
+  if (shot.still_frame_url) return ["pending", "Preview ready · video not generated"];
+  return ["pending", "Video not generated"];
+}
 
 function GenerationGrid({ shots, statuses }) {
   return (
@@ -66,7 +81,9 @@ function GenerationGrid({ shots, statuses }) {
 }
 
 function FinalVideo({ data, shots, busy, onAssemble }) {
-  const missing = shots.filter((shot) => !shot.video_url || shot.video_status !== "done" || shot.video_source_changed).map((shot) => shot.shot_number);
+  const missing = shots.filter((shot) => !videoReady(shot)).map((shot) => shot.shot_number);
+  const readyCount = shots.length - missing.length;
+  const needsRecovery = shots.some((shot) => !videoReady(shot) && (shot.video_source_changed || shot.video_status === "error" || shot.still_frame_status === "failed"));
   return (
     <Card component="section" className="generation-stage generation-placeholder generation-placeholder--final" aria-label="Final video" aria-live="polite">
       {busy ? <Loader2 size={30} className="animate-spin" /> : <Clapperboard size={32} />}
@@ -77,7 +94,11 @@ function FinalVideo({ data, shots, busy, onAssemble }) {
       {data?.url && <a href={data.url} target="_blank" rel="noreferrer" className="underline">Open final video</a>}
       {data?.stale && <p className="audio-warning">Your shots have changed. Combine them again to update the final video.</p>}
       {data?.error && <Alert severity="error">{friendlyMessage(data.error, "Your final video could not be finished. Please try again.")}</Alert>}
-      {missing.length > 0 && <p>Generate video for shot(s) {missing.join(", ")} before combining your video.</p>}
+      <p role="status" style={{ fontWeight: 600 }}>{readyCount} of {shots.length} videos ready</p>
+      {missing.length > 0 && <p>{needsRecovery
+        ? "Some shots need another try. Use Regenerate on the affected shot cards, and Generate video on any remaining previews. Then combine your clips here."
+        : "Preview your shots, then click 'Generate video' on each one to create its clip. Once every clip is ready, combine them here."}</p>}
+      {missing.length === 0 && shots.length > 0 && !data?.url && <p>All your clips are ready. Click 'Create final video' to combine them.</p>}
       <Button type="button" className="approve-button mt-4 disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy || !shots.length || missing.length > 0} onClick={onAssemble}>
         {busy ? "Combining…" : data?.url ? "Update final video" : "Create final video"}
       </Button>
@@ -361,12 +382,12 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
               )}
               {shots.map((shot) => {
                 const isEditing = editingShot === shot.shot_number;
-                const visualStatus = shotStatuses[shot.shot_number] || shot.status || "pending";
+                const [visualStatus, outputLabel] = shotOutputStatus(shot, shotStatuses[shot.shot_number] || shot.status);
                 return (
                   <Card component="article" className="shot-card" key={shot.shot_number} data-shot-number={shot.shot_number}>
                     <div className="shot-card-title">
                       <span>Shot {shot.shot_number} · {shot.has_dialogue ? "dialogue" : "silent"}</span>
-                      <span className={`shot-status shot-status--${visualStatus}`}>{STATUS_LABELS[visualStatus] || visualStatus}</span>
+                      <span className={`shot-status shot-status--${visualStatus}`}>{outputLabel}</span>
                     </div>
 
                     {isEditing ? (
@@ -408,8 +429,8 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     {shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
                     {(shot.video_warnings || []).map((warning) => <p className="audio-warning" key={warning}>{friendlyMessage(warning, "Please review this video before approving it.")}</p>)}
                     {(shot.has_dialogue || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && (shot.still_frame_url || (shot.has_dialogue && result.continuity?.characters?.some((character) => character.character_id && character.image_url && shot.characters_in_shot?.includes(character.name)))) && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
-                      <Button type="button" className="card-action my-2" disabled={videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
-                        {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate speaking video · 720p" : `Generate video · ${Math.max(4, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
+                      <Button type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
+                        {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate video · speaking · 720p" : `Generate video · ${Math.max(4, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
                       </Button>
                     )}
                     <div className="shot-technical">
@@ -471,7 +492,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
               </div>
             )}
 
-            {approved && <p className="approved-note"><Check size={14} /> {audioReady ? "Plan approved · ready to continue" : "Plan approved · preparing audio"}</p>}
+            {approved && <p className="approved-note"><Check size={14} /> {audioReady ? (shots.every(videoReady) ? "All shot videos ready · combine your clips in the final video panel" : shots.some((shot) => ["submitting", "processing"].includes(shot.video_status)) ? "Plan approved · video generation in progress" : "Plan approved · generate your shot videos next; retry any failed shots") : "Plan approved · preparing audio"}</p>}
           </>
         )}
 
