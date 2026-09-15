@@ -1,3 +1,6 @@
+import { Button, Alert } from "@mui/material";
+import ActionProgress from "./ActionProgress";
+import { friendlyMessage } from "../utils/presentation";
 import { useEffect, useState } from "react";
 import { enhanceShotFace } from "../api/client";
 
@@ -17,16 +20,18 @@ export default function FaceEnhancement({ jobId, shot, onRefresh }) {
   }
   return <div className="my-3 text-xs" aria-label={`Face enhancement for shot ${shot.shot_number}`}>
     {busy && <p role="status">Enhancing... {task.total_frames ? `${task.completed_frames}/${task.total_frames} frames` : "Queued"}. You can still view and approve the current unenhanced video.</p>}
-    {task?.warning && <p className="audio-warning" role="alert">{task.warning}</p>}
+    {busy && <ActionProgress label="Restoring facial detail…" value={task.total_frames ? 100 * task.completed_frames / task.total_frames : undefined} />}
+    {submitting && <ActionProgress label="Starting face enhancement…" />}
+    {task?.warning && <Alert severity="warning">{friendlyMessage(task.warning, "Face enhancement needs your review. Your original video remains available.")}</Alert>}
     {shot.video_face_enhanced && <p>Face enhancement applied · Experimental</p>}
-    {eligible && !busy && !confirm && <button type="button" className="card-action" onClick={() => setConfirm(true)}>Enhance Face</button>}
+    {eligible && !busy && !confirm && <Button type="button" className="card-action" onClick={() => setConfirm(true)}>Enhance Face</Button>}
     {eligible && !busy && confirm && <div className="p-3 border rounded-md" role="group" aria-label="Confirm face enhancement">
       <p>Sharpens facial detail using AI restoration. Takes approximately 10-12 minutes and roughly doubles this shot's generation cost. May cause subtle changes to facial appearance. Experimental — temporal flicker during playback has not been fully verified.</p>
       <p className="my-2">Actual time and cost depend on shot length, queue and provider limits. Your current video remains available while enhancement runs.</p>
-      <button type="button" className="card-action" disabled={submitting} onClick={start}>{submitting ? "Starting..." : "Start enhancement"}</button>
-      <button type="button" className="card-action" disabled={submitting} onClick={() => setConfirm(false)}>Cancel</button>
+      <Button type="button" className="card-action" disabled={submitting} onClick={start}>{submitting ? "Starting..." : "Start enhancement"}</Button>
+      <Button type="button" className="card-action" disabled={submitting} onClick={() => setConfirm(false)}>Cancel</Button>
     </div>}
-    {error && <p role="alert" className="panel-error">{error}</p>}
+    {error && <Alert severity="error">{friendlyMessage(error, "Face enhancement could not start. Please try again.")}</Alert>}
   </div>;
 }
 

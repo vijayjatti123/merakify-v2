@@ -1,6 +1,8 @@
 import { ArrowLeft, Check, ImagePlus, Loader2, RefreshCw, Sparkles, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Alert, Box, Button, Card, CardContent, CardMedia, Chip, Skeleton, Typography } from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, CardMedia, Chip, Skeleton, Typography, TextField } from "@mui/material";
+import ActionProgress from "../components/ActionProgress";
+import { friendlyMessage } from "../utils/presentation";
 
 import {
   approveCharacter,
@@ -18,7 +20,7 @@ const SARVAM_VOICES = [
 ];
 
 function voiceLabel(voiceId) {
-  return `${voiceId.charAt(0).toUpperCase()}${voiceId.slice(1)} (Sarvam)`;
+  return `${voiceId.charAt(0).toUpperCase()}${voiceId.slice(1)}`;
 }
 
 export function isVoiceSelectionSaved(voiceId, savedVoiceId) {
@@ -34,14 +36,14 @@ function CharacterImages({ character, compact = false }) {
       </figure>
       {character.reference_sheet_url ? (
         <figure>
-          <img src={character.reference_sheet_url} alt={`${character.name} reference sheet`} />
-          <figcaption>Reference sheet</figcaption>
+          <img src={character.reference_sheet_url} alt={`${character.name} character views`} />
+          <figcaption>Character views</figcaption>
         </figure>
       ) : (
         <div className="vault-reference-sheet-empty">
           {character.status === "approved"
-            ? "The reference sheet couldn't be generated."
-            : "Reference sheet will be generated on approval."}
+            ? "The character views couldn't be generated."
+            : "Character views will be generated on approval."}
         </div>
       )}
     </div>
@@ -51,7 +53,7 @@ function CharacterImages({ character, compact = false }) {
 function VaultImage({ src, label }) {
   const [state, setState] = useState("loading");
   useEffect(() => setState("loading"), [src]);
-  return <Box sx={{ position: "relative", bgcolor: "#0F1019", minHeight: 160 }}>
+  return <Box sx={{ position: "relative", bgcolor: "var(--mui-palette-action-hover)", minHeight: 160 }}>
     {state === "loading" && <Skeleton variant="rectangular" height={200} aria-label={`Loading ${label}`} />}
     {state === "error" ? <Alert severity="warning">Image unavailable. Try Refresh references.</Alert> :
       <CardMedia component="img" image={src} alt={label} onLoad={() => setState("loaded")} onError={() => setState("error")}
@@ -172,31 +174,32 @@ export default function CharacterVault({ onBack }) {
   const voiceSelectionSaved = isVoiceSelectionSaved(voiceId, draft?.voice_id);
 
   return (
-    <main className="vault-shell">
+    <Box component="section" className="vault-shell">
       <header className="vault-header">
-        <button type="button" onClick={onBack} className="vault-back"><ArrowLeft size={16} /> Director</button>
+        <Button type="button" onClick={onBack} className="vault-back"><ArrowLeft size={16} /> Back to video</Button>
         <div>
-          <p className="eyebrow">Phase 2</p>
+          <p className="eyebrow">Your cast</p>
           <h1>Character Vault</h1>
-          <p>Create reusable visual and voice references. Nothing here changes a job unless you opt in later.</p>
+          <p>Give your stories a familiar face. Save characters and voices to use in your videos.</p>
         </div>
       </header>
 
       <section className="vault-workspace">
-        <form className="vault-editor" onSubmit={(event) => event.preventDefault()}>
+        <Card component="form" className="vault-editor" onSubmit={(event) => event.preventDefault()}>
           <div>
             <p className="eyebrow">Draft character</p>
-            <h2>Build a reference</h2>
+            <h2>Create a character</h2>
           </div>
 
-          <label>Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Meera" /></label>
-          <label>Description<textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Age, appearance, wardrobe, personality, and distinctive details" rows={5} /></label>
+          <TextField fullWidth label="Name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Meera" />
+          <TextField fullWidth multiline label="Description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Age, appearance, wardrobe, personality, and distinctive details" minRows={4} />
+          {busy && <ActionProgress label={{ generate: "Creating your character image…", upload: "Uploading your character image…", voice: "Saving your voice choice…", approve: "Saving your character and creating character views…" }[busyAction]} />}
 
           <div className="vault-image-actions">
-            <button type="button" onClick={handleGenerate} disabled={busy} className="vault-primary">
+            <Button type="button" onClick={handleGenerate} disabled={busy} className="vault-primary">
               {busyAction === "generate" ? <Loader2 size={15} className="animate-spin" /> : draft ? <RefreshCw size={15} /> : <Sparkles size={15} />}
               {draft ? "Retry image" : "Generate image"}
-            </button>
+            </Button>
             <label className="vault-upload">
               {busyAction === "upload" ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
               Upload image
@@ -210,25 +213,25 @@ export default function CharacterVault({ onBack }) {
               <div className="vault-draft-details">
                 <span className="vault-source">{draft.image_source}</span>
                 <label>
-                  Sarvam voice
+                  Character voice
                   <select value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>
                     <option value="">Choose a voice</option>
                     {SARVAM_VOICES.map((voice) => <option key={voice} value={voice}>{voice}</option>)}
                   </select>
                 </label>
-                <button type="button" onClick={handleSaveVoice} disabled={busy || !voiceId} className="vault-secondary">
+                <Button type="button" onClick={handleSaveVoice} disabled={busy || !voiceId} className="vault-secondary">
                   {busyAction === "voice" && <Loader2 size={14} className="animate-spin" />} Save voice
-                </button>
+                </Button>
                 {draft.voice_id && (
                   <section
                     aria-label="Character review before approval"
-                    style={{ padding: "0.75rem", border: "1px solid #34374c", borderRadius: "0.65rem", background: "#181a27" }}
+                    style={{ padding: "0.75rem", border: "1px solid var(--mui-palette-divider)", borderRadius: "0.65rem", background: "var(--mui-palette-background-paper)" }}
                   >
                     <p className="eyebrow" style={{ marginBottom: "0.55rem" }}>Review before approval</p>
                     <CharacterImages character={draft} compact />
                     <div style={{ marginTop: "0.65rem" }}>
-                      <strong style={{ display: "block", color: "#f3f0e8" }}>{draft.name}</strong>
-                      <span style={{ color: "#aaa8bb", fontSize: "0.72rem" }}>
+                      <strong style={{ display: "block", color: "var(--mui-palette-text-primary)" }}>{draft.name}</strong>
+                      <span style={{ color: "var(--mui-palette-text-secondary)", fontSize: "0.72rem" }}>
                         Selected voice: {voiceLabel(draft.voice_id)}
                       </span>
                     </div>
@@ -237,23 +240,23 @@ export default function CharacterVault({ onBack }) {
                 {draft.voice_id && !voiceSelectionSaved && (
                   <p role="status" className="vault-error">Save your voice selection before approving.</p>
                 )}
-                <button type="button" onClick={handleApprove} disabled={busy || !voiceSelectionSaved} className="vault-primary">
+                <Button type="button" onClick={handleApprove} disabled={busy || !voiceSelectionSaved} className="vault-primary">
                   {busyAction === "approve" ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Approve character
-                </button>
+                </Button>
               </div>
             </section>
           )}
 
-          {error && <p className="vault-error">{error}</p>}
-        </form>
+          {error && <Alert severity="error">{friendlyMessage(error, "Your character could not be saved. Please try again.")}</Alert>}
+        </Card>
 
-        <section className="vault-library">
+        <Card component="section" className="vault-library">
           <div>
             <p className="eyebrow">Approved only</p>
             <h2>Your characters</h2>
           </div>
           <Button size="small" disabled={loading} onClick={refreshApproved}>Refresh references</Button>
-          {libraryError && <Alert severity="error">{libraryError}</Alert>}
+          {libraryError && <Alert severity="error">{friendlyMessage(libraryError, "Your characters could not be loaded. Please refresh.")}</Alert>}
           {loading && !approvedCharacters.length ? <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 2 }}>
             {[0, 1, 2, 3].map((index) => <Skeleton key={index} variant="rounded" height={280} aria-label="Loading character" />)}
           </Box> : approvedCharacters.length ? (
@@ -267,8 +270,8 @@ export default function CharacterVault({ onBack }) {
                     <Chip size="small" label={`${character.voice_id} · ${character.image_source}`} />
                   </CardContent>
                   {character.reference_sheet_url && <Box sx={{ px: 2, pb: 2 }}>
-                    <Typography variant="caption">Reference sheet</Typography>
-                    <VaultImage src={character.reference_sheet_url} label={`${character.name} reference sheet`} />
+                    <Typography variant="caption">Character views</Typography>
+                    <VaultImage src={character.reference_sheet_url} label={`${character.name} character views`} />
                   </Box>}
                 </Card>
               ))}
@@ -276,8 +279,8 @@ export default function CharacterVault({ onBack }) {
           ) : (
             !libraryError && <div className="vault-empty"><ImagePlus size={28} /><p>No approved characters yet.</p></div>
           )}
-        </section>
+        </Card>
       </section>
-    </main>
+    </Box>
   );
 }

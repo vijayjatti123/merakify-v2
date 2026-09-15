@@ -1,17 +1,20 @@
 import { ChevronUp, ImagePlus, Loader2, Plus, X } from "lucide-react";
 import { useState } from "react";
+import { Alert, Button, Card, TextField } from "@mui/material";
+import ActionProgress from "../components/ActionProgress";
+import { friendlyMessage } from "../utils/presentation";
 
 import { extractScript, listAssets, listCharacters, uploadAsset } from "../api/client";
 import ScriptResolutionPanel from "../components/ScriptResolutionPanel";
 
 const COLORS = {
-  bg: "#13141F",
-  panel: "#1B1D2B",
-  field: "#0F1019",
-  border: "#2E3145",
-  text: "#F3F0E8",
-  muted: "#9694A8",
-  marigold: "#E8A33D",
+  bg: "var(--mui-palette-background-default)",
+  panel: "var(--mui-palette-background-paper)",
+  field: "var(--mui-palette-action-hover)",
+  border: "var(--mui-palette-divider)",
+  text: "var(--mui-palette-text-primary)",
+  muted: "var(--mui-palette-text-secondary)",
+  marigold: "var(--mui-palette-primary-main)",
 };
 
 const MODEL_TIERS = [
@@ -21,20 +24,8 @@ const MODEL_TIERS = [
 ];
 
 function SelectField({ label, note, value, onChange, children }) {
-  return (
-    <label className="flex flex-col gap-1 min-w-[132px]">
-      <span className="text-xs" style={{ color: COLORS.muted }}>{label}</span>
-      <select
-        value={value}
-        onChange={onChange}
-        className="rounded-md px-3 py-2 text-sm outline-none"
-        style={{ background: COLORS.field, border: `1px solid ${COLORS.border}`, color: COLORS.text }}
-      >
-        {children}
-      </select>
-      {note && <span className="text-[10px] leading-tight max-w-[150px]" style={{ color: COLORS.muted }}>{note}</span>}
-    </label>
-  );
+  return <TextField select label={label} value={value} onChange={onChange} helperText={note}
+    slotProps={{ select: { native: true } }} sx={{ minWidth: 160, flex: "1 1 180px" }}>{children}</TextField>;
 }
 
 export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "" }) {
@@ -178,12 +169,12 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   }
 
   return (
-    <section className={`intake-card ${collapsed ? "intake-card--collapsed" : ""}`} aria-label="Creative brief input">
+    <Card component="section" className={`intake-card ${collapsed ? "intake-card--collapsed" : ""}`} aria-label="Creative brief input" sx={{ p: { xs: 2, md: 4 } }}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         <header className="intake-header">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] mb-2" style={{ color: COLORS.marigold }}>Merakify Director</p>
-            <h1 className="text-3xl md:text-4xl mb-2" style={{ fontFamily: "'Fraunces', serif" }}>
+            <p className="text-xs uppercase tracking-[0.2em] mb-2" style={{ color: COLORS.marigold }}>Your next video</p>
+            <h1 className="text-3xl md:text-4xl mb-2" style={{ fontFamily: "inherit" }}>
               {collapsed ? "Brief submitted" : "What should we make?"}
             </h1>
             <p className="text-sm intake-summary" style={{ color: COLORS.muted }}>
@@ -195,16 +186,15 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
 
         <div className="intake-collapse" aria-hidden={collapsed}>
           <fieldset disabled={collapsed} className="intake-collapse-inner flex flex-col gap-5">
-            <textarea
+            <TextField multiline fullWidth label={scriptMode ? "Your script" : "Your idea"}
               value={brief}
               onChange={(event) => setBrief(event.target.value)}
               placeholder={scriptMode ? "Paste your full script or scene breakdown here" : "A joyful jewellery ad about a daughter surprising her mother"}
-              rows={7}
+              minRows={5}
               autoFocus
-              className="w-full rounded-xl p-5 text-lg outline-none resize-none"
-              style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, color: COLORS.text }}
+              sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7 } }}
             />
-            <button
+            <Button
               type="button"
               className="script-mode-toggle"
               aria-pressed={scriptMode}
@@ -215,7 +205,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               }}
             >
               {scriptMode ? "Use an idea instead" : "Paste a script instead"}
-            </button>
+            </Button>
 
             <div className="flex flex-wrap items-start gap-3">
               <SelectField label="Duration" value={duration} onChange={(event) => setDuration(event.target.value)}>
@@ -234,7 +224,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               <SelectField label="Visual Style" value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)}>
                 {["Natural", "Cinematic", "Realistic", "Cartoon / Anime", "3D / CGI", "Hyper-realistic", "Vintage / retro film"].map((value) => <option key={value}>{value}</option>)}
               </SelectField>
-              <SelectField label="Quality" note="Applies once video rendering is live" value={quality} onChange={(event) => setQuality(event.target.value)}>
+              <SelectField label="Video quality" value={quality} onChange={(event) => setQuality(event.target.value)}>
                 <option>480p</option><option>720p</option>
               </SelectField>
               <SelectField label="Language" value={language} onChange={handleLanguageChange}>
@@ -247,9 +237,9 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
                   </optgroup>
                 ))}
               </SelectField>
-              <button type="button" onClick={toggleAssetPanel} aria-label="Add reference asset" className="mt-5 h-9 w-9 rounded-md flex items-center justify-center" style={{ background: assetPanelOpen ? COLORS.marigold : COLORS.panel, border: `1px solid ${assetPanelOpen ? COLORS.marigold : COLORS.border}`, color: assetPanelOpen ? COLORS.bg : COLORS.text }}>
+              <Button type="button" onClick={toggleAssetPanel} aria-label="Add reference image" className="mt-5 h-9 w-9 rounded-md flex items-center justify-center" style={{ background: assetPanelOpen ? COLORS.marigold : COLORS.panel, border: `1px solid ${assetPanelOpen ? COLORS.marigold : COLORS.border}`, color: assetPanelOpen ? COLORS.bg : COLORS.text }}>
                 {assetPanelOpen ? <X size={17} /> : <Plus size={17} />}
-              </button>
+              </Button>
             </div>
 
             {duration === "Custom" && <input value={customDuration} onChange={(event) => setCustomDuration(event.target.value)} placeholder="Custom duration, e.g. 45 seconds" className="w-full max-w-xs rounded-md px-3 py-2 text-sm outline-none" style={{ background: COLORS.field, border: `1px solid ${COLORS.border}`, color: COLORS.text }} />}
@@ -280,37 +270,39 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
                   <input type="file" accept="image/*" disabled={uploading} onChange={handleUpload} className="hidden" />
                 </label>
                 {loadingAssets ? (
-                  <p className="text-sm flex items-center gap-2" style={{ color: COLORS.muted }}><Loader2 size={14} className="animate-spin" /> Loading library...</p>
+                  <ActionProgress label="Loading your reference images…" />
                 ) : assets.length ? (
                   <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
                     {assets.map((asset) => {
                       const selected = selectedAsset?.id === asset.id;
                       return (
-                        <button type="button" key={asset.id} onClick={() => setSelectedAsset(asset)} className="rounded-md overflow-hidden text-left" style={{ border: `2px solid ${selected ? COLORS.marigold : COLORS.border}`, background: COLORS.field }}>
+                        <Button type="button" key={asset.id} onClick={() => setSelectedAsset(asset)} className="rounded-md overflow-hidden text-left" style={{ border: `2px solid ${selected ? COLORS.marigold : COLORS.border}`, background: COLORS.field }}>
                           <img src={asset.url} alt="" className="w-full h-20 object-cover" />
                           <span className="block text-[10px] px-2 py-1 truncate" style={{ color: COLORS.muted }}>{asset.filename}</span>
-                        </button>
+                        </Button>
                       );
                     })}
                   </div>
-                ) : <p className="text-xs" style={{ color: COLORS.muted }}>No uploaded assets yet.</p>}
+                ) : <p className="text-xs" style={{ color: COLORS.muted }}>No reference images yet.</p>}
               </section>
             )}
 
             {selectedAsset && (
               <div className="flex items-center gap-2 text-xs" style={{ color: COLORS.muted }}>
                 <span>Reference: {selectedAsset.filename}</span>
-                <button type="button" onClick={() => setSelectedAsset(null)} style={{ color: COLORS.marigold }}>Remove</button>
+                <Button type="button" onClick={() => setSelectedAsset(null)} style={{ color: COLORS.marigold }}>Remove</Button>
               </div>
             )}
-            {error && <p className="text-sm" style={{ color: "#C1453B" }}>{error}</p>}
-            <button type="submit" disabled={!canSubmit} className="self-start px-6 py-3 rounded-md text-sm font-semibold flex items-center gap-2" style={{ background: canSubmit ? COLORS.marigold : COLORS.border, color: canSubmit ? COLORS.bg : COLORS.muted, cursor: canSubmit ? "pointer" : "not-allowed" }}>
+            {error && <Alert severity="error">{friendlyMessage(error, "We couldn't start your video. Please try again.")}</Alert>}
+            {submitting && <ActionProgress label={scriptMode ? "Reading your script…" : "Starting your video plan…"} />}
+            {uploading && <ActionProgress label="Uploading your reference image…" />}
+            <Button type="submit" disabled={!canSubmit} className="self-start px-6 py-3 rounded-md text-sm font-semibold flex items-center gap-2" style={{ background: canSubmit ? COLORS.marigold : COLORS.border, color: canSubmit ? COLORS.bg : COLORS.muted, cursor: canSubmit ? "pointer" : "not-allowed" }}>
               {submitting && <Loader2 size={15} className="animate-spin" />}
-              {submitting ? (scriptMode ? "Extracting..." : "Starting...") : (scriptMode ? "Continue to resolve names" : "Create shot list")}
-            </button>
+              {submitting ? (scriptMode ? "Reading your script…" : "Starting...") : (scriptMode ? "Choose characters and places" : "Create shot list")}
+            </Button>
           </fieldset>
         </div>
       </form>
-    </section>
+    </Card>
   );
 }

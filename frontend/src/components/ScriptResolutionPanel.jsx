@@ -1,3 +1,6 @@
+import { Button, Alert, Card } from "@mui/material";
+import ActionProgress from "./ActionProgress";
+import { friendlyMessage } from "../utils/presentation";
 import { ArrowLeft, Check, ImagePlus, Loader2, Sparkles, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -125,13 +128,13 @@ function CharacterResolutionRow({ item, characters, resolution, onResolve, onApp
       <div className="resolution-row-heading">
         <div><span>Character</span><h3>{item.displayName}</h3></div>
         <span className={`resolution-status ${resolution ? "resolution-status--done" : ""}`}>
-          {resolution ? "Resolved" : "Needs a choice"}
+          {resolution ? "Ready" : "Needs a choice"}
         </span>
       </div>
       <label>
-        Resolution
-        <select aria-label={`Resolve character ${item.displayName}`} value={choice} onChange={handleChoice}>
-          <option value="">Choose how to resolve</option>
+        Reference
+        <select aria-label={`Choose character ${item.displayName}`} value={choice} onChange={handleChoice}>
+          <option value="">Choose a reference</option>
           {characters.map((character) => (
             <option key={character.id} value={`vault:${character.id}`}>Vault: {character.name}</option>
           ))}
@@ -145,10 +148,10 @@ function CharacterResolutionRow({ item, characters, resolution, onResolve, onApp
           <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label>Description<textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Appearance, wardrobe, and distinctive details" /></label>
           <div className="inline-character-actions">
-            <button type="button" onClick={handleGenerate} disabled={busy}>
+            <Button type="button" onClick={handleGenerate} disabled={busy}>
               {busyAction === "generate" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
               {draft ? "Retry image" : "Generate image"}
-            </button>
+            </Button>
             <label className="inline-upload">
               {busyAction === "upload" ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
               Upload image
@@ -161,23 +164,24 @@ function CharacterResolutionRow({ item, characters, resolution, onResolve, onApp
               <div>
                 <span>{draft.image_source}</span>
                 <label>
-                  Sarvam voice
+                  Character voice
                   <select value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>
                     <option value="">Choose a voice</option>
                     {SARVAM_VOICES.map((voice) => <option key={voice} value={voice}>{voice}</option>)}
                   </select>
                 </label>
-                <button type="button" onClick={handleSaveVoice} disabled={busy || !voiceId}>
+                <Button type="button" onClick={handleSaveVoice} disabled={busy || !voiceId}>
                   {busyAction === "voice" && <Loader2 size={14} className="animate-spin" />} Save voice
-                </button>
-                <button type="button" className="inline-approve" onClick={handleApprove} disabled={busy || !draft.voice_id}>
+                </Button>
+                <Button type="button" className="inline-approve" onClick={handleApprove} disabled={busy || !draft.voice_id}>
                   {busyAction === "approve" ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
                   Approve and use
-                </button>
+                </Button>
               </div>
             </div>
           )}
-          {error && <p className="resolution-error">{error}</p>}
+          {busy && <ActionProgress label={{generate: "Creating your character…", upload: "Uploading your character image…", voice: "Saving your voice choice…", approve: "Saving your character…"}[busyAction]} />}
+          {error && <Alert severity="error">{friendlyMessage(error, "Your character could not be saved. Please try again.")}</Alert>}
         </section>
       )}
     </article>
@@ -207,20 +211,20 @@ function LocationResolutionRow({ item, assets, resolution, onResolve }) {
       <div className="resolution-row-heading">
         <div><span>Location</span><h3>{item.displayName}</h3></div>
         <span className={`resolution-status ${resolution ? "resolution-status--done" : ""}`}>
-          {resolution ? "Resolved" : "Needs a choice"}
+          {resolution ? "Ready" : "Needs a choice"}
         </span>
       </div>
       <label>
-        Resolution
-        <select aria-label={`Resolve location ${item.displayName}`} value={choice} onChange={handleChoice}>
-          <option value="">Choose how to resolve</option>
+        Reference
+        <select aria-label={`Choose location ${item.displayName}`} value={choice} onChange={handleChoice}>
+          <option value="">Choose a reference</option>
           {assets.map((asset) => (
             <option key={asset.id} value={`asset:${asset.id}`}>Asset: {asset.label || asset.filename}</option>
           ))}
           <option value="invent">Let the AI invent this one</option>
         </select>
       </label>
-      {!assets.length && <p className="resolution-hint">No assets tagged as locations are available.</p>}
+      {!assets.length && <p className="resolution-hint">No location images have been saved yet.</p>}
     </article>
   );
 }
@@ -267,16 +271,16 @@ export default function ScriptResolutionPanel({ scriptText, extraction, initialC
   }
 
   return (
-    <section className="script-resolution-panel" aria-label="Resolve script references">
-      <button type="button" className="resolution-back" onClick={onBack}><ArrowLeft size={15} /> Back to script</button>
+    <Card component="section" className="script-resolution-panel" aria-label="Choose script characters and places">
+      <Button type="button" className="resolution-back" onClick={onBack}><ArrowLeft size={15} /> Back to script</Button>
       <header>
         <p className="eyebrow">Script references</p>
-        <h1>Resolve every named reference</h1>
+        <h1>Choose your characters and places</h1>
         <p>Choose an existing reference, create a character here, or explicitly let the AI invent it.</p>
       </header>
 
       {!items.length ? (
-        <div className="resolution-empty"><ImagePlus size={22} /><p>No named characters or locations were extracted.</p></div>
+        <div className="resolution-empty"><ImagePlus size={22} /><p>No named characters or places were found.</p></div>
       ) : (
         <div className="resolution-list">
           {characterItems.map((item) => (
@@ -302,14 +306,15 @@ export default function ScriptResolutionPanel({ scriptText, extraction, initialC
       )}
 
       <footer className="resolution-footer">
-        <p>{resolvedCount} of {items.length} resolved</p>
-        <button type="button" disabled={!allResolved || submitting} onClick={handleContinue}>
+        <p>{resolvedCount} of {items.length} ready</p>
+        <Button type="button" disabled={!allResolved || submitting} onClick={handleContinue}>
           {submitting && <Loader2 size={14} className="animate-spin" />}
           {submitting ? "Starting..." : "Continue to create shot list"}
-        </button>
-        {!allResolved && <span>Resolve every name before continuing.</span>}
-        {submitError && <span className="resolution-error">{submitError}</span>}
+        </Button>
+        {!allResolved && <span>Choose a reference for each name before continuing.</span>}
+        {submitting && <ActionProgress label="Starting your video plan…" />}
+        {submitError && <Alert severity="error">{friendlyMessage(submitError, "Your video plan could not start. Please try again.")}</Alert>}
       </footer>
-    </section>
+    </Card>
   );
 }
