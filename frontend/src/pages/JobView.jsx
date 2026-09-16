@@ -125,7 +125,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const [streamCycle, setStreamCycle] = useState(0);
   const [videoSubmitting, setVideoSubmitting] = useState(null);
   const [videoHints, setVideoHints] = useState({});
-  const videoBusy = final?.result?.shots?.some((shot) => (["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
+  const videoBusy = final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
 
   useEffect(() => {
     if (!videoBusy) return;
@@ -356,6 +356,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
 
         {done && result && (
           <>
+            {result.shots_needing_attention?.length > 0 && <Alert severity="error" sx={{ m: 2 }}>Shots {result.shots_needing_attention.join(", ")} need attention: no still image or video is available. Regenerate these shots before making your final video.</Alert>}
             <div className="panel-logline">
               <span>The story in one sentence</span>
               <p>{result.script.logline}</p>
@@ -419,7 +420,10 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         <small>{shot.still_frame_warning ? "Unavailable" : "Available after final shot planning"}</small>
                       </div>
                     )}
-                    {shot.still_frame_warning && <p className="audio-warning">{friendlyMessage(shot.still_frame_warning, "The image preview could not be completed. You can continue reviewing the plan.")}</p>}
+                    {shot.still_frame_status === "generating" ? <ActionProgress label={`Regenerating the image for shot ${shot.shot_number}… Video generation follows if accepted.`} /> : shot.still_frame_warning && <Alert severity={shot.video_url ? "warning" : "error"} sx={{ my: 2 }}>
+                      <AlertTitle>{shot.video_url ? "Still preview unavailable" : "This shot couldn't be generated — try regenerating it"}</AlertTitle>
+                      {shot.video_url ? "Your existing video is still available below." : "No still image or video is available for this shot."} {!approved ? "Approve the plan, then use Regenerate below." : "Use Regenerate below to retry this shot only."}
+                    </Alert>}
                     {shot.video_url && <ShotVideo shot={shot} />}
                     <FaceEnhancement jobId={jobId} shot={shot} onRefresh={async () => setFinal(await getJob(jobId))} />
                     {shot.video_status && <p className="text-sm my-2" role="status">Video: {{done: "Ready", error: "Needs attention", processing: "Generating", submitting: "Starting", submission_unknown: "Checking the request"}[shot.video_status] || "Checking progress"}{shot.has_dialogue && shot.video_status === "done" ? (shot.video_provider === "hedra" ? " · Spoken performance with audio" : " · Voice recording has not been added yet") : ""}</p>}
@@ -429,7 +433,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     {shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
                     {(shot.video_warnings || []).map((warning) => <p className="audio-warning" key={warning}>{friendlyMessage(warning, "Please review this video before approving it.")}</p>)}
                     {(shot.has_dialogue || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && (shot.still_frame_url || (shot.has_dialogue && result.continuity?.characters?.some((character) => character.character_id && character.image_url && shot.characters_in_shot?.includes(character.name)))) && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
-                      <Button type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
+                      <Button type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
                         {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate video · speaking · 720p" : `Generate video · ${Math.max(4, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
                       </Button>
                     )}
@@ -465,7 +469,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       ) : (
                         <>
                           <Button type="button" onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot text ${shot.shot_number}`}><Pencil size={13} /> Edit text</Button>
-                          <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={!approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title={approved ? "Restart this shot only" : "Approve the plan first"}>
+                          <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title={approved ? "Restart this shot only" : "Approve the plan first"}>
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate
                           </Button>
                           {!shot.has_dialogue && shot.video_provider !== "hedra" && shot.video_url && (

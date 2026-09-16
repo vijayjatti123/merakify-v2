@@ -183,6 +183,11 @@ def job_result(job: Job) -> Optional[Any]:
         from app.services.still_frame_service import invalidate_changed_stills
         invalidate_changed_stills(result)
         for shot in result.get("shots", []):
+            if shot.get("still_frame_status") == "generating" and still_retry_expired(shot):
+                shot["still_frame_status"] = "failed"
+                shot["still_frame_warning"] = "Shot regeneration timed out. Please try regenerating it again."
+            elif not shot.get("still_frame_status") and shot.get("still_frame_warning") and not shot.get("still_frame_key"):
+                shot["still_frame_status"] = "failed"
             if shot.get("still_frame_key"):
                 try:
                     shot["still_frame_url"] = storage_service.asset_url(shot["still_frame_key"])
@@ -234,6 +239,8 @@ def job_result(job: Job) -> Optional[Any]:
                     data["status"] = "failed"
                     data["error"] = "Assembly worker did not finish within 30 minutes. You can assemble again."
                 result["final_video"] = data
+        result["shots_needing_attention"] = [s["shot_number"] for s in result.get("shots", [])
+            if s.get("still_frame_status") == "failed" and not s.get("still_frame_url") and not s.get("video_url")]
     return result
 
 
@@ -249,6 +256,73 @@ def video_source(db, job_id, number):
     if shot is None:
         raise LookupError("Shot not found")
     return result, shot
+
+
+def still_retry_expired(shot):
+    from datetime import datetime, timezone
+    try:
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(shot["still_retry_started_at"])).total_seconds() > 900
+    except (KeyError, ValueError, TypeError):
+        return True
+
+
+def claim_still_retry(db, job_id, number, expected_attempt):
+    """Claim only a missing-output shot; CAS also guards SQLite double clicks."""
+    import uuid
+    from datetime import datetime, timezone
+    result, shot = video_source(db, job_id, number)
+    if not result.get("generation_approved") or not shot.get("compiled_prompt"):
+        raise ValueError("Approve the completed shot plan before regenerating")
+    if shot.get("still_frame_url") or shot.get("video_url"):
+        raise ValueError("Shot output changed; refresh before regenerating")
+    if shot.get("video_status") in {"submitting", "processing", "submission_unknown"}:
+        raise ValueError("Video is busy or needs reconciliation; refresh first")
+    if (shot.get("video_task_id") or shot.get("video_submitted_at") or "none") != expected_attempt:
+        raise ValueError("Video attempt changed; refresh before regenerating")
+    job = get_job(db, job_id)
+    old = job.result_json
+    stored = json.loads(old)
+    target = next(s for s in stored["shots"] if s["shot_number"] == number)
+    if target.get("still_frame_status") == "generating" and not still_retry_expired(target):
+        raise ValueError("This shot is already regenerating")
+    token = uuid.uuid4().hex
+    target.update(still_frame_status="generating", still_retry_token=token,
+                  still_retry_started_at=datetime.now(timezone.utc).isoformat())
+    changed = db.query(Job).filter(Job.id == job_id, Job.result_json == old).update(
+        {Job.result_json: json.dumps(stored)}, synchronize_session=False)
+    if changed != 1:
+        db.rollback()
+        raise ValueError("Job changed; refresh before regenerating")
+    db.commit()
+    db.expire_all()
+    return token
+
+
+def finish_still_retry(db, job_id, number, token, regenerated):
+    from app.services.still_frame_service import shot_fingerprint
+    job = db.query(Job).filter_by(id=job_id).with_for_update().populate_existing().one()
+    old = job.result_json
+    result = json.loads(old)
+    target = next(s for s in result["shots"] if s["shot_number"] == number)
+    source = next(s for s in regenerated["shots"] if s["shot_number"] == number)
+    if target.get("still_retry_token") != token or still_retry_expired(target) or shot_fingerprint(target) != shot_fingerprint(source):
+        db.rollback()
+        return False
+    for key in list(target):
+        if key.startswith("still_frame_") or key.startswith("still_retry_"):
+            target.pop(key)
+    target.update({k: v for k, v in source.items() if k.startswith("still_frame_")})
+    for entity, reference in regenerated.get("entity_references", {}).items():
+        if reference.get("shot_number") == number:
+            result.setdefault("entity_references", {})[entity] = reference
+    changed = db.query(Job).filter(Job.id == job_id, Job.result_json == old).update(
+        {Job.result_json: json.dumps(result)}, synchronize_session=False)
+    if changed != 1:
+        db.rollback()
+        return False
+    db.commit()
+    db.expire_all()
+    return True
 
 
 def claim_video(db, job_id, number, fields, *, replace_token=None):

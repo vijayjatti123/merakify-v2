@@ -71,9 +71,14 @@ class VideoRegenerateRequest(BaseModel):
 
 
 @router.post("/{job_id}/shots/{shot_number}/video/regenerate", status_code=202)
-def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequest, db: Session = Depends(get_db)):
+def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     from app.services import video_generation_service as video
     try:
+        _, shot = job_service.video_source(db, job_id, shot_number)
+        if not shot.get("still_frame_url") and not shot.get("video_url"):
+            token = job_service.claim_still_retry(db, job_id, shot_number, payload.expected_attempt)
+            background_tasks.add_task(_recover_missing_still, job_id, shot_number, token, payload.expected_attempt, payload.hint)
+            return {"shot_number": shot_number, "status": "generating_still"}
         return video.start(db, job_id, shot_number, regenerate=True, hint=payload.hint,
                            expected_attempt=payload.expected_attempt)
     except LookupError as error:
@@ -82,6 +87,31 @@ def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequ
         raise HTTPException(409, str(error)) from error
     except Exception as error:
         raise HTTPException(502, "Video regeneration failed or is uncertain; inspect shot status before retrying") from error
+
+
+def _recover_missing_still(job_id, number, token, expected_attempt, hint):
+    from app.services import still_frame_service, video_generation_service
+    with SessionLocal() as db:
+        result = None
+        try:
+            result, shot = job_service.video_source(db, job_id, number)
+            if shot.get("still_retry_token") != token:
+                return
+            emit = lambda agent, message: job_service.append_event(db, job_id, agent, message)
+            still_frame_service.generate_still_frames(result, job_id=job_id, emit=emit, shot_numbers={number})
+            if not job_service.finish_still_retry(db, job_id, number, token, result):
+                return
+            if shot.get("still_frame_url"):
+                # Reuse Module S/R, including existing dialogue audio. No replanning/TTS.
+                video_generation_service.start(db, job_id, number, regenerate=True,
+                    expected_attempt=expected_attempt, hint=hint)
+        except Exception as error:
+            db.rollback()
+            if result is not None and not shot.get("still_frame_url"):
+                shot.update(still_frame_status="failed", still_frame_warning="This shot couldn't be generated — try regenerating it.")
+                job_service.finish_still_retry(db, job_id, number, token, result)
+            job_service.append_event(db, job_id, "still_frame", "WARNING: Shot " + str(number)
+                + ": regeneration did not complete. Check the shot's current output before retrying. " + type(error).__name__)
 
 
 @router.get("/{job_id}/shots/{shot_number}/video-request")
@@ -272,7 +302,6 @@ def _resolve_brief_mentions(payload: JobCreate, db: Session):
     if script is not None:
         script = re.sub(pattern, lambda m: replacements[m[0]], script)
     return brief, script, resolutions
-
 
 
 @router.post("", response_model=JobOut)

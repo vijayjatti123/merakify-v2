@@ -309,12 +309,13 @@ def _continuous_pair(previous, shot, result):
                 re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I))
 
 
-def generate_still_frames(result, *, job_id, emit):
-    """A failed shot remains usable as text; never convert image failures to job errors."""
+def generate_still_frames(result, *, job_id, emit, shot_numbers=None):
+    """Keep the plan reviewable, but explicitly mark missing output as failed."""
     characters = {c["name"].strip().casefold(): c for c in result.get("continuity", {}).get("characters", [])}
     # References live only in this job's result JSON, pointing to its own stills.
     # Rebuild on each full still pass so revised plans cannot inherit stale anchors.
-    reference_map = result["entity_references"] = {}
+    reference_map = result.setdefault("entity_references", {}) if shot_numbers is not None else {}
+    result["entity_references"] = reference_map
     reference_bytes = {}
     ordered = sorted(result.get("shots", []), key=lambda s: s["shot_number"])
     previous_image = None
@@ -322,9 +323,17 @@ def generate_still_frames(result, *, job_id, emit):
     # upload inside it: the next iteration may consume only the accepted image
     # that produced the preceding shot's stored URL, never an in-flight candidate.
     for index, shot in enumerate(ordered):
+        if shot_numbers is not None and shot["shot_number"] not in shot_numbers:
+            previous_image = None
+            continue
         previous = ordered[index - 1] if index else None
         continuation = None
         if _continuous_pair(previous, shot, result):
+            if shot_numbers is not None and previous.get("still_frame_url"):
+                try:
+                    previous_image = _download_reference_image(fresh_reference(previous["still_frame_url"]))
+                except Exception:
+                    emit("still_frame", f"WARNING: Shot {shot['shot_number']}: previous still could not be loaded; no action anchor used.")
             if previous.get("still_frame_url") and previous_image is not None:
                 continuation = (previous['shot_number'], previous_image, previous['still_frame_url'])
             else:
@@ -335,6 +344,7 @@ def generate_still_frames(result, *, job_id, emit):
         shot.pop("still_frame_key", None)
         shot.pop("still_frame_source_hash", None)
         shot.pop("still_frame_warning", None)
+        shot["still_frame_status"] = "pending"
         if not shot.get("compiled_prompt"):
             continue  # Dialogue jobs wait for real post-approval compilation.
         number = shot["shot_number"]
@@ -350,7 +360,9 @@ def generate_still_frames(result, *, job_id, emit):
                     references.append((name, _download_reference_image(fresh_reference(character["image_url"])),
                                        character["image_url"], 0, 0))
             for entity_id in entities:
-                if entity_id in reference_map:
+                if entity_id in reference_map and reference_map[entity_id]["shot_number"] < number:
+                    if entity_id not in reference_bytes:
+                        reference_bytes[entity_id] = _download_reference_image(fresh_reference(reference_map[entity_id]["url"]))
                     references.append(("Job entity " + entity_id + "; preserve only this entity, not the old shot layout",
                                        reference_bytes[entity_id], reference_map[entity_id]["url"],
                                        1, reference_map[entity_id]["shot_number"]))
@@ -373,7 +385,7 @@ def generate_still_frames(result, *, job_id, emit):
                     feedback = (f"Decoded image is {dimensions['width']}x{dimensions['height']}; expected "
                                 f"{aspect_ratio} within 2% ratio tolerance. Generate the correct aspect ratio.")
                     emit("still_frame", f"WARNING: Shot {number}: aspect-ratio mismatch. {feedback} "
-                         + ("Retrying once." if attempt == 0 else "Using text fallback."))
+                         + ("Retrying once." if attempt == 0 else "No still accepted; regeneration needed."))
                     if attempt == 1:
                         raise StillFrameError("Aspect-ratio mismatch after retry: " + feedback)
                     continue
@@ -388,7 +400,7 @@ def generate_still_frames(result, *, job_id, emit):
                     break
                 feedback = verdict["reason"]
                 emit("still_frame", f"Shot {number}: visual check rejected candidate {attempt + 1}; "
-                     + ("retrying once." if attempt == 0 else "using text fallback.")
+                     + ("retrying once." if attempt == 0 else "no still accepted; regeneration needed.")
                      + f" Reason: {feedback}")
             else:
                 raise StillFrameError("Still-frame visual check rejected both candidates")
@@ -396,7 +408,7 @@ def generate_still_frames(result, *, job_id, emit):
             key = f"jobs/{job_id}/stills/{number}-{uuid.uuid4().hex}.{ext}"
             stored = storage_service.upload_bytes(key=key, body=image.data, content_type=image.content_type)
             shot.update(still_frame_url=stored["url"], still_frame_key=stored["key"],
-                        still_frame_source_hash=shot_fingerprint(shot))
+                        still_frame_source_hash=shot_fingerprint(shot), still_frame_status="ready")
             # Reuse the exact bytes uploaded at this URL; no redundant S3 download.
             previous_image = image
             observed = verdict.get("visible_entities", [])
@@ -414,7 +426,8 @@ def generate_still_frames(result, *, job_id, emit):
             emit("still_frame", f"Shot {number}: opening still passed visual check and was stored.")
         except Exception as error:
             detail = str(error) if isinstance(error, StillFrameError) else type(error).__name__
-            warning = f"Still frame unavailable for shot {number}: {detail}. Continuing with compiled text; job is not blocked."
+            warning = f"Shot {number}: This shot couldn't be generated — try regenerating it. No still was accepted. Reason: {detail}."
+            shot["still_frame_status"] = "failed"
             shot["still_frame_warning"] = warning
             emit("still_frame", "WARNING: " + warning)
     return result["shots"]
