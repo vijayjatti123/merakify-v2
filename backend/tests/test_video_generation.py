@@ -26,7 +26,7 @@ class VideoTests(unittest.TestCase):
         self.assertIn('job entity props:cup: @image1', out['request']['prompt'])
         self.assertIn('still entering', out['mode_risk_terms'])
         self.assertTrue(out['request']['generate_audio'])
-        self.shot.update(has_dialogue=True, dialogue_audio_url="https://example.com/real.wav")
+        self.shot.update(has_dialogue=True,speech_mode="onscreen", dialogue_audio_url="https://example.com/real.wav")
         self.assertEqual(video.translate(self.result, self.shot)['provider'], 'hedra')
 
     def test_reference_priority_cap_and_url_rewrite(self):

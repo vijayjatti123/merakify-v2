@@ -46,7 +46,7 @@ class TechniqueTests(unittest.TestCase):
 
     def test_once_per_shot_and_batch_scoping(self):
         payload = {"content_type": "ad", "ai_model": "Kling 3.0", "shots": [
-            {"shot_number": 1, "has_dialogue": False}, {"shot_number": 2, "has_dialogue": True}]}
+            {"shot_number": 1, "has_dialogue": False}, {"shot_number": 2, "has_dialogue": True, "speech_mode": "onscreen"}]}
         with patch.object(knowledge, "lookup_techniques", wraps=knowledge.lookup_techniques) as lookup:
             found = knowledge.shot_knowledge(payload, lambda *args: None)
             self.assertEqual(lookup.call_count, 2)

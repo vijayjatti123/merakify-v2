@@ -46,7 +46,7 @@ class RegenerateTests(unittest.TestCase):
         current=json.loads(self.db.query(VideoTask).one().data_json)
         self.assertEqual(current['video_status'],'submission_unknown');self.assertIsNone(current['video_url']);self.assertEqual(self.job.status,'done')
     def test_dialogue_dispatch_reuses_existing_audio(self):
-        self.result['shots'][0].update(has_dialogue=True,dialogue_text='Hello',dialogue_audio_url='https://example.com/audio.wav')
+        self.result['shots'][0].update(has_dialogue=True,speech_mode="onscreen",dialogue_text='Hello',dialogue_audio_url='https://example.com/audio.wav')
         jobs.set_result(self.db,self.job.id,self.result)
         from app.services import hedra_video_service as hedra,voice_generation_service as voice
         with patch.object(hedra,'start',return_value={'job_id':'new'}) as call,patch.object(voice,'generate_job_dialogue_audio') as tts:

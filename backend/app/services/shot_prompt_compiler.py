@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from contextvars import copy_context
 
 from app.agents import prompts
+from app.services.speech_mode import is_voiceover
 
 TEXT_GUARD = "No on-screen text, logos or readable signage; composite text in post."
 AUDIO_GUARD = "Visual performance only; use the existing dialogue audio file in post."
@@ -265,7 +266,7 @@ def compiler_input(result, *, brief="", emit):
     continuing_speaker = None
     for shot in shots:
         item = {k: shot.get(k) for k in ("shot_number", "scene_number", "camera_angle", "lens", "lighting",
-                                        "composition_note", "description", "dialogue_text", "has_dialogue", "characters_in_shot",
+                                        "composition_note", "description", "dialogue_text", "has_dialogue", "speech_mode", "characters_in_shot",
                                         "state_at_shot_start", "state_at_shot_end")}
         move, reduced = first_movement(shot.get("camera_movement"))
         item["camera_movement"] = move
@@ -301,10 +302,13 @@ def compiler_input(result, *, brief="", emit):
         # Establish speech from a sole dialogue performer, not a silent bystander.
         # Carry it across insert shots and batch boundaries without adding an
         # off-camera person to characters_in_shot or changing upstream audio.
-        if shot.get("has_dialogue") and refs:
+        if shot.get("has_dialogue") and refs and not is_voiceover(shot):
             continuing_speaker = refs[0] if len(refs) == 1 else {"name": "Dialogue performer", "gender": None}
         speaker = refs[0] if len(refs) == 1 else continuing_speaker if not refs else None
-        item["speaker_label"] = speaker["name"] if speaker else "Dialogue performer" if refs else "Narrator"
+        if is_voiceover(shot):
+            speaker = None
+            item["speech_mode"] = "voiceover"
+        item["speaker_label"] = "Narrator" if is_voiceover(shot) else speaker["name"] if speaker else "Dialogue performer" if refs else "Narrator"
         item["speaker_reference"] = copy.deepcopy(speaker)
         identity_refs = refs + ([speaker] if speaker and not refs else [])
         # Unknown classification never licenses a gender guess. In mixed scenes

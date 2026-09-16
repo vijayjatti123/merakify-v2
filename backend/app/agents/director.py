@@ -1,3 +1,4 @@
+from app.services.speech_mode import is_voiceover
 import json
 import unicodedata
 from typing import Callable
@@ -288,12 +289,13 @@ def _attach_voice_refs(
             if character is not None:
                 voice_refs[normalized_name] = character.get("voice_sample_ref")
 
-        shot["voice_refs"] = voice_refs
-        if shot.get("has_dialogue") and not names:
-            shot["voice_refs"]["Narrator"] = narrator_voice_ref
-        shot["experimental_audio_sync"] = bool(shot.get("has_dialogue"))
+        shot["voice_refs"] = {"Narrator": narrator_voice_ref} if is_voiceover(shot) else voice_refs
+        shot["speech_mode"] = "voiceover" if is_voiceover(shot) else "onscreen" if shot.get("has_dialogue") else "none"
+        shot["experimental_audio_sync"] = bool(shot.get("has_dialogue")) and not is_voiceover(shot)
         if shot["experimental_audio_sync"]:
             shot["audio_sync_note"] = AUDIO_SYNC_DISCLAIMER
+        else:
+            shot.pop("audio_sync_note", None)
     return shots
 
 

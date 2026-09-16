@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 from app.config import settings
+from app.services.speech_mode import is_voiceover, uses_hedra
 from app.services import job_service, storage_service, render_compliance_service
 from app.services.still_frame_service import match_entities, visual_description
 
@@ -28,7 +29,7 @@ def identity(url):
 
 
 def source_fingerprint(shot):
-    data = [shot.get(k) for k in ("compiled_prompt", "still_frame_key", "duration_sec", "dialogue_text", "dialogue_audio_key", "has_dialogue")]
+    data = [shot.get(k) for k in ("compiled_prompt", "still_frame_key", "duration_sec", "dialogue_text", "dialogue_audio_key", "has_dialogue", "speech_mode")]
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -43,7 +44,7 @@ def fresh_url(url):
 
 
 def translate(result, shot):
-    if shot.get("has_dialogue"):
+    if uses_hedra(shot):
         from app.services import hedra_video_service
         return hedra_video_service.preview(result, shot)
     if result.get("ai_model") != "Seedance 2.0":
@@ -55,7 +56,9 @@ def translate(result, shot):
     quality = result.get("quality", "720p").lower()
     if quality not in {"480p", "720p", "1080p", "4k"}:
         raise ValueError("Unsupported Seedance quality")
-    planned = float(shot["duration_sec"])
+    if is_voiceover(shot) and shot.get("dialogue_audio_duration_sec") is None:
+        raise ValueError("Finish narration audio measurement before video generation")
+    planned = float(shot.get("dialogue_audio_duration_sec") if is_voiceover(shot) else shot["duration_sec"])
     if not math.isfinite(planned) or planned <= 0 or planned > 15:
         raise ValueError("Seedance duration must fit within 15 seconds")
     duration = max(4, math.ceil(planned))
@@ -63,6 +66,9 @@ def translate(result, shot):
     if duration != planned:
         warnings.append(f"Provider bills {duration}s (integer minimum 4s); planned duration remains {planned:g}s.")
     visual = visual_description(shot["compiled_prompt"])
+    if is_voiceover(shot):
+        # The spoken text belongs to post-production, never a visible performance.
+        visual = re.split(r"Performance reference —|\nDialogue:", visual, maxsplit=1)[0].strip()
     candidates = [("shot opening/state", shot["still_frame_url"])]
     names = {n.strip().casefold() for n in shot.get("characters_in_shot", [])}
     for char in result.get("continuity", {}).get("characters", []):
@@ -138,7 +144,7 @@ def provider(method, path, body=None):
 
 def regenerate_translation(result, shot, hint=""):
     translated = translate(result, shot)
-    if shot.get("has_dialogue"):
+    if uses_hedra(shot):
         if hint:
             translated["warnings"].append("Hedra regenerates the full performance; targeted video editing is unavailable.")
         return translated
@@ -168,7 +174,7 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
         raise ValueError("Approve the revised plan/audio before video regeneration")
     if regenerate and expected_attempt is None:
         raise ValueError("Refresh the shot before regenerating")
-    if shot.get("has_dialogue"):
+    if uses_hedra(shot):
         from app.services import hedra_video_service
         return hedra_video_service.start(db, job_id, number, result, shot,
             replace_token=expected_attempt if regenerate else None, hint=hint)

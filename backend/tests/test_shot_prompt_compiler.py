@@ -154,16 +154,16 @@ class CompilerTests(unittest.TestCase):
             errors=compiler.validate_compiled({"shots":[{"shot_number":1,"compiled_prompt":prose()}]},payload)
             self.assertTrue(any("subject_anchor" in e for e in errors))
 
-    def test_offscreen_dialogue_keeps_prior_speaker_across_batches(self):
+    def test_narration_does_not_inherit_prior_visible_speaker_across_batches(self):
         result = source(dialogue=True)
         result["continuity"]["characters"] = [{"name": "Speaker", "gender": "unspecified"}]
         result["shots"] = [dict(result["shots"][0], shot_number=n,
                                 characters_in_shot=["Speaker"] if n == 1 else []) for n in range(1, 6)]
         result["assembly"]["transitions"] = [{"between": f"{n}-{n+1}", "type": "cut"} for n in range(1, 5)]
         payload = compiler.compiler_input(result, emit=Mock())
-        self.assertEqual([s["speaker_label"] for s in payload["shots"]], ["Speaker"] * 5)
+        self.assertEqual([s["speaker_label"] for s in payload["shots"]], ["Speaker"] + ["Narrator"] * 4)
         self.assertEqual(payload["shots"][2]["characters_in_shot"], [])
-        self.assertEqual(payload["shots"][2]["speaker_reference"]["gender"], "unspecified")
+        self.assertIsNone(payload["shots"][2]["speaker_reference"])
         self.assertEqual(payload["shots"][0]["character_references"][0]["gender"], "unspecified")
         result["shots"][0]["has_dialogue"] = False
         self.assertEqual(compiler.compiler_input(result, emit=Mock())["shots"][2]["speaker_label"], "Narrator")

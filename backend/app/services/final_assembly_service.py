@@ -15,6 +15,7 @@ import av
 import httpx
 
 from app.services import job_service, storage_service
+from app.services.speech_mode import is_voiceover
 
 FPS = 30
 FADE_SECONDS = 0.5  # Assembly currently supplies type, not duration. Symmetric A/V overlap.
@@ -29,7 +30,8 @@ def fingerprint(result, aspect_ratio, quality, color_grade='None'):
     def identity(shot):
         url = urlsplit(shot.get("video_url") or "")
         return [shot.get("shot_number"), shot.get("video_key") or urlunsplit((url.scheme, url.netloc, url.path, "", "")),
-                shot.get("video_sha256"), shot.get("video_task_id"), shot.get("video_status"), shot.get("video_source_changed", False)]
+                shot.get("video_sha256"), shot.get("video_task_id"), shot.get("video_status"), shot.get("video_source_changed", False), is_voiceover(shot),
+                shot.get("dialogue_audio_key"), shot.get("dialogue_audio_duration_sec"), shot.get("dialogue_audio_url") if not shot.get("dialogue_audio_key") else None]
     value = [sorted([identity(s) for s in result.get("shots", [])], key=lambda s: s[0]),
              result.get("assembly", {}), result.get("audio_assembly_pending", False), aspect_ratio, quality, color_grade or 'None']
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
@@ -43,6 +45,9 @@ def prepare(job, result, *, audio_offsets=None):
     missing = [s["shot_number"] for s in shots if not s.get("video_url")]
     if missing:
         raise AssemblyError("Cannot assemble final video: missing video for shot(s) " + ", ".join(map(str, missing)) + ". Generate or regenerate those shots first.")
+    missing_audio = [s["shot_number"] for s in shots if is_voiceover(s) and not s.get("dialogue_audio_url")]
+    if missing_audio:
+        raise AssemblyError("Missing approved narration audio for shot(s) " + ", ".join(map(str, missing_audio)))
     unfinished = [s["shot_number"] for s in shots if s.get("video_status") != "done" or s.get("video_source_changed")]
     if unfinished:
         raise AssemblyError("Cannot assemble final video: unfinished or outdated video for shot(s) " + ", ".join(map(str, unfinished)) + ".")
@@ -82,7 +87,7 @@ def prepare(job, result, *, audio_offsets=None):
         raise AssemblyError(f'Unsupported color grade: {grade!r}.')
     return {"source_hash": fingerprint(result, job.aspect_ratio, job.quality, grade), "color_grade": grade,
             "aspect_ratio": job.aspect_ratio, "quality": job.quality, "transitions": transitions,
-            "shots": [{k: s.get(k) for k in ("shot_number", "video_url", "video_key", "video_sha256", "video_provider", "has_dialogue")} for s in shots]}
+            "shots": [{k: s.get(k) for k in ("shot_number", "video_url", "video_key", "video_sha256", "video_provider", "has_dialogue", "speech_mode", "characters_in_shot", "dialogue_audio_url", "dialogue_audio_key", "dialogue_audio_duration_sec")} for s in shots]}
 
 
 def ffmpeg():
@@ -447,6 +452,33 @@ def apply_deflicker(source, target, timeline, emit=lambda note: None):
             emit('WARNING: Deflicker verification failed; retrying the local pass once.')
 
 
+def mux_narration(source, target, audio, expected_duration, emit):
+    """Use approved speech verbatim; do not generate, retime, or truncate it."""
+    from app.services.voice_generation_service import decoded_audio_duration
+    duration = decoded_audio_duration(audio.read_bytes())
+    if expected_duration is None or abs(duration - float(expected_duration)) > 0.05:
+        raise AssemblyError('Narration audio duration differs from the approved recording.')
+    with av.open(str(source)) as container:
+        stream = container.streams.video[0]
+        rate = float(stream.average_rate or FPS)
+        end = max((float(f.time or 0) + 1 / rate for f in container.decode(video=0)), default=0)
+    if end + 0.05 < duration:
+        raise AssemblyError('Generated B-roll is shorter than its narration; regenerate the shot with enough duration.')
+    command = [ffmpeg(), '-nostdin', '-y', '-v', 'error', '-i', str(source), '-i', str(audio),
+               '-map', '0:v:0', '-map', '1:a:0', '-vf', f'trim=duration={duration:.9f},setpts=PTS-STARTPTS,fps={FPS}',
+               '-frames:v', str(math.ceil(duration * FPS)),
+               '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p',
+               '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', str(target)]
+    done = subprocess.run(command, capture_output=True, timeout=900)
+    if done.returncode:
+        raise AssemblyError('Could not attach narration to B-roll; original shot remains available.')
+    measured = probe(target)
+    if abs(measured['audio_duration'] - duration) > 0.05 or abs(measured['video_duration'] - duration) > 0.05:
+        raise AssemblyError(f"Narration mux duration verification failed: expected {duration:.3f}s, audio {measured['audio_duration']:.3f}s, video {measured['video_duration']:.3f}s.")
+    emit(f"Narration mux verified: approved audio {duration:.3f}s, output audio {measured['audio_duration']:.3f}s, video {measured['video_duration']:.3f}s; no voice generation or Hedra call.")
+    return {'approved_audio_duration': duration, **measured}
+
+
 def run(db, job_id, token, plan):
     """Run only from the explicit assemble action; never called by per-shot regeneration."""
     def emit(note):
@@ -455,6 +487,7 @@ def run(db, job_id, token, plan):
         emit('Downloading all accepted shot videos in shot-number order; preserving their existing audio.')
         with tempfile.TemporaryDirectory() as folder:
             paths, total = [], 0
+            narration = []
             for shot in plan['shots']:
                 number = shot['shot_number']
                 if urlsplit(shot['video_url']).scheme != 'https':
@@ -472,12 +505,31 @@ def run(db, job_id, token, plan):
                             output.write(chunk); digest.update(chunk)
                 if shot.get('video_sha256') and digest.hexdigest() != shot['video_sha256']:
                     raise AssemblyError(f'Shot {number}: downloaded video hash does not match the accepted video.')
+                if is_voiceover(shot):
+                    from app.services.video_generation_service import fresh_url
+                    audio_url = storage_service.asset_url(shot['dialogue_audio_key']) if shot.get('dialogue_audio_key') else fresh_url(shot['dialogue_audio_url'])
+                    if urlsplit(audio_url).scheme != 'https':
+                        raise AssemblyError(f'Shot {number}: narration URL must use HTTPS.')
+                    audio = Path(folder) / f'narration-{number}.wav'
+                    with httpx.stream('GET', audio_url, timeout=120, follow_redirects=True) as response:
+                        response.raise_for_status()
+                        with audio.open('wb') as output:
+                            size = 0
+                            for chunk in response.iter_bytes(1024 * 1024):
+                                size += len(chunk); total += len(chunk)
+                                if size > 32 * 1024 ** 2 or total > MAX_TOTAL_BYTES:
+                                    raise AssemblyError('Narration exceeds assembly download limits.')
+                                output.write(chunk)
+                    muxed = Path(folder) / f'narrated-{number}.mp4'
+                    narration.append({'shot_number': number, **mux_narration(path, muxed, audio, shot.get('dialogue_audio_duration_sec'), emit)})
+                    path = muxed
                 paths.append(path)
             emit('Stitching hard cuts and paired video/audio crossfades before technical correction and creative grading.')
             target = Path(folder) / 'final.mp4'
             graded = Path(folder) / 'graded.mp4'
             stitched = Path(folder) / 'stitched.mp4'
             evidence = render(paths, stitched, plan, emit)
+            evidence['narration'] = narration
             evidence['stitched_final'] = evidence['final']
             evidence['color_pipeline'] = apply_color_pipeline(stitched, graded, evidence['timeline'], plan['color_grade'], emit)
             evidence['deflicker'] = apply_deflicker(graded, target, evidence['timeline'], emit)

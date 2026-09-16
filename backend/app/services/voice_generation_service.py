@@ -1,3 +1,4 @@
+from app.services.speech_mode import is_voiceover
 import asyncio
 import base64
 import uuid
@@ -97,7 +98,7 @@ def assign_missing_voice_ids(continuity: dict, shots: list[dict] | None = None, 
 
     narrator_used = bool(
         shots
-        and any(shot.get("has_dialogue") and not shot.get("characters_in_shot") for shot in shots)
+        and any(is_voiceover(shot) for shot in shots)
     )
     if narrator_used and not continuity.get("narrator_voice_ref"):
         continuity["narrator_voice_ref"] = "shubh"
@@ -300,6 +301,7 @@ async def _generate_dialogue_shot(
             "status": "done",
             "error_message": None,
             "dialogue_audio_url": uploaded["url"],
+            "dialogue_audio_key": object_key,
             "dialogue_audio_provider": generated.provider,
             "dialogue_voice_id": voice_id,
             "duration_sec": final_duration,

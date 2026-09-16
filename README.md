@@ -171,3 +171,26 @@ URLs expire after 30 minutes; the picker refreshes them before playback after 25
 Missing previews disable only the play icon, not voice selection or Save voice.
 Samples are reusable object-storage assets; no per-preview TTS charge applies.
 This extends character review, not the generation pipeline or voice calibration.
+
+
+### Module AR — narration without a Vault character
+
+Shots retain `has_dialogue` for all spoken audio and add `speech_mode`:
+`onscreen` uses Hedra, `voiceover` uses Seedance visuals plus approved Sarvam
+narration at final assembly, and `none` is silent/ambient. Legacy spoken shots
+with no visible characters are treated as voice-over. Visible bystanders can
+coexist with an explicit `voiceover` mode; they are not assigned the narration.
+The job's existing `continuity.narrator_voice_ref` is the stable catalog voice,
+with no Character Vault row. The existing audio approval flow still applies.
+
+Final assembly replaces the silent B-roll audio with that exact recording
+before the existing cuts/crossfades, correction, grade, and deflicker steps.
+Audio is not synthesized or retimed during assembly. Raw shot clips remain
+silent until assembly. The measured narration must fit Seedance's existing
+15-second limit; an overlong complete line or a returned clip shorter than its
+audio raises a specific error rather than silently clipping speech. Longer
+narration spanning multiple visual clips is not implemented by this module.
+
+This extends README's core brief-to-finished-video workflow; it adds no new
+provider, orchestrator, or Vault submission flow. Module K protection remains
+unchanged and applies equally to supplied narration text.
