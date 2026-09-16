@@ -4,7 +4,7 @@ import { Alert, Avatar, Box, Button, Chip, CircularProgress, Dialog, DialogActio
 import { AtSign, Plus, X } from "lucide-react";
 import { listCharacters, uploadCharacter, setCharacterVoice, approveCharacter } from "../api/client";
 import { activeMentions, mentionPattern, mentionToken, mentionsDiscovered, rememberMentions } from "../utils/characterMentions";
-import { SARVAM_VOICES } from "../utils/voices";
+import VoicePreviewPicker from "./VoicePreviewPicker";
 
 export default function BriefCharacterInput({ value, onChange, selections, onSelections, disabled, scriptMode }) {
   const input = useRef(null), popup = useRef(null), alive = useRef(true), loadingRef = useRef(false), insertion = useRef(null);
@@ -129,9 +129,7 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
         <Typography variant="body2">Upload a reference, choose a voice, then save and use this character. Approval also creates the Vault’s character-view sheet.</Typography>
         <TextField label="Display name" helperText="The short name shown in your brief and character picker." value={name} disabled={busy || Boolean(draft)} onChange={e => setName(e.target.value)} slotProps={{ htmlInput: { maxLength: 80 } }} />
         <TextField label="Character description" multiline minRows={2} value={description} disabled={busy || Boolean(draft)} onChange={e => setDescription(e.target.value)} />
-        <TextField select label="Character voice" value={voice} disabled={busy} onChange={e => setVoice(e.target.value)} slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}>
-          <option value="">Choose a voice</option>{SARVAM_VOICES.map(v => <option key={v} value={v}>{v}</option>)}
-        </TextField>
+        <VoicePreviewPicker value={voice} onChange={setVoice} disabled={busy} />
         <Button component="label" variant="outlined" disabled={busy || Boolean(draft)}>
           {file ? file.name : "Choose reference image"}
           <input data-testid="inline-character-file" type="file" accept="image/*" hidden disabled={busy || Boolean(draft)} onChange={e => setFile(e.target.files?.[0] || null)} />
