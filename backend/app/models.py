@@ -49,6 +49,25 @@ class Job(Base):
     events = relationship("AgentEvent", back_populates="job", cascade="all, delete-orphan")
 
 
+class PipelineTask(Base):
+    """Durable dispatch/lease record; executes existing Director entry points."""
+    __tablename__ = "pipeline_tasks"
+    job_id = Column(String, ForeignKey("jobs.id"), primary_key=True)
+    kind = Column(String, nullable=False)
+    token = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="queued")
+    heartbeat_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AgentCheckpoint(Base):
+    """Private completed text responses, keyed by exact versioned inputs."""
+    __tablename__ = "agent_checkpoints"
+    job_id = Column(String, ForeignKey("jobs.id"), primary_key=True)
+    input_hash = Column(String, primary_key=True)
+    response_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class VideoTask(Base):
     """A durable, single paid attempt per shot; independent of mutable planning JSON."""
     __tablename__ = "video_tasks"

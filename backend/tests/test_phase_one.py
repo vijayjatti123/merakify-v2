@@ -62,6 +62,7 @@ class PhaseOneRouteTests(unittest.TestCase):
             patch("app.routes.jobs.job_service.get_job", return_value=job),
             patch("app.routes.jobs.job_service.job_result", return_value=result),
             patch("app.routes.jobs.job_service.set_result") as set_result,
+            patch("app.routes.jobs.job_service.queue_pipeline_task") as enqueue,
         ):
             response = approve_job(job.id, background_tasks, db)
 
@@ -72,7 +73,8 @@ class PhaseOneRouteTests(unittest.TestCase):
             [SHOT_STATUS_PENDING, SHOT_STATUS_PENDING],
         )
         set_result.assert_called_once_with(db, job.id, response.result)
-        background_tasks.add_task.assert_called_once()
+        enqueue.assert_called_once_with(db, job.id, "prepare")
+        background_tasks.add_task.assert_not_called()
 
     def test_regenerate_resets_only_the_requested_shot(self) -> None:
         result = {

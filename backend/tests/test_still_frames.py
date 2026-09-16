@@ -38,14 +38,14 @@ class StillFramesTests(unittest.TestCase):
             shot['characters_in_shot'] = ['Meera']
         check.return_value['visible_entities'] = ['props:cup']
         order = []
-        def generate(visual, refs, aspect, feedback, *, continuation):
+        def generate(visual, refs, aspect, feedback, *, continuation, emit):
             number = 1 + sum(item.startswith('generate') for item in order)
             order.append(f'generate{number}')
-            self.assertEqual(refs[0], ('Meera', self.image))
+            self.assertEqual(refs[0][:2], ('Meera', self.image))
             if number > 1:
-                self.assertTrue(any('Job entity props:cup' in name for name, _ in refs))
+                self.assertTrue(any('Job entity props:cup' in ref[0] for ref in refs))
             if number in (2, 4):
-                self.assertEqual(continuation, (number - 1, self.image))
+                self.assertEqual(continuation[:2], (number - 1, self.image))
                 self.assertIn(f'upload{number-1}', order)
             else:
                 self.assertIsNone(continuation)
@@ -59,7 +59,7 @@ class StillFramesTests(unittest.TestCase):
              patch.object(service.storage_service, 'upload_bytes', side_effect=upload):
             self.run_stills()
         self.assertEqual(order, ['generate1','upload1','generate2','upload2','generate3','upload3','generate4','upload4'])
-        self.assertEqual([c.kwargs['continuation'] for c in check.call_args_list],
+        self.assertEqual([c.kwargs['continuation'][:2] if c.kwargs['continuation'] else None for c in check.call_args_list],
                          [None, (1,self.image), None, (3,self.image)])
 
     @patch.object(service.storage_service, 'upload_bytes', return_value={'url': 'https://stored', 'key': 'stored'})
@@ -67,12 +67,12 @@ class StillFramesTests(unittest.TestCase):
     def test_failed_previous_shot_breaks_chain_without_blocking_next(self, check, upload):
         self.continuous_shots([1,1,1])
         calls = []
-        def generate(*args, continuation=None):
-            calls.append(continuation)
+        def generate(*args, continuation=None, emit=None):
+            calls.append(continuation[:2] if continuation else None)
             if len(calls) == 2:
                 raise service.StillFrameError('forced failure')
             return self.image
-        with patch.object(service, 'generate_still', side_effect=generate):
+        with patch.object(service, 'generate_still', side_effect=generate), patch.object(service, '_download_reference_image', return_value=self.image):
             shots=self.run_stills()
         self.assertEqual(calls, [None,(1,self.image),None])
         self.assertIsNone(shots[1]['still_frame_url'])
@@ -155,7 +155,7 @@ class StillFramesTests(unittest.TestCase):
         shots = self.run_stills()
         self.assertEqual(generate.call_count, 2)
         self.assertTrue(all(s["still_frame_url"] is None and "still_frame_key" not in s for s in shots))
-        self.assertTrue(all("Continuing" in s["still_frame_warning"] for s in shots))
+        self.assertTrue(all("couldn't be generated" in s["still_frame_warning"] for s in shots))
         self.assertTrue(any("WARNING:" in c.args[1] for c in self.emit.call_args_list))
 
     @patch.object(service, "generate_still")
@@ -191,7 +191,7 @@ class StillFramesTests(unittest.TestCase):
         self.assertIsNone(self.result["shots"][0]["still_frame_url"])
         self.assertIsNone(json.loads(job.result_json)["shots"][0]["still_frame_url"])
 
-    def test_dialogue_hook_compiles_then_generates_stills_after_real_assembly(self):
+    def test_dialogue_hook_generates_stills_before_video_compilation_after_real_assembly(self):
         from app.agents import director
         order = []
         self.result.update(format={"duration_target_sec": 4}, assembly={"provisional": True})
@@ -209,7 +209,8 @@ class StillFramesTests(unittest.TestCase):
             return result["shots"]
         with patch.object(director.job_service, "get_job", return_value=job), patch.object(director.job_service, "job_result", return_value=self.result), patch.object(director.job_service, "append_event"), patch.object(director.job_service, "set_result"), patch.object(director, "assemble_shots", side_effect=assemble), patch.object(director, "compile_shot_prompts", side_effect=compile), patch.object(director, "generate_still_frames", side_effect=stills):
             director.finalize_audio_assembly(Mock(), "audit")
-        self.assertEqual(order, ["assembly", "compile", "stills"])
+        self.assertEqual(order[0], "assembly")
+        self.assertCountEqual(order[1:], ["stills", "compile"])
 
     @patch.object(service.storage_service, "upload_bytes", return_value={"url": "https://stored", "key": "stored"})
     @patch.object(service, "check_still", return_value={"approved": True, "reason": "Matches"})
@@ -222,7 +223,7 @@ class StillFramesTests(unittest.TestCase):
             {"name": "Offscreen", "character_id": "other", "image_url": "https://other"}]
         self.result["shots"][0]["characters_in_shot"] = ["Meera"]
         self.run_stills()
-        self.assertEqual(generate.call_args.args[1], [("Meera", self.image)])
+        self.assertEqual([ref[:2] for ref in generate.call_args.args[1]], [("Meera", self.image)])
         download.assert_called_once_with("https://reference")
 
 

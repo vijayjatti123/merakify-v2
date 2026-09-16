@@ -6,6 +6,10 @@ import json
 import re
 import unicodedata
 import uuid
+import copy
+import queue
+import time
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from urllib.error import HTTPError
 from urllib.parse import quote, unquote, urlsplit
 from urllib.request import Request, urlopen
@@ -19,6 +23,37 @@ from app.services.character_image_service import GeneratedCharacterImage, _downl
 
 class StillFrameError(RuntimeError):
     pass
+
+
+class NoStillImageError(StillFrameError):
+    def __init__(self, diagnostics):
+        self.diagnostics = diagnostics
+        candidates = diagnostics.get("candidates", [])
+        reasons = [c.get("finishReason", "unknown") for c in candidates]
+        blocked = diagnostics.get("promptFeedback", {}).get("blockReason")
+        self.retryable = bool(reasons) and all(r in {"IMAGE_OTHER", "NO_IMAGE"} for r in reasons) and not blocked and not any(
+            rating.get("blocked") for c in candidates for rating in c.get("safetyRatings", [])) and not any(
+            rating.get("blocked") for rating in diagnostics.get("promptFeedback", {}).get("safetyRatings", []))
+        super().__init__("Google returned no usable still image; finish_reason=" + ",".join(reasons)
+                         + ("; block_reason=" + str(blocked) if blocked else ""))
+
+
+def _image_response_diagnostics(response, parts):
+    """Retain diagnostic metadata, never candidate image bytes or request prose."""
+    def message(value):
+        text = str(value or "")
+        for part in parts:
+            if part.get("text"):
+                text = text.replace(part["text"], "[request text omitted]")
+        return re.sub(r"https?://\S+", "[URL omitted]", text)[:500]
+    feedback = response.get("promptFeedback") or {}
+    return {"model": settings.gemini_image_model, "modelVersion": response.get("modelVersion"),
+        "responseId": response.get("responseId"), "usageMetadata": response.get("usageMetadata"),
+        "promptFeedback": {k: feedback[k] for k in ("blockReason", "safetyRatings") if k in feedback},
+        "candidates": [{"finishReason": c.get("finishReason") or "unknown",
+                        "finishMessage": message(c.get("finishMessage")),
+                        "safetyRatings": c.get("safetyRatings") or []}
+                       for c in response.get("candidates", [])]}
 
 
 # Allow provider resolution rounding (e.g. 1376x768 for 16:9), not wrong orientation.
@@ -48,13 +83,18 @@ def check_dimensions(image, aspect_ratio):
 
 def shot_fingerprint(shot):
     """Hide previews after edits rather than show an image of an outdated plan."""
+    if shot.get("preview_input"):
+        return hashlib.sha256(json.dumps([shot["preview_input"], shot.get("preview_dependencies", {})], sort_keys=True).encode()).hexdigest()
     fields = ("compiled_prompt", "description", "camera_angle", "camera_movement",
               "lighting", "composition_note", "characters_in_shot", "dialogue_text")
     return hashlib.sha256(json.dumps({k: shot.get(k) for k in fields}, sort_keys=True).encode()).hexdigest()
 
 
 def invalidate_changed_stills(result):
+    from app.services.preview_plan import preview_input
     for shot in result.get("shots", []):
+        if shot.get("preview_input"):
+            shot["preview_input"] = preview_input(result, shot)
         if shot.get("still_frame_source_hash") and shot["still_frame_source_hash"] != shot_fingerprint(shot):
             shot["still_frame_url"] = None
             shot.pop("still_frame_key", None)
@@ -194,6 +234,9 @@ def generate_still(visual, references, aspect_ratio, feedback="", *, continuatio
         + ("\nCorrect the previous visual check: " + feedback if feedback else "")
     )})
     response = _google(parts, aspect_ratio=aspect_ratio)
+    diagnostics = _image_response_diagnostics(response, parts)
+    if emit:
+        emit("still_provider_response", json.dumps(diagnostics))
     for candidate in response.get("candidates", []):
         for part in candidate.get("content", {}).get("parts", []):
             data = part.get("inlineData", {})
@@ -202,7 +245,7 @@ def generate_still(visual, references, aspect_ratio, feedback="", *, continuatio
                 mime = data.get("mimeType", "")
                 if raw and mime in {"image/png", "image/jpeg", "image/webp"}:
                     return GeneratedCharacterImage(raw, mime)
-    raise StillFrameError("Google returned no usable still image")
+    raise NoStillImageError(diagnostics)
 
 
 def check_still(visual, references, image, *, emit=None, entities=None, continuation=None):
@@ -309,7 +352,7 @@ def _continuous_pair(previous, shot, result):
                 re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I))
 
 
-def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progress=None):
+def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on_progress=None):
     """Keep the plan reviewable, but explicitly mark missing output as failed."""
     characters = {c["name"].strip().casefold(): c for c in result.get("continuity", {}).get("characters", [])}
     # References live only in this job's result JSON, pointing to its own stills.
@@ -345,14 +388,15 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
         shot.pop("still_frame_source_hash", None)
         shot.pop("still_frame_warning", None)
         shot["still_frame_status"] = "pending"
-        if not shot.get("compiled_prompt"):
+        if not shot.get("compiled_prompt") and not shot.get("preview_input"):
             continue  # Dialogue jobs wait for real post-approval compilation.
         number = shot["shot_number"]
         shot["still_frame_status"] = "generating"
         if on_progress:
             on_progress(result)
         try:
-            visual = visual_description(shot["compiled_prompt"])
+            from app.services.preview_plan import preview_visual
+            visual = preview_visual(shot["preview_input"]) if shot.get("preview_input") else visual_description(shot["compiled_prompt"])
             entities = match_entities(result, shot, visual)
             references = []
             for name in shot.get("characters_in_shot", []):
@@ -382,7 +426,29 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
             feedback = ""
             aspect_ratio = result.get("aspect_ratio") or "16:9"
             for attempt in range(2):
-                image = generate_still(visual, references, aspect_ratio, feedback, continuation=continuation, emit=emit)
+                started = time.monotonic()
+                emit("preview_timing", json.dumps({"shot_number": number, "phase": "image_request_started", "attempt": attempt + 1}))
+                def attempt_emit(key, note):
+                    if key == "still_provider_response":
+                        note = json.dumps({**json.loads(note), "shot_number": number, "attempt": attempt + 1})
+                    emit(key, note)
+                try:
+                    image = generate_still(visual, references, aspect_ratio, feedback, continuation=continuation, emit=attempt_emit)
+                except NoStillImageError as error:
+                    if not error.retryable or attempt == 1:
+                        raise
+                    # Share the existing two-candidate budget with QA correction;
+                    # never stack a new retry loop or alter references to bypass a block.
+                    shot["still_frame_retrying"] = True
+                    if on_progress:
+                        on_progress(result)
+                    emit("preview_timing", json.dumps({"shot_number": number, "phase": "automatic_retry",
+                        "attempt": 1, "next_attempt": 2, "elapsed_sec": round(time.monotonic() - started, 3),
+                        "delay_sec": 2, "reason": "Provider returned no image; retrying the unchanged request once."}))
+                    time.sleep(2)
+                    continue
+                emit("preview_timing", json.dumps({"shot_number": number, "phase": "image_request_completed", "attempt": attempt + 1,
+                    "elapsed_sec": round(time.monotonic() - started, 3)}))
                 dimensions = check_dimensions(image, aspect_ratio)
                 if not dimensions["matches"]:
                     feedback = (f"Decoded image is {dimensions['width']}x{dimensions['height']}; expected "
@@ -394,7 +460,11 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
                     continue
                 emit("still_frame", f"Shot {number}: decoded {dimensions['width']}x{dimensions['height']} "
                      f"matches {aspect_ratio} within 2% ratio tolerance.")
+                started = time.monotonic()
+                emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_started", "attempt": attempt + 1}))
                 verdict = check_still(visual, references, image, emit=emit, entities=entities, continuation=continuation)
+                emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_completed", "attempt": attempt + 1,
+                    "elapsed_sec": round(time.monotonic() - started, 3), "approved": verdict["approved"]}))
                 if verdict["approved"]:
                     if continuation:
                         emit("still_frame", f"Warning — shot {number}: physical-state QA approval is a model judgment, "
@@ -409,7 +479,9 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
                 raise StillFrameError("Still-frame visual check rejected both candidates")
             ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[image.content_type]
             key = f"jobs/{job_id}/stills/{number}-{uuid.uuid4().hex}.{ext}"
+            started = time.monotonic()
             stored = storage_service.upload_bytes(key=key, body=image.data, content_type=image.content_type)
+            emit("preview_timing", json.dumps({"shot_number": number, "phase": "stored", "elapsed_sec": round(time.monotonic() - started, 3)}))
             shot.update(still_frame_url=stored["url"], still_frame_key=stored["key"],
                         still_frame_source_hash=shot_fingerprint(shot), still_frame_status="ready")
             # Reuse the exact bytes uploaded at this URL; no redundant S3 download.
@@ -433,6 +505,99 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
             shot["still_frame_status"] = "failed"
             shot["still_frame_warning"] = warning
             emit("still_frame", "WARNING: " + warning)
+        shot.pop("still_frame_retrying", None)
         if on_progress:
             on_progress(result)
+    return result["shots"]
+
+
+def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progress=None):
+    """Two bounded workers; only the owning thread persists progress or emits DB events.
+
+    Dependencies serialize shared job entities and accepted action anchors. Each
+    worker receives a snapshot, never the owner's mutable plan or DB session.
+    """
+    from app.services.preview_plan import preview_input, preview_visual
+    ordered = sorted(result.get("shots", []), key=lambda s: s["shot_number"])
+    targets = {s["shot_number"] for s in ordered if shot_numbers is None or s["shot_number"] in shot_numbers}
+    for shot in ordered:
+        facts = preview_input(result, shot)
+        if facts:
+            shot["preview_input"] = facts
+    invalidate_changed_stills(result)
+    references = result.setdefault("entity_references", {})
+    deps, previous_entities = {}, {}
+    for index, shot in enumerate(ordered):
+        number = shot["shot_number"]
+        visual = preview_visual(shot["preview_input"]) if shot.get("preview_input") else visual_description(shot["compiled_prompt"]) if shot.get("compiled_prompt") else ""
+        dependencies = set()
+        for entity in match_entities(result, shot, visual):
+            if entity in previous_entities:
+                dependencies.add(previous_entities[entity])
+            previous_entities[entity] = number
+        if index and _continuous_pair(ordered[index - 1], shot, result):
+            dependencies.add(ordered[index - 1]["shot_number"])
+        deps[number] = dependencies & targets
+    pending = set(targets)
+    done, futures = set(), {}
+    events = queue.Queue()
+    by_number = {s["shot_number"]: s for s in ordered}
+    def dependencies_for(number):
+        return {str(n): by_number[n].get("still_frame_key") or by_number[n].get("still_frame_url")
+                for n in sorted(deps[number])}
+    def persist():
+        if on_progress:
+            on_progress(result)
+    for shot in ordered:
+        number = shot["shot_number"]
+        if number not in pending:
+            continue
+        shot["preview_dependencies"] = dependencies_for(number)
+        if shot.get("still_frame_url") and shot.get("still_frame_source_hash") == shot_fingerprint(shot):
+            pending.remove(number)
+            done.add(number)
+            emit("still_frame", f"Shot {number}: unchanged accepted preview reused.")
+        else:
+            shot["still_frame_status"] = "pending"
+            shot["still_frame_url"] = None
+            shot.pop("still_frame_key", None)
+    persist()
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="still-preview") as pool:
+        while pending or futures:
+            for shot in ordered:
+                number = shot["shot_number"]
+                if len(futures) >= 2:
+                    break
+                if number not in pending or not deps[number] <= done:
+                    continue
+                pending.remove(number)
+                shot["preview_dependencies"] = dependencies_for(number)
+                shot["still_frame_status"] = "generating"
+                persist()
+                snapshot = copy.deepcopy(result)
+                started = time.monotonic()
+                def work(snapshot=snapshot, number=number):
+                    _generate_still_frames_serial(snapshot, job_id=job_id,
+                        emit=lambda k, n: events.put((k, n)), shot_numbers={number})
+                    return snapshot
+                futures[pool.submit(work)] = (number, started)
+            if not futures and pending:
+                raise StillFrameError("Preview dependency graph cannot advance")
+            complete, _ = wait(futures, timeout=.1, return_when=FIRST_COMPLETED)
+            while not events.empty():
+                emit(*events.get_nowait())
+            for future in complete:
+                number, started = futures.pop(future)
+                snapshot = future.result()
+                rendered = next(s for s in snapshot["shots"] if s["shot_number"] == number)
+                target = next(s for s in ordered if s["shot_number"] == number)
+                target.clear()
+                target.update(rendered)
+                for entity, ref in snapshot.get("entity_references", {}).items():
+                    if ref["shot_number"] == number:
+                        references[entity] = ref
+                done.add(number)
+                persist()
+                emit("preview_timing", json.dumps({"shot_number": number, "phase": "completed",
+                    "elapsed_sec": round(time.monotonic() - started, 3), "status": target.get("still_frame_status")}))
     return result["shots"]

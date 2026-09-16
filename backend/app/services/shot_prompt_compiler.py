@@ -650,7 +650,7 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
     model_input = copy.deepcopy(payload)
     for source, item in zip(payload["shots"], model_input["shots"]):
         reference = dialogue_insert(source, payload["model_family"])
-        reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split())
+        reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split()) + len(TEXT_GUARD.split())
         for ref in item["character_references"]:
             ref["has_image_reference"] = bool(ref.pop("image_url", None))
             ref["has_locked_identity"] = bool(ref.get("locked_vault_description"))
@@ -664,7 +664,7 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
         item["visual_word_target"] = [max(1, n - reserved) for n in target]
         item["visual_word_range"] = [max(1, minimum - reserved), maximum - reserved]
         item["programmatic_reserved_words"] = reserved
-        item["visual_sentence_max"] = 6 - int(bool(reference)) - int(bool(reference_insert(source)))
+        item["visual_sentence_max"] = 5 - int(bool(reference)) - int(bool(reference_insert(source)))
         # The validator retains the original lookup. The model gets the required
         # identifier separately from its optical purpose, never a copyable stock
         # phrase that its repetition check correctly rejects across shots.
@@ -767,8 +767,8 @@ def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
                     if not isinstance(output, dict) or not isinstance(output.get("compiled_prompt"), str):
                         continue
                     visual = output["compiled_prompt"]
-                    if not visual.endswith(TEXT_GUARD):
-                        errors.append(f"Shot {output.get('shot_number')}: visual prose must end with the no-text guard")
+                    # Guards, references and dialogue are serialized by code.
+                    # Legacy responses containing the guard remain compatible.
                     if re.search(r'["“”]|\bDialogue:|\bPerformance reference', re.sub(r'https?://\S+', '', visual)) or AUDIO_GUARD in visual:
                         errors.append(f"Shot {output.get('shot_number')}: return visual prose only; code inserts dialogue and audio guard")
             rendered = insert_dialogue(response, payload)

@@ -95,7 +95,7 @@ class StillRecoveryTests(unittest.TestCase):
              patch.object(still, 'check_still', return_value={'approved': False, 'reason': 'Deliberate mismatch'}):
             still.generate_still_frames(self.result, job_id=self.job.id, emit=lambda *args: None,
                 shot_numbers={1}, on_progress=lambda result: seen.append(result['shots'][0]['still_frame_status']))
-        self.assertEqual(seen, ['generating', 'failed'])
+        self.assertEqual(seen, ['pending', 'generating', 'failed'])
 
     def test_stale_token_cannot_save(self):
         jobs.claim_still_retry(self.db,self.job.id,1,'none')

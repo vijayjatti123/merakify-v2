@@ -80,7 +80,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const [videoSubmitting, setVideoSubmitting] = useState(null);
   const [videoHints, setVideoHints] = useState({});
   const [previewSubmitting, setPreviewSubmitting] = useState(null);
-  const videoBusy = final?.result?.audio_assembly_pending || final?.status === "running" || final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
+  const videoBusy = final?.result?.audio_assembly_pending || final?.result?.preview_preparation_pending || final?.status === "running" || final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
 
   useEffect(() => {
     if (!videoBusy) return;
@@ -163,7 +163,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const allVideosReady = shots.length > 0 && shots.every(videoReady);
   const latestTrace = trace[trace.length - 1];
   const compilerTimeout = errored && isCompilerTimeout(final?.error_message);
-  const canResumePreviews = approved && shots.length > 0 && !previews.busy && !shots.some(s => s.still_frame_url || s.video_url) &&
+  const canResumePreviews = approved && shots.length > 0 && !previews.busy && !shots.some(s => s.video_url) && (!shots.some(s => s.still_frame_url) || result?.video_prompt_error) &&
     shots.every(s => !s.has_dialogue || (s.status === "done" && s.dialogue_audio_url)) && (errored || result?.assembly?.provisional);
   const progressNote = compilerTimeout ? "This shot is taking longer than expected." : done ? "Your plan is ready to review." : progressMessage(latestTrace);
 
@@ -274,11 +274,11 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
             <FinalVideo data={result?.final_video} shots={shots} busy={assembling || result?.final_video?.status === "running"} onAssemble={handleAssemble} />
           ) : (
             <Card className="director-progress-card" data-testid="preview-progress">
-              <div><p className="eyebrow">Shot previews</p><h2>{canResumePreviews ? "Preview preparation paused" : "Preparing your previews"}</h2>
-                <p>We prepare any speech and timing first, then create and check each image. No video clips are being generated yet.</p>
+              <div><p className="eyebrow">Shot previews</p><h2>{canResumePreviews ? "Preparation paused" : result?.video_prompts_pending && previews.ready === previews.total ? "Your previews are ready to review" : "Preparing your previews"}</h2>
+                <p>{result?.video_prompts_pending ? "Images appear as they're ready. We're also preparing instructions for your video clips; no videos are being generated yet." : "We prepare speech and timing, then create and check your images. No video clips are being generated yet."}</p>
                 <p role="status">{previews.ready} of {previews.total} previews ready</p>
-                {previews.busy && <ActionProgress label={shots.some(s => s.still_frame_status === "generating") ? "Creating and checking your images…" : "Preparing speech and shot details…"} />}
-                {canResumePreviews && <Alert severity="warning">Your written plan and speech are saved. Retry preview preparation to continue.</Alert>}
+                {previews.busy && <ActionProgress label={result?.video_prompts_pending && shots.some(s => s.still_frame_status === "generating") ? "Creating previews and preparing video instructions…" : result?.video_prompts_pending ? "Preparing video instructions…" : shots.some(s => s.still_frame_status === "generating") ? "Creating and checking your images…" : "Preparing speech and shot details…"} />}
+                {canResumePreviews && <Alert severity="warning">Your plan, completed speech and accepted previews are saved. Retry preparation to continue.</Alert>}
               </div>
             </Card>
           )

@@ -403,7 +403,7 @@ async def generate_job_dialogue_audio(
         "voice_generation",
         f"Voice generation finished for {len(dialogue_shots)} dialogue shot(s).",
     )
-    if has_dialogue:
+    if has_dialogue or any(not s.get("compiled_prompt") for s in result.get("shots", [])):
         await asyncio.to_thread(finalize_audio_assembly, db, job_id)
 
 
@@ -421,6 +421,7 @@ def fail_unfinished_shots(
         return
     error_message = str(error)[:1200]
     result["audio_assembly_pending"] = False
+    result["preview_preparation_pending"] = False
     result["assembly"] = {**result.get("assembly", {}), "provisional": True, "error": error_message}
     job_service.set_result(db, job_id, result)
     for shot in result.get("shots", []):

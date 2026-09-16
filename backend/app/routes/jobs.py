@@ -232,7 +232,7 @@ def _create_and_start_job(
         script_text=script_text,
         resolutions=resolutions,
     )
-    background_tasks.add_task(_run_in_background, job.id)
+    job_service.queue_pipeline_task(db, job.id, "plan")
     return _job_out(job)
 
 
@@ -281,7 +281,7 @@ def retry_failed_job(job_id: str, background_tasks: BackgroundTasks, db: Session
     if job.status != "error":
         raise HTTPException(409, "Only a failed job can be retried here")
     retried = job_service.copy_job_for_retry(db, job)
-    background_tasks.add_task(_run_in_background, retried.id)
+    job_service.queue_pipeline_task(db, retried.id, "plan")
     return _job_out(retried)
 
 
@@ -418,6 +418,7 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
         return _job_out(job, result)
     updated_result = dict(result)
     updated_result["generation_approved"] = True
+    updated_result["preview_preparation_pending"] = True
     updated_result["audio_assembly_pending"] = any(shot.get("has_dialogue") for shot in result.get("shots", []))
     updated_result["shots"] = [
         {
@@ -439,7 +440,7 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
             SHOT_STATUS_PENDING,
             message=f"Shot {shot['shot_number']} queued for voice generation.",
         )
-    background_tasks.add_task(_run_voice_generation_in_background, job_id)
+    job_service.queue_pipeline_task(db, job_id, "prepare")
     db.refresh(job)
     return _job_out(job, updated_result)
 
@@ -459,7 +460,7 @@ def retry_preview_preparation(job_id: str, background_tasks: BackgroundTasks, db
         raise HTTPException(404, str(error)) from error
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
-    background_tasks.add_task(_retry_preview_preparation, job_id)
+    job_service.queue_pipeline_task(db, job_id, "resume")
     job = job_service.get_job(db, job_id)
     return _job_out(job, job_service.job_result(job))
 
@@ -641,7 +642,7 @@ async def stream_job(job_id: str):
                     job.status == "done"
                     and result
                     and result.get("generation_approved")
-                    and (result.get("audio_assembly_pending") or any(
+                    and (result.get("audio_assembly_pending") or result.get("preview_preparation_pending") or any(
                         shot.get("status") in {SHOT_STATUS_PENDING, SHOT_STATUS_GENERATING}
                         for shot in result.get("shots", [])
                     ))

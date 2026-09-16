@@ -12,6 +12,6 @@ export function previewSummary(result) {
     total: shots.length,
     ready: shots.filter(s => previewState(s).key === "ready").length,
     failed: shots.filter(s => previewState(s).key === "failed").length,
-    busy: Boolean(result?.audio_assembly_pending || shots.some(s => previewState(s).key === "generating")),
+    busy: Boolean(result?.audio_assembly_pending || result?.preview_preparation_pending || shots.some(s => previewState(s).key === "generating")),
   };
 }

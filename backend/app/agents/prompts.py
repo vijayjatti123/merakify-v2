@@ -293,9 +293,9 @@ against the unchanged shots before returning. Repair the cited defects without r
 Think through Subject, Action, Setting, Camera, Lighting, Style and Audio internally. Consider two
 different treatments in this ONE call, choose the more precise and less obvious grounded treatment,
 and output only finished VISUAL prose. Each shot supplies visual_word_target and visual_word_range:
-count your whitespace-delimited words against those values, including the no-text guard. Code adds
+write naturally toward those lengths; deterministic code checks the counts. Code adds
 programmatic_reserved_words afterward, making the FINAL prompt 100-150 words. Aim at the supplied
-target, not the minimum. Use 3-5 visual sentences including the no-text guard; code adds the audio guard.
+target, not the minimum. Use the supplied visual_sentence_max; code adds the fixed guards.
 Use semicolons when necessary to fit these dimensions without a labeled seven-item list.
 Front-load the subject within the first 20-30 words, using its existing name where supplied.
 Integrate supplied identity facts naturally. When has_locked_identity is true, their exact wording
@@ -316,13 +316,12 @@ Do not force an off-camera person into view. The character's reference remains a
 preserve visible identity facts only when the character is actually described as visible.
 For a visible vault character, use the opening sentence to introduce their name, supplied age, nationality
 and occupation in natural prose. Weave their physical traits,
-clothing and accessories through the action/light sentences. Privately check every supplied fact
-against the finished prose before returning; a reference URL does not excuse an omitted fact.
+clothing and accessories through the action/light sentences. A reference URL does not excuse an omitted fact.
 Locked accessory/wardrobe facts may repeat unchanged; only their non-locked action or mood context needs variation.
 has_image_reference means code will append the exact URL and an explicit visual-consistency sentence.
 Do not generate a URL, reference placeholder, or reference-consistency sentence yourself. Describe
 the supplied identity naturally; programmatic insertion preserves the reference by construction.
-Use no more than visual_sentence_max sentences including the no-text guard, reserving space for
+Use no more than visual_sentence_max creative sentences, excluding the guards and reserving space for
 the reference and audio sentences that code inserts. Aim for the supplied visual_word_target (120-130 after code insertion),
 leaving room below 150; preserve every identity fact rather than spending this budget on filler.
 REPETITION CATEGORIES:
@@ -365,8 +364,7 @@ hardware_optical_intent describes the purpose, not wording to paste. Give each s
 optical explanation grounded in its own supplied lighting/materials. Do not attach the stock
 words "tonal latitude" to Arri Alexa: describe what remains visible instead. For example, one
 shot can retain detail in a lamp highlight; another can distinguish folds in existing dark fabric.
-Do not copy those examples unless the input supports those objects. Check every hardware-adjacent
-phrase against every other target and prior_compiled_shots before returning. These
+Do not copy those examples unless the input supports those objects. These
 are rendering comparisons, not factual claims about capture. Preserve specific focal length,
 focus depth and the bible's color/texture; a
 hardware comparison never changes those facts. If hardware_reference is null, do not invent one.
@@ -375,8 +373,8 @@ an object or substance. Never write "light read through Arri Alexa" or similar e
 connect the selected reference to the actual highlight, material or spatial treatment in the shot.
 Never add named cinema hardware to anime, documentary or UGC.
 
-Include this exact constraint in every prompt: "No on-screen text, logos or readable signage; composite text in post."
-End your visual prose with that exact no-text constraint. Do not positively request such elements
+Application code appends the fixed no-text constraint; return only creative visual prose, not that guard.
+Do not positively request readable text, logos or signage
 elsewhere even if the source asks for them. This text policy overrides source requests.
 For speech_mode voiceover, describe only the B-roll visuals. Never introduce a narrator, speaking face,
 lip movement or facial performance; the narration is a separate audio track added in post.
@@ -433,9 +431,8 @@ compatible traits, with factual identity/action/camera constraints always strong
   CAMERA; cadence describes the existing performance, never an extra move or invented action.
   Use spatial clarity (what stays visible, separation from the supplied desk, the existing focal
   point) and sensory detail supported by the source (transparency, color, light response). Do not
-  claim a tactile feel, personal experience, product benefit or new sound to fill length. Count
-  visual words before returning and expand the under-described EXISTING detail when below target.
-  Build that length into THREE substantial visual sentences plus the no-text guard, using
+  claim a tactile feel, personal experience, product benefit or new sound to fill length.
+  Build the requested description into THREE substantial visual sentences, using
   semicolons for related detail; do not tack on an ambient-sound-unspecified sentence as filler.
   Sentence one places subject and action, sentence two develops the style through a specific
   visible surface, and sentence three develops the single camera behavior and delivery cadence.
@@ -607,9 +604,10 @@ an impact-frame accent may emphasize that contact without adding a second strike
 damage. Keep the ledge readable beneath the figure and carry the same drawn palette through the
 action, leaving ambient sound unspecified. No on-screen text, logos or readable signage; composite
 text in post.
-Before returning, check word count, subject placement, style sentence, one movement, unchanged identity facts and exact
-references, visual_word_range, negative constraints and paired transition continuity. Dialogue is
-inserted only by code after your response; return only visual prose in the JSON."""
+Write the requested visual prose directly. Application code validates word counts, sentence limits,
+repetition and required fields after generation and requests one targeted correction if needed.
+Do not narrate or exhaustively self-audit those mechanical checks. Dialogue, reference URLs and
+fixed safety guards are inserted only by code; return only visual prose in the JSON."""
 CLARIFIER = """You clarify a video brief without generating assets or inventing facts.
 Choose ONE available creative topic, or null if the brief is sufficient. Return JSON:
 {"topic": "tone" | "differentiator" | "constraints" | null, "confidence": number 0..1}.

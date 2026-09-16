@@ -41,6 +41,22 @@ export function friendlyMessage(value, context = "This step could not finish. Pl
 
 export function progressMessage(event) {
   const key = event?.agent_key || "";
+  if (key === "pipeline_timing" || key === "pipeline_usage") {
+    try {
+      const timing = JSON.parse(event.note);
+      const label = progressMessage({ agent_key: timing.stage });
+      if (timing.phase === "checkpoint_reused") return `${label} · saved work restored`;
+      if (timing.phase === "waiting") return `${label} · ${Math.round(timing.elapsed_sec)} seconds elapsed`;
+      if (timing.phase === "request_started" && timing.attempt > 1) return `${label} · retrying once`;
+      return label;
+    } catch { return "Preparing your plan"; }
+  }
+  if (key === "preview_timing") {
+    try {
+      const timing = JSON.parse(event.note);
+      return `${/visual_check/.test(timing.phase) ? "Checking" : "Creating"} preview ${timing.shot_number}`;
+    } catch { return "Creating your shot previews"; }
+  }
   if (/format/.test(key)) return "Understanding your idea";
   if (/shot_prompt_compiler/.test(key)) return "Preparing shot details";
   if (/still/.test(key)) return "Creating your shot previews";

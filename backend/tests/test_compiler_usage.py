@@ -42,7 +42,7 @@ class CompilerUsageTests(unittest.TestCase):
             calls.append((data['shots'][0]['shot_number'], correction, kwargs['request_timeout']))
             time.sleep(.07 if correction else .01)
             return {'shots':[{'shot_number':data['shots'][0]['shot_number'],
-                              'compiled_prompt':prose() if correction else 'missing guard'}]}
+                              'compiled_prompt':prose() if correction else '"unexpected dialogue"'}]}
         start = time.monotonic()
         with patch('app.services.prompt_technique_service.shot_knowledge', return_value={}), patch.object(compiler,'COMPILER_BATCH_SIZE',1), patch.object(compiler,'COMPILER_DEADLINE_SEC',.12), patch.object(compiler,'validate_compiled',return_value=[]):
             with self.assertRaisesRegex(TimeoutError,'deadline exceeded'):

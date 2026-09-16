@@ -30,6 +30,9 @@ async def lifespan(app):
     from app.services.face_enhancement_service import polling_loop as face_polling_loop
     face_worker = threading.Thread(target=face_polling_loop, args=(stop,), daemon=True, name="face-enhancement-worker")
     face_worker.start()
+    from app.services.pipeline_tasks import polling_loop as pipeline_polling_loop
+    pipeline_worker = threading.Thread(target=pipeline_polling_loop, args=(stop,), daemon=True, name="pipeline-dispatcher")
+    pipeline_worker.start()
     yield
     stop.set()
 

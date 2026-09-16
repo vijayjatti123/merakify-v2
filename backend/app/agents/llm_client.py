@@ -1,6 +1,7 @@
 import json
 import math
 import re
+import time
 from typing import Callable
 
 import anthropic
@@ -46,10 +47,15 @@ def call_agent(system: str, user_content: str, fast: bool = False, max_tokens: i
                request_timeout: float | None = None, *,
                truncation_retry_tokens: int | None = None,
                on_response: Callable[[dict], None] | None = None) -> dict:
+    from app.agents.execution import current_execution, execute
+    scope = current_execution()
+    if scope and request_timeout is None:
+        return execute(call_agent, system, user_content, dict(fast=fast, max_tokens=max_tokens,
+            truncation_retry_tokens=truncation_retry_tokens, on_response=on_response), scope)
     model = FAST_MODEL if fast else REASONING_MODEL
-    # Compiler-only opt-in: one transport attempt using its remaining wall-clock
-    # budget. All existing agents retain the shared 90s timeout / two SDK retries.
+    # Director/Compiler scopes own retries and wall-clock budgets explicitly.
     client = _client if request_timeout is None else _client.with_options(timeout=request_timeout, max_retries=0)
+    deadline = time.monotonic() + request_timeout if request_timeout is not None else None
     if truncation_retry_tokens is not None and not max_tokens < truncation_retry_tokens <= 32768:
         raise ValueError("Truncation recovery budget must exceed the initial budget and be at most 32768.")
     request = dict(
@@ -67,6 +73,11 @@ def call_agent(system: str, user_content: str, fast: bool = False, max_tokens: i
         # Opt-in only. A completed truncated response is not a transport error;
         # retry the unchanged request once, without stacking SDK retries on it.
         attempt_client = client if attempt == 1 else client.with_options(max_retries=0)
+        if attempt > 1 and deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Planning response budget expired before truncation recovery. Please retry.")
+            attempt_client = client.with_options(timeout=remaining, max_retries=0)
         response = attempt_client.messages.create(**{**request, "max_tokens": budget})
         text = "".join(block.text for block in response.content if block.type == "text")
         will_retry = response.stop_reason == "max_tokens" and attempt < len(budgets)

@@ -107,7 +107,115 @@ def copy_job_for_retry(db: Session, source: Job) -> Job:
     db.add(job)
     db.commit()
     db.refresh(job)
+    from app.models import AgentCheckpoint
+    for row in db.query(AgentCheckpoint).filter_by(job_id=source.id).all():
+        db.add(AgentCheckpoint(job_id=job.id, input_hash=row.input_hash, response_json=row.response_json))
+    db.commit()
     return job
+
+
+def get_agent_checkpoint(db, job_id, input_hash):
+    from app.models import AgentCheckpoint
+    row = db.get(AgentCheckpoint, (job_id, input_hash))
+    return json.loads(row.response_json) if row else None
+
+
+def queue_pipeline_task(db, job_id, kind):
+    from app.models import PipelineTask, new_id
+    from sqlalchemy.exc import IntegrityError
+    if kind not in {"plan", "prepare", "resume"}:
+        raise ValueError("Unknown pipeline operation")
+    row = db.get(PipelineTask, job_id, populate_existing=True)
+    completed_plan = (row and row.kind == "plan" and row.status == "running" and kind == "prepare"
+                      and get_job(db, job_id).status == "done")
+    if row and row.status in {"queued", "running"} and not completed_plan:
+        raise ValueError("This operation is already running")
+    values = dict(kind=kind, token=new_id(), status="queued", heartbeat_at=datetime.utcnow())
+    if row:
+        changed = db.query(PipelineTask).filter_by(job_id=job_id, token=row.token, status=row.status).update(
+            values, synchronize_session=False)
+        if changed != 1:
+            db.rollback()
+            raise ValueError("This operation is already running")
+    else:
+        db.add(PipelineTask(job_id=job_id, **values))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ValueError("This operation is already running") from None
+
+
+def fail_pipeline_preparation(db, job_id, message):
+    """Release visible busy states without discarding accepted media."""
+    job = get_job(db, job_id)
+    if not job:
+        return
+    result = json.loads(job.result_json or "null")
+    if result:
+        for field in ("audio_assembly_pending", "preview_preparation_pending", "video_prompts_pending"):
+            result[field] = False
+        result["video_prompt_error"] = message
+        for shot in result.get("shots", []):
+            if shot.get("still_frame_status") in {"pending", "generating"} and not shot.get("still_frame_url"):
+                shot.update(still_frame_status="failed", still_frame_warning=message)
+        job.result_json = json.dumps(result)
+    job.status = "error"
+    job.error_message = message
+    db.add(AgentEvent(job_id=job_id, agent_key="error", note=message))
+    db.commit()
+
+
+def claim_pipeline_task(db):
+    from app.models import PipelineTask
+    row = db.query(PipelineTask).filter_by(status="queued").order_by(PipelineTask.heartbeat_at).first()
+    if not row:
+        return None
+    identity = (row.job_id, row.token, row.kind)
+    changed = db.query(PipelineTask).filter_by(job_id=row.job_id, token=row.token, status="queued").update(
+        {PipelineTask.status: "running", PipelineTask.heartbeat_at: datetime.utcnow()}, synchronize_session=False)
+    db.commit()
+    return identity if changed else None
+
+
+def heartbeat_pipeline_task(db, job_id, token, status="running"):
+    from app.models import PipelineTask
+    db.query(PipelineTask).filter_by(job_id=job_id, token=token, status="running").update(
+        {PipelineTask.status: status, PipelineTask.heartbeat_at: datetime.utcnow()}, synchronize_session=False)
+    db.commit()
+
+
+def pause_expired_pipeline_tasks(db):
+    from datetime import timedelta
+    from app.models import PipelineTask
+    cutoff = datetime.utcnow() - timedelta(seconds=90)
+    for row in db.query(PipelineTask).filter(PipelineTask.status == "running", PipelineTask.heartbeat_at < cutoff).all():
+        changed = db.query(PipelineTask).filter(PipelineTask.job_id == row.job_id,
+            PipelineTask.token == row.token, PipelineTask.status == "running", PipelineTask.heartbeat_at < cutoff).update(
+            {PipelineTask.status: "paused"}, synchronize_session=False)
+        if not changed:
+            continue
+        job = get_job(db, row.job_id)
+        result = json.loads(job.result_json or "null")
+        if result:
+            result["audio_assembly_pending"] = False
+            result["preview_preparation_pending"] = False
+            result["video_prompts_pending"] = False
+            result["video_prompt_error"] = "Preparation was interrupted. Your completed work is saved; retry preparation."
+            for shot in result.get("shots", []):
+                if shot.get("still_frame_status") == "generating":
+                    shot.update(still_frame_status="failed", still_frame_warning="Preparation was interrupted; retry this preview.")
+            job.result_json = json.dumps(result)
+        job.status = "error"
+        job.error_message = "Preparation was interrupted. Your completed work is saved; please retry."
+        db.add(AgentEvent(job_id=row.job_id, agent_key="error", note=job.error_message))
+    db.commit()
+
+
+def save_agent_checkpoint(db, job_id, input_hash, response):
+    from app.models import AgentCheckpoint
+    db.merge(AgentCheckpoint(job_id=job_id, input_hash=input_hash, response_json=json.dumps(response)))
+    db.commit()
 
 
 def set_status(db: Session, job_id: str, status: str, error_message: Optional[str] = None) -> None:
@@ -277,15 +385,16 @@ def claim_preview_preparation(db, job_id):
     shots = result.get("shots", [])
     if not result.get("generation_approved") or not shots:
         raise ValueError("Create previews from the completed plan first")
-    if result.get("audio_assembly_pending") or any(s.get("still_frame_status") == "generating" for s in shots):
+    if result.get("audio_assembly_pending") or result.get("preview_preparation_pending") or any(s.get("still_frame_status") == "generating" for s in shots):
         raise ValueError("Preview preparation is already running")
-    if any(s.get("still_frame_url") or s.get("video_url") for s in shots):
+    if any(s.get("video_url") for s in shots) or (any(s.get("still_frame_url") for s in shots) and not result.get("video_prompt_error")):
         raise ValueError("Use the individual shot's Retry preview action to preserve existing output")
     if any(s.get("has_dialogue") and (s.get("status") != "done" or not s.get("dialogue_audio_url")) for s in shots):
         raise ValueError("Speech preparation must finish before previews can be retried")
     if job.status != "error" and not result.get("assembly", {}).get("provisional"):
         raise ValueError("No failed preview preparation to retry")
     result["audio_assembly_pending"] = True
+    result["preview_preparation_pending"] = True
     changed = db.query(Job).filter(Job.id == job_id, Job.result_json == old, Job.status == job.status).update(
         {Job.result_json: json.dumps(result), Job.status: "done", Job.error_message: None}, synchronize_session=False)
     if changed != 1:
@@ -300,7 +409,7 @@ def claim_still_retry(db, job_id, number, expected_attempt):
     import uuid
     from datetime import datetime, timezone
     result, shot = video_source(db, job_id, number)
-    if not result.get("generation_approved") or not shot.get("compiled_prompt"):
+    if not result.get("generation_approved") or not (shot.get("compiled_prompt") or shot.get("preview_input")):
         raise ValueError("Approve the completed shot plan before regenerating")
     if shot.get("still_frame_url") or shot.get("video_url"):
         raise ValueError("Shot output changed; refresh before regenerating")

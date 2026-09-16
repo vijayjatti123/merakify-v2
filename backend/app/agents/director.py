@@ -1,5 +1,9 @@
 from app.services.speech_mode import is_voiceover
 import json
+import copy
+import queue
+import threading
+import time
 import unicodedata
 from typing import Callable
 
@@ -8,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.agents import prompts
 from app.agents.dialogue_integrity import protected_dialogue, restore_protected, screen_issues, warn_dialogue_loss
 from app.agents.llm_client import call_agent, cinematography_token_budget
+from app.agents.execution import checkpointed_planning
 from app.services import asset_service, character_service, job_service, storage_service, voice_generation_service
 from app.services.shot_prompt_compiler import compile_shot_prompts
 from app.services.still_frame_service import generate_still_frames
@@ -460,10 +465,93 @@ def assemble_shots(shots, characters, target_duration_sec, *, narrator_voice_ref
     return {"shots": current_shots, "assembly": assembly}
 
 
+def _prepare_media_parallel(db, job_id, result, *, brief, emit):
+    """Private branch snapshots; only this owning thread writes the job or events."""
+    messages = queue.Queue()
+    started = time.monotonic()
+    result["video_prompts_pending"] = True
+    result.pop("video_prompt_error", None)
+    # Never expose prompts from an earlier preparation while replacements run.
+    for shot in result["shots"]:
+        shot.pop("compiled_prompt", None)
+    job_service.set_result(db, job_id, result)
+
+    def worker(kind, snapshot):
+        notify = lambda key, note: messages.put(("event", key, note))
+        notify("media_preparation_timing", json.dumps({"branch": kind, "phase": "started",
+            "elapsed_sec": round(time.monotonic() - started, 3)}))
+        try:
+            if kind == "previews":
+                snapshot["shots"] = generate_still_frames(snapshot, job_id=job_id, emit=notify,
+                    on_progress=lambda current: messages.put(("preview_progress", copy.deepcopy(current))))
+                messages.put(("preview_progress", snapshot))
+            else:
+                shots = compile_shot_prompts(snapshot, brief=brief, emit=notify, call_agent=call_agent)
+                expected = {s["shot_number"] for s in snapshot["shots"]}
+                if len(shots) != len(expected) or {s["shot_number"] for s in shots} != expected or any(
+                        not isinstance(s.get("compiled_prompt"), str) or not s["compiled_prompt"].strip() for s in shots):
+                    raise ValueError("Compiler returned incomplete shot prompts")
+                messages.put(("compiled", shots))
+        except Exception as error:
+            messages.put(("failed", kind, error))
+        finally:
+            messages.put(("finished", kind, time.monotonic() - started))
+
+    for kind in ("previews", "compiler"):
+        threading.Thread(target=worker, args=(kind, copy.deepcopy(result)),
+                         daemon=True, name=f"prepare-{kind}").start()
+    remaining = {"previews", "compiler"}
+    while remaining:
+        message = messages.get()
+        action = message[0]
+        if action == "event":
+            emit(message[1], message[2])
+        elif action == "preview_progress":
+            current = message[1]
+            by_number = {s["shot_number"]: s for s in current["shots"]}
+            for shot in result["shots"]:
+                rendered = by_number[shot["shot_number"]]
+                # The preview snapshot may predate Compiler completion. It owns
+                # only these fields, never prompt/audio/timing/transition data.
+                for key in list(shot):
+                    if key.startswith("still_frame_") or key in {"preview_input", "preview_dependencies"}:
+                        shot.pop(key)
+                shot.update({k: v for k, v in rendered.items()
+                    if k.startswith("still_frame_") or k in {"preview_input", "preview_dependencies"}})
+            result["entity_references"] = current.get("entity_references", {})
+            job_service.set_result(db, job_id, result)
+        elif action == "compiled":
+            compiled = {s["shot_number"]: s["compiled_prompt"] for s in message[1]}
+            for shot in result["shots"]:
+                shot["compiled_prompt"] = compiled[shot["shot_number"]]
+            result["video_prompts_pending"] = False
+            job_service.set_result(db, job_id, result)
+        elif action == "failed":
+            kind, error = message[1:]
+            if kind == "compiler":
+                result["video_prompts_pending"] = False
+                result["video_prompt_error"] = "Video instructions could not be prepared. Your accepted previews are saved; retry preparation."
+                emit("shot_prompt_compiler", f"Shot Prompt Compiler failed: {type(error).__name__}: {error}")
+                job_service.set_status(db, job_id, "error", error_message=f"Shot Prompt Compiler failed: {error}")
+            else:
+                for shot in result["shots"]:
+                    if not shot.get("still_frame_url"):
+                        shot.update(still_frame_status="failed", still_frame_warning="Preview preparation failed; retry this preview.")
+                emit("still_frame", f"WARNING: Preview preparation failed: {type(error).__name__}; accepted previews preserved.")
+            job_service.set_result(db, job_id, result)
+        elif action == "finished":
+            remaining.remove(message[1])
+            emit("media_preparation_timing", json.dumps({"branch": message[1], "phase": "finished",
+                "elapsed_sec": round(message[2], 3)}))
+
+
+@checkpointed_planning
 def finalize_audio_assembly(db, job_id):
     """Persist final assembly after all selected audio tasks have corrected durations."""
     job = job_service.get_job(db, job_id)
     result = job_service.job_result(job)
+    result["preview_preparation_pending"] = True
+    job_service.set_result(db, job_id, result)
     def emit(key, note):
         job_service.append_event(db, job_id, key, note)
     try:
@@ -471,8 +559,14 @@ def finalize_audio_assembly(db, job_id):
             raise ValueError("Dialogue audio incomplete; final assembly cannot lock timing")
         emit("assembly", "Decoded audio corrections complete; running final Shot Assembler and duration self-check now.")
         continuity = result.get("continuity", {})
-        assembled = assemble_shots(result["shots"], continuity.get("characters", []), result["format"]["duration_target_sec"],
-                                   narrator_voice_ref=continuity.get("narrator_voice_ref"), emit=emit)
+        old_assembly = result.get("assembly", {})
+        duration = sum(float(s.get("duration_sec", 0)) for s in result["shots"])
+        if not old_assembly.get("provisional", True) and abs(float(old_assembly.get("total_duration_sec", -1)) - duration) < .001:
+            assembled = {"shots": result["shots"], "assembly": old_assembly}
+            emit("assembly", "Unchanged accepted transitions and measured duration restored.")
+        else:
+            assembled = assemble_shots(result["shots"], continuity.get("characters", []), result["format"]["duration_target_sec"],
+                                       narrator_voice_ref=continuity.get("narrator_voice_ref"), emit=emit)
         result.update(assembled)
         result["assembly"]["provisional"] = False
     except Exception as error:
@@ -485,18 +579,18 @@ def finalize_audio_assembly(db, job_id):
         if not result.get("assembly", {}).get("provisional", True):
             try:
                 result["ai_model"] = result.get("ai_model") or job.ai_model
-                result["shots"] = compile_shot_prompts(result, brief=job.brief, emit=emit, call_agent=call_agent)
-                result["shots"] = generate_still_frames(result, job_id=job_id, emit=emit,
-                    on_progress=lambda current: job_service.set_result(db, job_id, current))
+                _prepare_media_parallel(db, job_id, result, brief=job.brief, emit=emit)
             except Exception as error:
-                for shot in result["shots"]:
-                    shot.pop("compiled_prompt", None)  # Never retain stale text after a failed recompile.
+                result["video_prompts_pending"] = False
+                result["video_prompt_error"] = "Video instructions could not be prepared. Your accepted previews are saved; retry preparation."
                 emit("shot_prompt_compiler", f"Shot Prompt Compiler failed: {type(error).__name__}: {error}")
                 job_service.set_status(db, job_id, "error", error_message=f"Shot Prompt Compiler failed: {error}")
         result["audio_assembly_pending"] = False
+        result["preview_preparation_pending"] = False
         job_service.set_result(db, job_id, result)
 
 
+@checkpointed_planning
 def run_pipeline(db: Session, job_id: str) -> None:
     """Runs the full pipeline for one job, synchronously, writing an AgentEvent
     row (and a job status update) after every step so a live SSE stream reading
@@ -675,15 +769,16 @@ def run_pipeline(db: Session, job_id: str) -> None:
         }
         if source_script:
             result["source_script_text"] = source_script
-        # Silent jobs already have real Assembly; dialogue jobs compile only in
-        # finalize_audio_assembly after approval, never from provisional boundaries.
-        if not assembly.get("provisional", False):
-            result["shots"] = compile_shot_prompts(result, brief=brief, emit=emit, call_agent=call_agent)
-            result["shots"] = generate_still_frames(result, job_id=job_id, emit=emit,
-                on_progress=lambda current: job_service.set_result(db, job_id, current))
+        # Both silent and dialogue jobs stop at the written plan. Paid previews
+        # start only after the same explicit approval action.
         job_service.set_result(db, job_id, result)
         job_service.set_status(db, job_id, "done")
 
     except Exception as exc:  # noqa: BLE001 — surface any failure to the job record
+        saved = job_service.job_result(job_service.get_job(db, job_id))
+        if saved and saved.get("video_prompts_pending"):
+            saved["video_prompts_pending"] = False
+            saved["video_prompt_error"] = "Video instructions could not be prepared. Your accepted previews are saved; retry preparation."
+            job_service.set_result(db, job_id, saved)
         job_service.set_status(db, job_id, "error", error_message=str(exc))
         emit("error", f"Pipeline failed: {exc}")
