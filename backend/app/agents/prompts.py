@@ -328,7 +328,11 @@ Use no more than visual_sentence_max sentences including the no-text guard, rese
 the reference and audio sentences that code inserts. Aim for the supplied visual_word_target (120-130 after code insertion),
 leaving room below 150; preserve every identity fact rather than spending this budget on filler.
 Across the entire job, vary sentence structure, verbs and descriptive phrasing for the same scene
-and style bible. Restate the facts, NEVER repeat a descriptive sentence fragment. The only literal
+and style bible. Restate the facts; do not repeat descriptive fragments except the grounded facts below.
+When has_locked_identity is true, literal identity/appearance facts from that character's supplied
+description may repeat for the SAME character within a scene or across scenes. This does not permit
+repeated action, setting, or camera prose beside those facts; do not paste the entire description.
+The other literal
 repetition allowed is required guards, Render style: label, proper names, exact dialogue/reference
 URLs, hardware identifiers and short factual anchors needed for a match cut. Do not recycle
 long palette/texture clauses. Give each shot a distinct emphasis while preserving the whole bible.
@@ -341,7 +345,10 @@ Unless grounded in the job's supplied rendering, palette or texture_grain field 
 scenes, a clause such as "restrained natural rendering with true material fidelity" must not recur:
 one shot might specify faithful steel texture, the next natural tonal separation; retain both facts
 without the shared stock sentence. Required names/guards and those grounded cross-scene style facts
-are exceptions, descriptive boilerplate is not. A "Render style:" label alone grants no exemption.
+are exceptions, descriptive boilerplate is not. Across different scenes, a genuine combination of
+contiguous locked excerpts from two or more of rendering, palette and texture_grain may repeat too;
+join them only with simple connectors (and/with/plus/alongside), retaining their exact content words.
+Do not assume synonyms, reordered words or invented attributes are grounded. A "Render style:" label alone grants no exemption.
 Preserve scene-specific lighting directions; the global-style exception does not cover lighting_motif.
 Vary long object noun phrases too: "the cup with its red handle" can become "the red-handled cup"
 or "the cup's handle, still red". Preserve the exact color/material facts without copying a long
@@ -365,13 +372,16 @@ Preserve supplied camera geometry, lens and axis, except use the mandatory UGC v
 instead of copying conventional framing labels. Do not add a second move in a match-cut bridge.
 Preserve composition placement too: a subject specified left stays left, not centered. Phone-native
 vocabulary changes the language, never the subject's position or which objects occupy the frame.
-When hardware_language is non-null, hardware_reference is the mandatory identifier to include
-naturally once. The remainder of hardware_language describes the intended optical role, not text
-to paste. Vary the explanation: Arri Alexa can motivate preserved highlight detail in one shot
-and readable shadow separation in another, without repeating 'Arri Alexa tonal latitude'. These
+When hardware_reference is non-null, it is the mandatory identifier to include naturally once.
+hardware_optical_intent describes the purpose, not wording to paste. Give each shot a DISTINCT
+optical explanation grounded in its own supplied lighting/materials. Do not attach the stock
+words "tonal latitude" to Arri Alexa: describe what remains visible instead. For example, one
+shot can retain detail in a lamp highlight; another can distinguish folds in existing dark fabric.
+Do not copy those examples unless the input supports those objects. Check every hardware-adjacent
+phrase against every other target and prior_compiled_shots before returning. These
 are rendering comparisons, not factual claims about capture. Preserve specific focal length,
 focus depth and the bible's color/texture; a
-hardware comparison never changes those facts. If hardware_language is null, do not invent one.
+hardware comparison never changes those facts. If hardware_reference is null, do not invent one.
 Use hardware terms meaningfully: tonal latitude describes retained highlight/shadow detail, not
 an object or substance. Never write "light read through Arri Alexa" or similar empty similes;
 connect the selected reference to the actual highlight, material or spatial treatment in the shot.

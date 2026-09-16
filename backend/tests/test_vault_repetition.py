@@ -29,9 +29,9 @@ class VaultRepetitionTests(unittest.TestCase):
         self.assertFalse(self.repeated(p,r))
         self.assertTrue(compiler.validate_compiled(r,p))  # Other validation is not bypassed.
 
-    def test_same_scene_still_rejected(self):
+    def test_same_scene_locked_identity_allowed(self):
         p,r=self.case(); p['shots'][1]['scene_number']=1
-        self.assertTrue(self.repeated(p,r))
+        self.assertFalse(self.repeated(p,r))
 
     def test_unknown_scene_still_rejected(self):
         p,r=self.case(); p['shots'][1]['scene_number']=None
@@ -78,11 +78,11 @@ class VaultRepetitionTests(unittest.TestCase):
             p,r=self.case(phrase)
             self.assertTrue(self.repeated(p,r))
 
-    def test_later_scene_does_not_hide_prior_same_scene_collision(self):
+    def test_locked_identity_may_recur_when_returning_to_a_scene(self):
         p,r=self.case()
         p['shots'].append({**copy.deepcopy(p['shots'][0]),'shot_number':3})
         r['shots'].append({'shot_number':3,'compiled_prompt':PHRASE+'.'})
-        self.assertTrue(any('Shot 3' in e for e in self.repeated(p,r)))
+        self.assertFalse(self.repeated(p,r))
 
     def test_generic_hardware_explanation_still_rejected(self):
         p,r=self.case('Arri Alexa tonal latitude')

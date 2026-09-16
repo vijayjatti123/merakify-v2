@@ -354,7 +354,7 @@ class CompilerTests(unittest.TestCase):
             return {'shots':[{'shot_number':1,'compiled_prompt':prose()}]}
         start=time.monotonic()
         try:
-            with patch.object(compiler,'COMPILER_DEADLINE_SEC',0.04):
+            with patch.object(compiler,'_compiler_time_budget',return_value=0.04):
                 with self.assertRaises(TimeoutError):
                     compiler.compile_shot_prompts(result,emit=emit,call_agent=blocked)
             self.assertLess(time.monotonic()-start,0.5)
@@ -377,7 +377,7 @@ class CompilerTests(unittest.TestCase):
             time.sleep(0.06)
             return {'shots':[]}
         emit=Mock();started=time.monotonic()
-        with patch.object(compiler,'COMPILER_DEADLINE_SEC',0.10):
+        with patch.object(compiler,'_compiler_time_budget',return_value=0.10):
             with self.assertRaises(TimeoutError):
                 compiler.compile_shot_prompts(source(),emit=emit,call_agent=slow_invalid)
         self.assertLess(time.monotonic()-started,0.18)
@@ -465,7 +465,7 @@ class CompilerTests(unittest.TestCase):
             data=json.loads(content)
             rendezvous.wait(timeout=0.5)
             return {'shots':[{'shot_number':data['shots'][0]['shot_number'],'compiled_prompt':prose()}]}
-        with patch.object(compiler,'COMPILER_BATCH_SIZE',1), patch.object(compiler,'COMPILER_DEADLINE_SEC',1), patch.object(compiler,'validate_compiled',return_value=[]) as validate:
+        with patch.object(compiler,'COMPILER_BATCH_SIZE',1), patch.object(compiler,'_compiler_time_budget',return_value=1), patch.object(compiler,'validate_compiled',return_value=[]) as validate:
             compiled=compiler.compile_shot_prompts(result,emit=Mock(),call_agent=answer)
         self.assertEqual([s['shot_number'] for s in compiled],[1,2])
         self.assertEqual([s['shot_number'] for s in validate.call_args.args[0]['shots']],[1,2])

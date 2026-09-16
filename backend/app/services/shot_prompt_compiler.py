@@ -1,6 +1,7 @@
 """One text-only compiler; consumes assembled data without revising upstream shots."""
 import copy
 import json
+import math
 import re
 import unicodedata
 import queue
@@ -14,10 +15,29 @@ from app.services.speech_mode import is_voiceover
 
 TEXT_GUARD = "No on-screen text, logos or readable signage; composite text in post."
 AUDIO_GUARD = "Visual performance only; use the existing dialogue audio file in post."
-# Real eight-shot output took 102s; reserve room for one comparable correction.
-# Still shorter than three 90s SDK attempts for even one old logical call.
-COMPILER_DEADLINE_SEC = 240.0
 COMPILER_BATCH_SIZE = 4
+COMPILER_DEADLINE_SEC = 300.0
+
+
+def compiler_token_budget(shot_count):
+    # The real four-shot diagnostic consumed all 16,000 tokens in thinking,
+    # with zero JSON. Reserve that reasoning headroom plus 1,024 per target
+    # for visual prose/JSON (real four-shot text used 1,115 tokens total).
+    # Dialogue and reference URLs are inserted by code, not generated here.
+    return min(24576, 16384 + 1024 * max(1, shot_count))
+
+
+def _provider_time_budget(tokens):
+    # Measured 12,228-16,000 output tokens in 100-130s. Budget at a slower
+    # 100 tokens/s plus 20s transport overhead; this is a bound, not a delay.
+    return math.ceil(tokens / 100 + 20)
+
+
+def _compiler_time_budget(groups):
+    # Product limit, independent of shot count/token allowances. Batches and
+    # their one corrective retry share this deadline; never reserve a fresh
+    # full timeout per retry. Fail honestly and let the user retry the saved plan.
+    return COMPILER_DEADLINE_SEC
 
 
 def dialogue_insert(source, family):
@@ -80,9 +100,10 @@ def _start_provider_call(call):
     completed = queue.Queue(maxsize=1)
     def work():
         try:
-            completed.put((True, call()))
+            value = call()
+            completed.put((True, value, time.monotonic()))
         except BaseException as error:
-            completed.put((False, error))
+            completed.put((False, error, time.monotonic()))
     context = copy_context()
     threading.Thread(target=lambda: context.run(work), daemon=True, name="shot-compiler-provider").start()
     return completed
@@ -90,12 +111,14 @@ def _start_provider_call(call):
 
 def _await_provider(completed, *, deadline):
     remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise TimeoutError(f"Shot Prompt Compiler overall {COMPILER_DEADLINE_SEC:g}-second deadline exceeded")
     try:
-        ok, value = completed.get(timeout=remaining)
+        ok, value, finished_at = completed.get(timeout=max(0, remaining))
     except queue.Empty:
-        raise TimeoutError(f"Shot Prompt Compiler overall {COMPILER_DEADLINE_SEC:g}-second deadline exceeded; late provider result discarded") from None
+        raise TimeoutError("Shot Prompt Compiler deadline exceeded; late provider result discarded") from None
+    # A lookahead response may have finished on time and waited for prior-batch
+    # validation. Judge its completion time, not when the parent dequeues it.
+    if finished_at > deadline:
+        raise TimeoutError("Shot Prompt Compiler deadline exceeded; late provider result discarded")
     if not ok:
         raise value
     return value
@@ -103,8 +126,27 @@ def _await_provider(completed, *, deadline):
 
 def _attempt_before_deadline(call, *, deadline):
     if time.monotonic() >= deadline:
-        raise TimeoutError(f"Shot Prompt Compiler overall {COMPILER_DEADLINE_SEC:g}-second deadline exceeded")
+        raise TimeoutError("Shot Prompt Compiler deadline exceeded")
     return _await_provider(_start_provider_call(call), deadline=deadline)
+
+
+def _response_recorder(records, started):
+    # Provider workers may finish late. They enqueue metadata only; the owning
+    # compiler thread alone emits events/uses the request's database session.
+    def record(metadata):
+        records.put({**metadata, "provider_elapsed_sec": round(time.monotonic() - started, 3)})
+    return record
+
+
+def _format_failure(error):
+    if not isinstance(error, ValueError):
+        return None
+    for prefix, kind in (("Model response was cut off", "output_token_limit"),
+                         ("No JSON object found", "missing_json_object"),
+                         ("Model response was not valid JSON", "invalid_json")):
+        if str(error).startswith(prefix):
+            return kind
+    return None
 
 
 def _timing(emit, started, attempt_started, deadline, batch_index, numbers, attempt, phase, **extra):
@@ -113,7 +155,7 @@ def _timing(emit, started, attempt_started, deadline, batch_index, numbers, atte
         "phase": phase, "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "attempt_elapsed_sec": round(time.monotonic() - attempt_started, 3),
         "orchestration_elapsed_sec": round(time.monotonic() - started, 3),
-        "deadline_sec": COMPILER_DEADLINE_SEC,
+        "deadline_sec": round(deadline - started, 3),
         "remaining_budget_sec": round(max(0, deadline - time.monotonic()), 3),
         "sdk_retries": 0, **extra}))
 # Optical comparisons, not assertions that a particular camera shot the scene.
@@ -435,7 +477,7 @@ def _vault_fact_ids(phrase, source, *, boundary=True):
 
 
 def _job_style_fact(phrase, bible):
-    """Ground in one supplied global style field, never the output's style label.
+    """Ground in exact locked spans, never the output's style label.
 
     Lighting motifs may contain scene-specific source positions; those remain
     subject to the existing physical-lighting continuity check instead.
@@ -452,7 +494,36 @@ def _job_style_fact(phrase, bible):
         words = _vault_fact_tokens(value)
         if any(words[i:i + len(needle)] == needle for i in range(len(words) - len(needle) + 1)):
             return True
-    return False
+    # A combined clause can join exact excerpts from different locked fields.
+    # No bag-of-words/synonym matching, arbitrary omissions, or lighting fields.
+    # The optional suffix in the literal rendering compound "live-action-style"
+    # is grammatical glue ONLY for this multi-field path; the single-field exact
+    # matcher above is unchanged.
+    def combined_tokens(text):
+        text = re.sub(r"\blive[- ]action[- ]style\b", "live action", text, flags=re.I)
+        return _vault_fact_tokens(text)
+    combined = combined_tokens(" ".join(phrase))
+    fields = {key: combined_tokens(value) for key, value in bible.items()
+              if key in {"rendering", "palette", "texture_grain"} and isinstance(value, str)}
+    joins = {"with", "plus", "alongside"}  # Articles and "and" already normalize away.
+
+    def matches(offset, used):
+        if offset == len(combined):
+            return len(used) >= 2
+        if used and combined[offset] in joins:
+            offset += 1
+        for field, words in fields.items():
+            if field in used:
+                continue
+            # At least two content tokens establish each contributing field.
+            for end in range(offset + 2, len(combined) + 1):
+                span = combined[offset:end]
+                if any(words[i:i + len(span)] == span for i in range(len(words) - len(span) + 1)):
+                    if matches(end, used | {field}):
+                        return True
+        return False
+
+    return matches(0, set())
 
 
 def validate_compiled(response, payload):
@@ -618,8 +689,9 @@ def validate_compiled(response, payload):
         scene = source.get("scene_number")
         repeats = [phrase for phrase in phrases if phrase in seen and not all(
             (group == lighting_group and signatures & setups.get(phrase, set()))
-            or (scene is not None and prior_scene is not None and scene != prior_scene
-                and (prior_ids & vault_facts[phrase] or phrase in style_facts))
+            or (scene is not None and prior_scene is not None
+                and (prior_ids & vault_facts[phrase]
+                     or (scene != prior_scene and phrase in style_facts)))
             for group, signatures, prior_scene, prior_ids in seen[phrase])]
         if repeats:
             errors.append(f"Shot {source['shot_number']}: repeated descriptive clause; vary phrasing: {' '.join(sorted(repeats)[0])}")
@@ -660,9 +732,9 @@ def shot_batches(payload):
 
 def compile_shot_prompts(result, *, brief="", emit, call_agent):
     started = time.monotonic()
-    deadline = started + COMPILER_DEADLINE_SEC
     payload = compiler_input(result, brief=brief, emit=emit)
     groups = list(shot_batches(payload))
+    deadline = started + _compiler_time_budget(groups)
     from app.services.prompt_technique_service import shot_knowledge, knowledge_addendum
     knowledge = shot_knowledge(payload, emit)
     systems = {index: prompts.SHOT_PROMPT_COMPILER + knowledge_addendum(group, knowledge)
@@ -674,6 +746,7 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
         reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split())
         for ref in item["character_references"]:
             ref["has_image_reference"] = bool(ref.pop("image_url", None))
+            ref["has_locked_identity"] = bool(ref.get("locked_vault_description"))
             ref.pop("locked_vault_description", None)  # Validator provenance, not new model instructions.
         if item.get("speaker_reference"):
             item["speaker_reference"].pop("image_url", None)
@@ -685,6 +758,17 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
         item["visual_word_range"] = [max(1, minimum - reserved), maximum - reserved]
         item["programmatic_reserved_words"] = reserved
         item["visual_sentence_max"] = 6 - int(bool(reference)) - int(bool(reference_insert(source)))
+        # The validator retains the original lookup. The model gets the required
+        # identifier separately from its optical purpose, never a copyable stock
+        # phrase that its repetition check correctly rejects across shots.
+        selected = item.pop("hardware_language", None)
+        item["hardware_optical_intent"] = (
+            "Preserve highlight and shadow detail; explain the relevant visible effect in your own shot-specific words."
+            if selected and "tonal latitude" in selected else
+            "Describe the supplied lens's subject/background separation in shot-specific words."
+            if selected and "optical separation" in selected else
+            "Describe the supplied lens's spatial breadth in shot-specific words."
+            if selected else None)
     raw_done, rendered_done, pending = [], [], {}
     def input_for(index):
         group = groups[index-1]
@@ -703,15 +787,19 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
                 if index > len(groups) or index in pending:
                     continue
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(f"Shot Prompt Compiler overall {COMPILER_DEADLINE_SEC:g}-second deadline exceeded")
+                    raise TimeoutError("Shot Prompt Compiler overall deadline exceeded")
                 attempt_started = time.monotonic()
                 numbers = [s["shot_number"] for s in groups[index-1]]
                 _timing(emit, started, attempt_started, deadline, index, numbers, 1, "start")
                 body = json.dumps(input_for(index), ensure_ascii=False)
-                budget = max(0.001, deadline - time.monotonic())
-                pending[index] = {"started": attempt_started, "claimed": False,
-                                  "completed": _start_provider_call(lambda body=body, budget=budget, system=systems[index]: call_agent(
-                                      system, body, max_tokens=16000, request_timeout=budget))}
+                tokens = compiler_token_budget(len(groups[index-1]))
+                budget = min(_provider_time_budget(tokens), max(0.001, deadline - time.monotonic()))
+                usage = queue.Queue()
+                recorder = _response_recorder(usage, attempt_started)
+                pending[index] = {"started": attempt_started, "deadline": attempt_started + budget,
+                                  "claimed": False, "usage": usage,
+                                  "completed": _start_provider_call(lambda body=body, budget=budget, tokens=tokens, system=systems[index], record=recorder: call_agent(
+                                      system, body, max_tokens=tokens, request_timeout=budget, on_response=record))}
             numbers = {s["shot_number"] for s in group}
             prefix_numbers = {s["shot_number"] for s in rendered_done} | numbers
             targets = {**payload, "shots": group}
@@ -727,6 +815,9 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
     except Exception:
         for index, initial in pending.items():
             if not initial["claimed"]:
+                while not initial["usage"].empty():
+                    emit("shot_prompt_compiler_usage", json.dumps({**initial["usage"].get_nowait(),
+                        "batch": index, "compiler_attempt": 1, "discarded": True}))
                 _timing(emit, started, initial["started"], deadline, index,
                         [s["shot_number"] for s in groups[index-1]], 1, "end",
                         outcome="discarded", reason="Another batch failed; late response cannot persist")
@@ -740,13 +831,14 @@ def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
                    started, deadline, batch_index, emit, call_agent, initial, system):
     content = json.dumps(model_input, ensure_ascii=False)
     errors = []
+    tokens = compiler_token_budget(len(payload["shots"]))
     # Strong reasoning model is deliberate: immutable identities, model-specific
     # syntax and coordinated boundary reasoning. One call normally; one retry only
     # if deterministic compiler checks fail. No video/image/audio generation API.
     for attempt in range(2):
-        # Include reasoning headroom as well as 100-150 words per shot. Real audits
-        # exhausted a 4096-token budget entirely in thinking before emitting JSON.
         attempt_started = initial["started"] if attempt == 0 else time.monotonic()
+        usage = initial["usage"] if attempt == 0 else queue.Queue()
+        recorder = _response_recorder(usage, attempt_started)
         def timing(phase, **extra):
             _timing(emit, started, attempt_started, deadline, batch_index,
                     [s["shot_number"] for s in payload["shots"]], attempt + 1, phase, **extra)
@@ -755,12 +847,13 @@ def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
         try:
             # Capture immutable arguments; a late worker must not see a later retry.
             request_content = content
-            request_timeout = max(0.001, deadline - time.monotonic())
-            response = _await_provider(initial["completed"], deadline=deadline) if attempt == 0 else _attempt_before_deadline(
-                lambda body=request_content, budget=request_timeout: call_agent(
+            request_timeout = min(_provider_time_budget(tokens), max(0.001, deadline - time.monotonic()))
+            attempt_deadline = min(deadline, initial["deadline"] if attempt == 0 else time.monotonic() + request_timeout)
+            response = _await_provider(initial["completed"], deadline=attempt_deadline) if attempt == 0 else _attempt_before_deadline(
+                lambda body=request_content, budget=request_timeout, record=recorder, token_budget=tokens: call_agent(
                     system, body,
-                    max_tokens=max(16000, len(payload["shots"]) * 1800), request_timeout=budget),
-                deadline=deadline)
+                    max_tokens=token_budget, request_timeout=budget, on_response=record),
+                deadline=attempt_deadline)
             errors = []
             if isinstance(response, dict) and isinstance(response.get("shots"), list):
                 for output in response["shots"]:
@@ -783,19 +876,26 @@ def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
             else:
                 errors += ["Return every input shot exactly once in its original order"]
             if time.monotonic() >= deadline:
-                raise TimeoutError(f"Shot Prompt Compiler overall {COMPILER_DEADLINE_SEC:g}-second deadline exceeded")
+                raise TimeoutError("Shot Prompt Compiler overall deadline exceeded")
         except Exception as error:
-            malformed = isinstance(error, ValueError) and str(error).startswith((
-                "Model response was not valid JSON", "No JSON object found", "Model response was cut off"))
+            malformed = _format_failure(error)
             if malformed and attempt == 0 and time.monotonic() < deadline:
                 timing("end", outcome="format_rejected", error_type=type(error).__name__,
-                       reason="Provider returned malformed or incomplete JSON")
-                emit("shot_prompt_compiler", f"Compiler batch {batch_index}: malformed/incomplete JSON; using its one corrective retry within the original deadline.")
+                       format_failure=malformed, reason="Provider returned malformed or incomplete JSON")
+                if malformed == "output_token_limit":
+                    tokens = min(32768, tokens * 2)
+                emit("shot_prompt_compiler", f"Compiler batch {batch_index}: {malformed}; using its one corrective retry with max_tokens={tokens} within the allocated deadline.")
                 content = json.dumps({"input": model_input, "required_corrections": [
                     "Previous response was malformed or incomplete JSON. Return complete valid JSON for every target shot, and only those targets."]}, ensure_ascii=False)
                 continue
-            timing("end", outcome="error", error_type=type(error).__name__, reason=str(error))
+            timing("end", outcome="error", error_type=type(error).__name__,
+                   format_failure=malformed, reason=malformed or str(error))
             raise
+        finally:
+            while not usage.empty():
+                emit("shot_prompt_compiler_usage", json.dumps({**usage.get_nowait(),
+                    "batch": batch_index, "compiler_attempt": attempt + 1,
+                    "shot_numbers": [s["shot_number"] for s in payload["shots"]]}))
         timing("end", outcome="validation_rejected" if errors else "accepted", validation_errors=errors)
         if not errors:
             generated = rendered["shots"]

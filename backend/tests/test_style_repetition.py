@@ -69,3 +69,34 @@ class StyleRepetitionTests(unittest.TestCase):
             shot['compiled_prompt'] = 'Before her. Render style: ' + CLAUSE + ' image.'
         self.p['shots'][1]['scene_number'] = 1
         self.assertTrue(self.errors())
+
+    def test_real_combined_rendering_palette_clause(self):
+        self.p, self.r = self.fixture.case('natural live action rendering with muted warm browns')
+        self.p['style_bible'] = {
+            'rendering': 'Natural live-action-style rendering, restrained realism, no stylization or exaggeration',
+            'palette': 'Neutral true-to-life colors, muted warm browns and soft window daylight, no color grade shift',
+        }
+        self.assertFalse(self.errors())
+        self.p['shots'][1]['scene_number'] = 1
+        self.assertTrue(self.errors())  # Same-scene extension is identity-only.
+
+    def test_combination_requires_distinct_fields_and_exact_spans(self):
+        self.p, self.r = self.fixture.case('restrained natural rendering with muted warm brown surfaces')
+        self.p['style_bible'] = {'rendering': 'restrained natural rendering', 'palette': 'muted warm brown surfaces'}
+        self.assertFalse(self.errors())
+        self.p['style_bible'] = {'rendering': 'restrained natural rendering and muted warm brown surfaces'}
+        self.assertTrue(self.errors())  # Not an exact single-field span ("with" was added).
+        self.p['style_bible'] = {'rendering': 'restrained natural rendering', 'palette': 'warm muted brown surfaces'}
+        self.assertTrue(self.errors())
+        self.p['style_bible'] = {'rendering': 'restrained natural rendering', 'lighting_motif': 'muted warm brown surfaces'}
+        self.assertTrue(self.errors())
+
+    def test_combined_facts_do_not_swallow_action_or_new_attributes(self):
+        self.p, self.r = self.fixture.case('natural live action rendering with muted warm browns')
+        self.p['style_bible'] = {'rendering':'natural live action rendering', 'palette':'muted warm browns'}
+        for shot in self.r['shots']:
+            shot['compiled_prompt'] += ' Mira the woman at her sunlit desk lifts the notebook.'
+        self.assertTrue(self.errors())
+        self.p, self.r = self.fixture.case('natural live action rendering with vivid golden browns')
+        self.p['style_bible'] = {'rendering':'natural live action rendering', 'palette':'muted warm browns'}
+        self.assertTrue(self.errors())
