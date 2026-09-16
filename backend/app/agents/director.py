@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.agents import prompts
 from app.agents.dialogue_integrity import protected_dialogue, restore_protected, screen_issues, warn_dialogue_loss
-from app.agents.llm_client import call_agent
+from app.agents.llm_client import call_agent, cinematography_token_budget
 from app.services import asset_service, character_service, job_service, storage_service, voice_generation_service
 from app.services.shot_prompt_compiler import compile_shot_prompts
 from app.services.still_frame_service import generate_still_frames
@@ -585,10 +585,19 @@ def run_pipeline(db: Session, job_id: str) -> None:
         cinematography_input += f"\nTarget total duration: {fmt['duration_target_sec']} seconds"
         from app.services.voice_timing import measured_budget
         cinematography_input += f"\nMeasured dialogue budget: {json.dumps(measured_budget(db, language))}"
+        token_budget = cinematography_token_budget(script["scenes"], fmt["duration_target_sec"])
+
+        def record_cinematography_usage(metadata: dict) -> None:
+            emit("cinematography_usage", json.dumps(metadata))
+            if metadata["will_retry"]:
+                emit("cinematography", "Shot planning reached its response limit; retrying once with more room.")
+
         cine = call_agent(
             prompts.CINEMATOGRAPHY_AGENT,
             cinematography_input,
-            max_tokens=4096,
+            max_tokens=token_budget,
+            truncation_retry_tokens=min(32768, token_budget * 2),
+            on_response=record_cinematography_usage,
         )
         from app.services.dialogue_duration import preflight_dialogue_durations
         preflight_dialogue_durations(cine["shots"], emit=emit)
