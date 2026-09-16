@@ -526,6 +526,38 @@ def _job_style_fact(phrase, bible):
     return matches(0, set())
 
 
+def _technical_fact_boundaries(prose, source):
+    """Exclude exact supplied lens facts, not the optical explanation beside them.
+
+    Unique boundary tokens prevent sliding windows from joining unrelated words
+    across a removed fact. No free-form synonym inference or whole-clause waiver.
+    Only a concrete millimeter lens specification establishes provenance here.
+    """
+    lens = source.get("lens") or ""
+    focal = re.search(r"\b(\d+(?:\.\d+)?)\s*mm\b", lens, re.I)
+    if not focal:
+        return prose
+    value = focal.group(1)
+    aliases = [re.escape(value)]
+    # Spelling out a focal length is notation, not a change to the locked fact.
+    units = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+    tens = "zero ten twenty thirty forty fifty sixty seventy eighty ninety".split()
+    if value.isdigit() and 0 < int(value) < 100:
+        n = int(value)
+        words = units[n] if n < 20 else tens[n // 10] + (" " + units[n % 10] if n % 10 else "")
+        aliases.append(r"[-\s]+".join(words.split()))
+    measure = r"(?:" + "|".join(aliases) + r")[-\s]*(?:mm|millimet(?:er|re)s?)"
+    def literal(text):
+        return r"[-\s]+".join(re.escape(word) for word in re.findall(r"\w+", text))
+    prefix, suffix = literal(lens[:focal.start()]), literal(lens[focal.end():])
+    pattern = r"\b" + (prefix + r"[-\s]+" if prefix else "") + measure
+    pattern += (r"[-\s]+" + suffix if suffix else "")
+    if not re.search(r"\blens\b", lens, re.I):
+        pattern += r"(?:[-\s]+lens)?"
+    pattern += r"\b"
+    return re.sub(pattern, f" technicalfactboundary{source['shot_number']} ", prose, flags=re.I)
+
+
 def validate_compiled(response, payload):
     """Deterministic checks plus a bounded compiler retry; no upstream QA changes.
 
@@ -662,6 +694,9 @@ def validate_compiled(response, payload):
                 errors.append(f"Shot {source['shot_number']}: repeated hardware phrasing: {phrase}; keep the hardware identity, vary its grounded optical explanation")
             for phrase in phrases:
                 hardware_seen[phrase] = source["shot_number"]
+        # Hardware identifiers already have their own exemption/check above.
+        # Add only source-grounded lens spans, never the surrounding explanation.
+        prose = _technical_fact_boundaries(prose, source)
         for literal in (TEXT_GUARD, AUDIO_GUARD, source.get("dialogue_text") or "", reference or ""):
             if literal:
                 prose = prose.replace(literal, " ")
