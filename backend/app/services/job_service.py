@@ -183,7 +183,9 @@ def job_result(job: Job) -> Optional[Any]:
         from app.services.still_frame_service import invalidate_changed_stills
         invalidate_changed_stills(result)
         for shot in result.get("shots", []):
-            if shot.get("still_frame_status") == "generating" and still_retry_expired(shot):
+            # Initial batch generation has no manual-retry lease. Absence of that
+            # lease must not turn a live preview into a false timeout on read.
+            if shot.get("still_frame_status") == "generating" and shot.get("still_retry_token") and still_retry_expired(shot):
                 shot["still_frame_status"] = "failed"
                 shot["still_frame_warning"] = "Shot regeneration timed out. Please try regenerating it again."
             elif not shot.get("still_frame_status") and shot.get("still_frame_warning") and not shot.get("still_frame_key"):
@@ -264,6 +266,33 @@ def still_retry_expired(shot):
         return (datetime.now(timezone.utc) - datetime.fromisoformat(shot["still_retry_started_at"])).total_seconds() > 900
     except (KeyError, ValueError, TypeError):
         return True
+
+
+def claim_preview_preparation(db, job_id):
+    job = get_job(db, job_id)
+    if not job:
+        raise LookupError("Job not found")
+    old = job.result_json
+    result = json.loads(old or "{}")
+    shots = result.get("shots", [])
+    if not result.get("generation_approved") or not shots:
+        raise ValueError("Create previews from the completed plan first")
+    if result.get("audio_assembly_pending") or any(s.get("still_frame_status") == "generating" for s in shots):
+        raise ValueError("Preview preparation is already running")
+    if any(s.get("still_frame_url") or s.get("video_url") for s in shots):
+        raise ValueError("Use the individual shot's Retry preview action to preserve existing output")
+    if any(s.get("has_dialogue") and (s.get("status") != "done" or not s.get("dialogue_audio_url")) for s in shots):
+        raise ValueError("Speech preparation must finish before previews can be retried")
+    if job.status != "error" and not result.get("assembly", {}).get("provisional"):
+        raise ValueError("No failed preview preparation to retry")
+    result["audio_assembly_pending"] = True
+    changed = db.query(Job).filter(Job.id == job_id, Job.result_json == old, Job.status == job.status).update(
+        {Job.result_json: json.dumps(result), Job.status: "done", Job.error_message: None}, synchronize_session=False)
+    if changed != 1:
+        db.rollback()
+        raise ValueError("Job changed; refresh before retrying")
+    db.commit()
+    db.expire_all()
 
 
 def claim_still_retry(db, job_id, number, expected_attempt):

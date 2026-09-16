@@ -209,6 +209,23 @@ export async function regenerateShotVideo(jobId, shot, hint = "") {
   return data;
 }
 
+export async function retryShotPreview(jobId, shot) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shot.shot_number}/preview/retry`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_attempt: shot.video_task_id || shot.video_submitted_at || "none" }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not retry this preview. Please try again.");
+  return data;
+}
+
+export async function retryPreviewPreparation(jobId) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/previews/retry`, { method: "POST" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not retry preview preparation.");
+  return data;
+}
+
 
 export async function assembleFinalVideo(jobId) {
   const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/assemble`, { method: "POST" });

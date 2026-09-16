@@ -309,7 +309,7 @@ def _continuous_pair(previous, shot, result):
                 re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I))
 
 
-def generate_still_frames(result, *, job_id, emit, shot_numbers=None):
+def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progress=None):
     """Keep the plan reviewable, but explicitly mark missing output as failed."""
     characters = {c["name"].strip().casefold(): c for c in result.get("continuity", {}).get("characters", [])}
     # References live only in this job's result JSON, pointing to its own stills.
@@ -348,6 +348,9 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None):
         if not shot.get("compiled_prompt"):
             continue  # Dialogue jobs wait for real post-approval compilation.
         number = shot["shot_number"]
+        shot["still_frame_status"] = "generating"
+        if on_progress:
+            on_progress(result)
         try:
             visual = visual_description(shot["compiled_prompt"])
             entities = match_entities(result, shot, visual)
@@ -430,4 +433,6 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None):
             shot["still_frame_status"] = "failed"
             shot["still_frame_warning"] = warning
             emit("still_frame", "WARNING: " + warning)
+        if on_progress:
+            on_progress(result)
     return result["shots"]

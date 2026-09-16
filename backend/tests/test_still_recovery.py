@@ -72,9 +72,67 @@ class StillRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'already regenerating'):
             jobs.claim_still_retry(self.db,self.job.id,1,'none')
 
+    def test_preview_retry_never_starts_video(self):
+        task = BackgroundTasks()
+        with patch.object(routes, 'SessionLocal', self.sessions), \
+             patch.object(still, 'generate_still', return_value=self.image), \
+             patch.object(still, 'check_still', return_value={'approved': True, 'reason': 'Matches'}), \
+             patch.object(still.storage_service, 'upload_bytes', return_value={'key':'audit/still','url':'https://audit/still'}), \
+             patch.object(video, 'start') as start:
+            response = routes.retry_preview(self.job.id, 1, routes.VideoRegenerateRequest(expected_attempt='none'), task, self.db)
+            self.assertEqual(response['status'], 'generating')
+            asyncio.run(task())
+            start.assert_not_called()
+        self.db.expire_all()
+        result = jobs.job_result(jobs.get_job(self.db, self.job.id))
+        self.assertEqual(result['shots'][0]['still_frame_status'], 'ready')
+        self.assertFalse(result['shots'][0].get('video_url'))
+        self.assertEqual(result['shots'][1], self.result['shots'][1])
+
+    def test_live_progress_reports_start_and_completion(self):
+        seen = []
+        with patch.object(still, 'generate_still', return_value=self.image), \
+             patch.object(still, 'check_still', return_value={'approved': False, 'reason': 'Deliberate mismatch'}):
+            still.generate_still_frames(self.result, job_id=self.job.id, emit=lambda *args: None,
+                shot_numbers={1}, on_progress=lambda result: seen.append(result['shots'][0]['still_frame_status']))
+        self.assertEqual(seen, ['generating', 'failed'])
+
     def test_stale_token_cannot_save(self):
         jobs.claim_still_retry(self.db,self.job.id,1,'none')
         self.assertFalse(jobs.finish_still_retry(self.db,self.job.id,1,'stale',self.result))
+
+    def test_initial_generation_is_not_an_expired_manual_retry(self):
+        self.result['shots'][0]['still_frame_status'] = 'generating'
+        self.job.result_json = json.dumps(self.result)
+        self.db.commit()
+        self.assertEqual(jobs.job_result(self.job)['shots'][0]['still_frame_status'], 'generating')
+
+    def test_expired_manual_retry_still_reads_as_failed(self):
+        self.result['shots'][0].update(still_frame_status='generating', still_retry_token='audit',
+            still_retry_started_at='2000-01-01T00:00:00+00:00')
+        self.job.result_json = json.dumps(self.result)
+        self.db.commit()
+        self.assertEqual(jobs.job_result(self.job)['shots'][0]['still_frame_status'], 'failed')
+
+    def test_preparation_retry_keeps_audio_and_rejects_second_claim(self):
+        self.result['shots'] = [dict(self.result['shots'][0], has_dialogue=True,
+            status='done', dialogue_audio_url='https://audit/saved-speech', dialogue_voice_id='priya')]
+        self.job.result_json = json.dumps(self.result)
+        self.job.status = 'error'
+        self.job.error_message = 'Shot Prompt Compiler deadline exceeded'
+        self.db.commit()
+        jobs.claim_preview_preparation(self.db, self.job.id)
+        restored = jobs.job_result(jobs.get_job(self.db, self.job.id))
+        self.assertTrue(restored['audio_assembly_pending'])
+        self.assertEqual(restored['shots'][0]['dialogue_audio_url'], 'https://audit/saved-speech')
+        self.assertIsNone(jobs.get_job(self.db, self.job.id).error_message)
+        with self.assertRaisesRegex(ValueError, 'already running'):
+            jobs.claim_preview_preparation(self.db, self.job.id)
+
+    def test_preparation_retry_cannot_overwrite_existing_images(self):
+        self.job.status = 'error'; self.db.commit()
+        with self.assertRaisesRegex(ValueError, 'preserve existing output'):
+            jobs.claim_preview_preparation(self.db, self.job.id)
 
     def test_unapproved_plan_is_not_submitted(self):
         self.result['generation_approved'] = False

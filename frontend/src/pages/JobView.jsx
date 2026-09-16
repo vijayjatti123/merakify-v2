@@ -1,9 +1,10 @@
-import { AlertTriangle, Check, Clapperboard, Clock3, ImageIcon, Loader2, Pencil, RefreshCw, Save, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Check, Clapperboard, Clock3, Loader2, Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Alert, AlertTitle, Button, Card, Stepper, Step, StepLabel, Box } from "@mui/material";
+import { Alert, AlertTitle, Button, Card, Stepper, Step, StepLabel, Box, Stack, Typography } from "@mui/material";
 import ActionProgress from "../components/ActionProgress";
 import { friendlyMessage, progressMessage } from "../utils/presentation";
-import { retryFailedJob } from "../api/client";
+import { retryFailedJob, retryShotPreview, retryPreviewPreparation } from "../api/client";
+import { previewState, previewSummary } from "../utils/previewState";
 
 import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, assembleFinalVideo } from "../api/client";
 import FaceEnhancement, { ShotVideo } from "../components/FaceEnhancement";
@@ -21,13 +22,6 @@ const COLORS = {
   red: "var(--mui-palette-error-main)",
 };
 
-const STATUS_LABELS = {
-  pending: "Pending",
-  generating: "Generating",
-  done: "Audio ready",
-  error: "Error",
-};
-
 const videoReady = (shot) => Boolean(shot.video_url && shot.video_status === "done" && !shot.video_source_changed);
 
 function shotOutputStatus(shot, audioStatus) {
@@ -36,48 +30,11 @@ function shotOutputStatus(shot, audioStatus) {
   if (shot.video_source_changed) return ["pending", "Video needs regeneration"];
   if (shot.video_status === "error") return ["error", "Video generation failed"];
   if (videoReady(shot)) return ["done", "Video ready"];
-  if (shot.still_frame_status === "generating") return ["generating", "Generating preview"];
-  if (shot.still_frame_status === "failed" && !shot.still_frame_url) return ["error", "No usable output"];
+  if (shot.still_frame_status === "generating") return ["generating", "Creating preview"];
+  if (shot.still_frame_status === "failed" && !shot.still_frame_url) return ["error", "Preview failed"];
   if (shot.has_dialogue && audioStatus === "error") return ["error", "Audio preparation failed"];
-  if (shot.still_frame_url) return ["pending", "Preview ready · video not generated"];
-  return ["pending", "Video not generated"];
-}
-
-function GenerationGrid({ shots, statuses }) {
-  return (
-    <Card component="section" className="generation-stage" aria-label="Shot generation progress">
-      <div className="generation-heading">
-        <div>
-          <p className="eyebrow">Approved shot plan</p>
-          <h2>Preparing your voice recordings</h2>
-        </div>
-        <span className="phase-badge">Audio</span>
-      </div>
-      <div className="generation-grid">
-        {shots.map((shot) => {
-          const status = statuses[shot.shot_number] || shot.status || "pending";
-          return (
-            <article
-              key={shot.shot_number}
-              className={`generation-card generation-card--${status}`}
-              data-shot-number={shot.shot_number}
-              data-status={status}
-            >
-              <div className="generation-frame">
-                {status === "error" ? <AlertTriangle size={18} /> : <Sparkles size={18} />}
-                <span>Shot {shot.shot_number}</span>
-              </div>
-              <div className="generation-meta">
-                <span>{STATUS_LABELS[status] || status}</span>
-                <span>{shot.duration_sec}s</span>
-              </div>
-              {status === "generating" && <ActionProgress label={`Preparing audio for shot ${shot.shot_number}…`} />}
-            </article>
-          );
-        })}
-      </div>
-    </Card>
-  );
+  if (shot.still_frame_url) return ["done", "Preview ready"];
+  return ["pending", "Waiting"];
 }
 
 function FinalVideo({ data, shots, busy, onAssemble }) {
@@ -87,8 +44,8 @@ function FinalVideo({ data, shots, busy, onAssemble }) {
   return (
     <Card component="section" className="generation-stage generation-placeholder generation-placeholder--final" aria-label="Final video" aria-live="polite">
       {busy ? <Loader2 size={30} className="animate-spin" /> : <Clapperboard size={32} />}
-      <p className="eyebrow">Your finished video</p>
-      <h2>{busy ? "Putting it all together…" : data?.url ? "Your video is ready" : "Bring your shots together"}</h2>
+      <p className="eyebrow">{missing.length ? "Video clips" : "Your finished video"}</p>
+      <h2>{busy ? "Putting it all together…" : data?.url ? "Your video is ready" : needsRecovery ? "Some shots need another try" : missing.length ? "Turn your previews into video clips" : "Bring your shots together"}</h2>
       {busy && <ActionProgress label="Combining your shots, sound and transitions…" />}
       {data?.url && <video controls preload="metadata" src={data.url} className="w-full rounded-md my-3" style={{ maxHeight: "60vh" }} aria-label="Final assembled video" />}
       {data?.url && <a href={data.url} target="_blank" rel="noreferrer" className="underline">Open final video</a>}
@@ -96,12 +53,9 @@ function FinalVideo({ data, shots, busy, onAssemble }) {
       {data?.error && <Alert severity="error">{friendlyMessage(data.error, "Your final video could not be finished. Please try again.")}</Alert>}
       <p role="status" style={{ fontWeight: 600 }}>{readyCount} of {shots.length} videos ready</p>
       {missing.length > 0 && <p>{needsRecovery
-        ? "Some shots need another try. Use Regenerate on the affected shot cards, and Generate video on any remaining previews. Then combine your clips here."
+        ? "Use Retry preview for a missing image, or Regenerate for a failed video. Then generate any remaining clips."
         : "Preview your shots, then click 'Generate video' on each one to create its clip. Once every clip is ready, combine them here."}</p>}
       {missing.length === 0 && shots.length > 0 && !data?.url && <p>All your clips are ready. Click 'Create final video' to combine them.</p>}
-      <Button type="button" className="approve-button mt-4 disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy || !shots.length || missing.length > 0} onClick={onAssemble}>
-        {busy ? "Combining…" : data?.url ? "Update final video" : "Create final video"}
-      </Button>
       <p>Keeps your shots’ sound and planned transitions.</p>
     </Card>
   );
@@ -125,7 +79,8 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const [streamCycle, setStreamCycle] = useState(0);
   const [videoSubmitting, setVideoSubmitting] = useState(null);
   const [videoHints, setVideoHints] = useState({});
-  const videoBusy = final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
+  const [previewSubmitting, setPreviewSubmitting] = useState(null);
+  const videoBusy = final?.result?.audio_assembly_pending || final?.status === "running" || final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
 
   useEffect(() => {
     if (!videoBusy) return;
@@ -197,14 +152,27 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const errored = final?.status === "error";
   const result = final?.result;
   const shots = result?.shots || [];
+  const editingSource = shots.find(shot => shot.shot_number === editingShot);
+  const hasUnsavedEdit = Boolean(editingSource && (
+    editValues.description !== (editingSource.description || "") ||
+    editValues.dialogue_text !== (editingSource.dialogue_text || "")
+  ));
+  const editBlocksApproval = hasUnsavedEdit || savingShot !== null;
   const approved = Boolean(result?.generation_approved);
+  const previews = previewSummary(result);
+  const allVideosReady = shots.length > 0 && shots.every(videoReady);
   const latestTrace = trace[trace.length - 1];
   const compilerTimeout = errored && isCompilerTimeout(final?.error_message);
+  const canResumePreviews = approved && shots.length > 0 && !previews.busy && !shots.some(s => s.still_frame_url || s.video_url) &&
+    shots.every(s => !s.has_dialogue || (s.status === "done" && s.dialogue_audio_url)) && (errored || result?.assembly?.provisional);
   const progressNote = compilerTimeout ? "This shot is taking longer than expected." : done ? "Your plan is ready to review." : progressMessage(latestTrace);
 
   async function handleTimeoutRetry() {
     setRetrying(true); setRetryError("");
-    try { onRetry(await retryFailedJob(jobId)); }
+    try {
+      if (canResumePreviews) { setFinal(await retryPreviewPreparation(jobId)); setStreamCycle(n => n + 1); }
+      else onRetry(await retryFailedJob(jobId));
+    }
     catch (err) { setRetryError(err.message); }
     finally { setRetrying(false); }
   }
@@ -214,8 +182,18 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   ])];
 
   const audioReady = shots.length > 0 && shots.every((shot) => (shotStatuses[shot.shot_number] || shot.status) === "done") && !result?.audio_assembly_pending && !result?.assembly?.provisional;
-  const currentStep = result?.final_video?.status === "running" ? 3 : result?.final_video?.url && !result.final_video.stale ? 4 :
-    approved && audioReady ? 2 : done ? 1 : 0;
+  const currentStep = result?.final_video?.url && !result.final_video.stale ? 4 : allVideosReady ? 3 :
+    approved && audioReady && previews.ready > 0 && !previews.busy ? 2 : approved ? 1 : 0;
+
+  async function handlePreviewRetry(shot) {
+    setPreviewSubmitting(shot.shot_number); setError("");
+    try { await retryShotPreview(jobId, shot); }
+    catch (err) { setError(err.message); }
+    finally {
+      try { setFinal(await getJob(jobId)); } catch (err) { setError(err.message); }
+      setPreviewSubmitting(null);
+    }
+  }
 
   async function handleAssemble() {
     setAssembling(true);
@@ -252,6 +230,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   }
 
   async function handleApprove() {
+    if (editBlocksApproval) return;
     setApproving(true);
     setError("");
     try {
@@ -288,13 +267,20 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
     <>
       <section className="generation-area">
         <Box sx={{ mb: 3 }}><Stepper activeStep={currentStep} alternativeLabel>
-          {["Plan", "Review", "Generate", "Finish"].map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
+          {["Your idea & plan", "Shot previews", "Video clips", "Final video"].map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
         </Stepper></Box>
         {approved ? (
-          audioReady ? (
+          audioReady && !previews.busy && !canResumePreviews ? (
             <FinalVideo data={result?.final_video} shots={shots} busy={assembling || result?.final_video?.status === "running"} onAssemble={handleAssemble} />
           ) : (
-            <GenerationGrid shots={shots} statuses={shotStatuses} />
+            <Card className="director-progress-card" data-testid="preview-progress">
+              <div><p className="eyebrow">Shot previews</p><h2>{canResumePreviews ? "Preview preparation paused" : "Preparing your previews"}</h2>
+                <p>We prepare any speech and timing first, then create and check each image. No video clips are being generated yet.</p>
+                <p role="status">{previews.ready} of {previews.total} previews ready</p>
+                {previews.busy && <ActionProgress label={shots.some(s => s.still_frame_status === "generating") ? "Creating and checking your images…" : "Preparing speech and shot details…"} />}
+                {canResumePreviews && <Alert severity="warning">Your written plan and speech are saved. Retry preview preparation to continue.</Alert>}
+              </div>
+            </Card>
           )
         ) : (
           <Card className="director-progress-card">
@@ -303,8 +289,8 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
             </div>
             <div>
               <p className="eyebrow">{done ? "Ready for review" : "Your video"}</p>
-              <h2>{compilerTimeout ? "Planning paused" : done ? "Your shot plan is ready" : "Building your shot plan"}</h2>
-              <p>{progressNote || "Preparing the creative direction…"}</p>
+              <h2>{compilerTimeout ? "Planning paused" : done ? "Your written plan is ready" : "Building your shot plan"}</h2>
+              <p>{done ? (previews.ready === previews.total ? "Your preview images are ready too. Review the plan, then continue to video clips." : "Review the shots below, then click 'Create shot previews' to see them as images. This prepares any speech too; it does not generate video clips.") : progressNote || "Preparing the creative direction…"}</p>
               {!done && !errored && <ActionProgress label={`${progressNote}…`} />}
             </div>
           </Card>
@@ -315,13 +301,14 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
         <div className="shot-panel-header">
           <div>
             <p className="eyebrow">Shot plan</p>
-            <h2>{compilerTimeout ? "Ready to retry" : done ? `${shots.length} ${shots.length === 1 ? "shot" : "shots"}` : "In progress"}</h2>
+            <h2>{shots.length ? `${shots.length} ${shots.length === 1 ? "shot" : "shots"}` : "In progress"}</h2>
           </div>
           <Button type="button" onClick={onReset} className="icon-button" aria-label="Start over"><X size={17} /></Button>
         </div>
 
         <details className="px-4 py-3 text-sm shrink-0">
-          <summary className="cursor-pointer underline" style={{ color: COLORS.marigold }}>Camera guide</summary>
+          <summary className="cursor-pointer underline" style={{ color: COLORS.marigold }}>Advanced details</summary>
+          <details><summary>Processing log</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{trace.map(event => `${event.agent_key}: ${event.note || ""}`).join("\n")}</pre></details>
           <div className="mt-3 flex flex-col gap-4 max-h-[30vh] overflow-y-auto">
             {CAMERA_VOCABULARY.map(({ key, label, options }) => (
               <section key={key} aria-label={`${label} vocabulary`}>
@@ -340,7 +327,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
           </div>
         ))}
 
-        {!done && !errored && (
+        {!done && !errored && !shots.length && (
           <div className="panel-waiting">
             <Loader2 size={22} className="animate-spin" />
             <p>{progressNote || "The first shots will appear here when the plan is complete."}</p>
@@ -349,14 +336,14 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
 
         {compilerTimeout ? <Alert severity="warning" sx={{ m: 2 }} action={<Button color="inherit" disabled={retrying} onClick={handleTimeoutRetry}>{retrying ? "Retrying…" : "Retry"}</Button>}>
           <AlertTitle>This shot is taking longer than expected.</AlertTitle>
-          Planning stopped before it could finish. Retry starts a new attempt with the same brief, script and settings. Your original job stays in history.
+          {canResumePreviews ? "Your written plan and completed speech are saved. Retry continues preview preparation without generating your speech again." : "Planning stopped before it could finish. Retry starts a new attempt with the same brief, script and settings. Your original job stays in history."}
         </Alert> : errored && <Alert severity="error" sx={{ m: 2 }}>{friendlyMessage(final.error_message, "We couldn't finish your video plan. Please try again.")}</Alert>}
         {retrying && <ActionProgress label="Restarting your video plan…" />}
         {retryError && <Alert severity="error" sx={{ m: 2 }}>{friendlyMessage(retryError)}</Alert>}
 
-        {done && result && (
+        {result && shots.length > 0 && (
           <>
-            {result.shots_needing_attention?.length > 0 && <Alert severity="error" sx={{ m: 2 }}>Shots {result.shots_needing_attention.join(", ")} need attention: no still image or video is available. Regenerate these shots before making your final video.</Alert>}
+            {previews.failed > 0 && <Alert severity="warning" sx={{ m: 2 }}>{previews.failed} preview{previews.failed === 1 ? " needs" : "s need"} another try. Use Retry preview on the affected shot. Your other previews are kept.</Alert>}
             <div className="panel-logline">
               <span>The story in one sentence</span>
               <p>{result.script.logline}</p>
@@ -414,15 +401,11 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         <img src={shot.still_frame_url} alt={`Shot ${shot.shot_number} opening frame — ${shot.description}`} className="w-full rounded-md" loading="lazy" />
                         <figcaption className="mt-1 text-xs" style={{ color: COLORS.muted }}>Opening still preview</figcaption>
                       </figure>
-                    ) : (
-                      <div className="reference-image-slot" aria-label={`Still preview for shot ${shot.shot_number}`}>
-                        <ImageIcon size={18} /><span>Opening still</span>
-                        <small>{shot.still_frame_warning ? "Unavailable" : "Available after final shot planning"}</small>
-                      </div>
-                    )}
-                    {shot.still_frame_status === "generating" ? <ActionProgress label={`Regenerating the image for shot ${shot.shot_number}… Video generation follows if accepted.`} /> : shot.still_frame_warning && <Alert severity={shot.video_url ? "warning" : "error"} sx={{ my: 2 }}>
-                      <AlertTitle>{shot.video_url ? "Still preview unavailable" : "This shot couldn't be generated — try regenerating it"}</AlertTitle>
-                      {shot.video_url ? "Your existing video is still available below." : "No still image or video is available for this shot."} {!approved ? "Approve the plan, then use Regenerate below." : "Use Regenerate below to retry this shot only."}
+                    ) : null}
+                    {shot.still_frame_status === "generating" ? <ActionProgress label={`Creating and checking the preview for shot ${shot.shot_number}…`} /> : previewState(shot).key === "failed" && <Alert severity="warning" sx={{ my: 2 }}>
+                      <AlertTitle>This preview couldn't be created</AlertTitle>
+                      {shot.video_url ? "Your existing video is still available below." : "Try this preview again. Video generation is a separate step."}
+                      {approved && shot.compiled_prompt && !shot.video_url && <Button data-testid={`retry-preview-${shot.shot_number}`} disabled={previews.busy || previewSubmitting !== null} onClick={() => handlePreviewRetry(shot)}>Retry preview</Button>}
                     </Alert>}
                     {shot.video_url && <ShotVideo shot={shot} />}
                     <FaceEnhancement jobId={jobId} shot={shot} onRefresh={async () => setFinal(await getJob(jobId))} />
@@ -432,19 +415,19 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
                     {shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
                     {(shot.video_warnings || []).map((warning) => <p className="audio-warning" key={warning}>{friendlyMessage(warning, "Please review this video before approving it.")}</p>)}
-                    {(shot.has_dialogue || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && (shot.still_frame_url || (shot.has_dialogue && result.continuity?.characters?.some((character) => character.character_id && character.image_url && shot.characters_in_shot?.includes(character.name)))) && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
-                      <Button type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
+                    {approved && !errored && (shot.has_dialogue || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && (shot.still_frame_url || (shot.has_dialogue && result.continuity?.characters?.some((character) => character.character_id && character.image_url && shot.characters_in_shot?.includes(character.name)))) && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
+                      <Button id={`generate-video-${shot.shot_number}`} type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
                         {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate video · speaking · 720p" : `Generate video · ${Math.max(4, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
                       </Button>
                     )}
                     <div className="shot-technical">
                       <span><Clapperboard size={12} /> {shot.camera_angle} · {shot.camera_movement}</span>
-                      <span><Clock3 size={12} /> {shot.duration_sec}s · {shot.lighting}</span>
+                      <span><Clock3 size={12} /> {Number(shot.duration_sec.toFixed(1))}s · {shot.lighting}</span>
                     </div>
 
                     {shot.compiled_prompt?.trim() && (
                       <details className="my-3 text-xs">
-                        <summary className="cursor-pointer" style={{ color: COLORS.muted }}>View technical prompt</summary>
+                        <summary className="cursor-pointer" style={{ color: COLORS.muted }}>Advanced details · technical prompt</summary>
                         <p className="mt-2 whitespace-pre-wrap break-words leading-relaxed" style={{ overflowWrap: "anywhere" }}>{shot.compiled_prompt}</p>
                       </details>
                     )}
@@ -468,10 +451,10 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         </>
                       ) : (
                         <>
-                          <Button type="button" onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot text ${shot.shot_number}`}><Pencil size={13} /> Edit text</Button>
-                          <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title={approved ? "Restart this shot only" : "Approve the plan first"}>
+                          <Button type="button" disabled={previews.busy || videoBusy || editBlocksApproval} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot text ${shot.shot_number}`}><Pencil size={13} /> Edit text</Button>
+                          {(shot.video_url || shot.video_status === "error") && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate
-                          </Button>
+                          </Button>}
                           {!shot.has_dialogue && shot.video_provider !== "hedra" && shot.video_url && (
                             <Button type="button" onClick={() => handleRegenerate(shot.shot_number, true)} disabled={!(videoHints[shot.shot_number] || "").trim() || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action" style={{ background: "transparent", border: `1px solid ${COLORS.border}`, fontSize: "0.62rem", padding: "0.3rem 0.45rem" }} aria-label={`Edit shot video ${shot.shot_number}`}>
                               Edit Shot
@@ -485,23 +468,33 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
               })}
             </div>
 
-            {!approved && (
-              <div className="approve-footer">
-                <p>{shots.some((shot) => shot.has_dialogue) ? "Approve your plan to prepare the voice recordings." : "Approve your plan when you're happy with the shots."}</p>
-                {approving && <ActionProgress label="Saving your approval…" />}
-                <Button type="button" onClick={handleApprove} disabled={approving} className="approve-button">
-                  {approving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-                  {approving ? "Approving…" : "Approve shot plan"}
-                </Button>
-              </div>
-            )}
-
-            {approved && <p className="approved-note"><Check size={14} /> {audioReady ? (shots.every(videoReady) ? "All shot videos ready · combine your clips in the final video panel" : shots.some((shot) => ["submitting", "processing"].includes(shot.video_status)) ? "Plan approved · video generation in progress" : "Plan approved · generate your shot videos next; retry any failed shots") : "Plan approved · preparing audio"}</p>}
+            {approved && !previews.busy && audioReady && previews.ready > 0 && !errored && <p className="approved-note"><Check size={14} /> {allVideosReady ? "All clips ready to combine" : "Previews are images. Generate each video clip when you're ready."}</p>}
           </>
         )}
 
         {error && <Alert severity="error" sx={{ m: 2 }}>{friendlyMessage(error)}</Alert>}
       </Card>
+      {(done || canResumePreviews) && shots.length > 0 && <Box component="footer" data-testid="job-primary-action" sx={{ position: "fixed", bottom: 0, left: { xs: 0, md: 240 }, right: 0, zIndex: 1100, bgcolor: "background.paper", borderTop: 1, borderColor: "divider", p: 2, display: "flex", flexWrap: "wrap", gap: 2, alignItems: "center", justifyContent: "space-between", boxShadow: "0 -6px 28px #0000000a" }}>
+        <Box role="status">{editingShot !== null ? <>
+          <Typography fontWeight={600}>Editing shot {editingShot}</Typography>
+          <Typography id="shot-edit-approval-hint" variant="body2">{savingShot !== null ? "Saving and checking your edit…" : hasUnsavedEdit ? "Save your edit first" : "No unsaved changes"}</Typography>
+        </> : canResumePreviews ? "Preview preparation paused · your plan is saved" : !approved ? (previews.ready ? `${previews.ready} of ${shots.length} previews ready` : "No previews yet · your written plan is ready") : previews.busy ? `${previews.ready} of ${shots.length} previews ready · working…` : `${shots.filter(videoReady).length} of ${shots.length} videos ready`}</Box>
+        {canResumePreviews ? <Button variant="contained" disabled={retrying} onClick={handleTimeoutRetry}>Retry preview preparation</Button>
+          : !approved ? <Button variant="contained" data-testid="create-previews" aria-describedby={editingShot !== null ? "shot-edit-approval-hint" : undefined} disabled={approving || editBlocksApproval} onClick={handleApprove}>{approving ? "Starting…" : previews.ready === shots.length ? "Generate video clips" : "Create shot previews"}</Button>
+          : previews.busy ? <span>Keep this page open or come back later.</span>
+          : allVideosReady ? <Button variant="contained" disabled={assembling || result.final_video?.status === "running"} onClick={handleAssemble}>{result.final_video?.url ? "Update final video" : "Create final video"}</Button>
+          : previews.failed ? <span>Retry failed previews on their shot cards.</span>
+          : previews.ready > 0 && audioReady && !errored ? <Stack spacing={0.5}>
+              <Button variant="contained" data-testid="generate-clips-step" onClick={() => {
+                const button = shots.map(shot => document.getElementById(`generate-video-${shot.shot_number}`)).find(Boolean);
+                button?.scrollIntoView({ behavior: "smooth", block: "center" });
+                button?.focus({ preventScroll: true });
+              }}>Generate video clips</Button>
+              <Typography variant="caption">Choose a shot to generate. Each clip starts only when you click its button.</Typography>
+            </Stack>
+          : <span>Preparing your shot previews…</span>}
+      </Box>}
+      <Box sx={{ height: { xs: 150, md: 100 }, gridColumn: "1 / -1" }} />
     </>
   );
 }

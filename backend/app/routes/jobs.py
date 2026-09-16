@@ -89,7 +89,7 @@ def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequ
         raise HTTPException(502, "Video regeneration failed or is uncertain; inspect shot status before retrying") from error
 
 
-def _recover_missing_still(job_id, number, token, expected_attempt, hint):
+def _recover_missing_still(job_id, number, token, expected_attempt, hint, generate_video=True):
     from app.services import still_frame_service, video_generation_service
     with SessionLocal() as db:
         result = None
@@ -101,7 +101,7 @@ def _recover_missing_still(job_id, number, token, expected_attempt, hint):
             still_frame_service.generate_still_frames(result, job_id=job_id, emit=emit, shot_numbers={number})
             if not job_service.finish_still_retry(db, job_id, number, token, result):
                 return
-            if shot.get("still_frame_url"):
+            if shot.get("still_frame_url") and generate_video:
                 # Reuse Module S/R, including existing dialogue audio. No replanning/TTS.
                 video_generation_service.start(db, job_id, number, regenerate=True,
                     expected_attempt=expected_attempt, hint=hint)
@@ -112,6 +112,24 @@ def _recover_missing_still(job_id, number, token, expected_attempt, hint):
                 job_service.finish_still_retry(db, job_id, number, token, result)
             job_service.append_event(db, job_id, "still_frame", "WARNING: Shot " + str(number)
                 + ": regeneration did not complete. Check the shot's current output before retrying. " + type(error).__name__)
+
+
+@router.post("/{job_id}/shots/{shot_number}/preview/retry", status_code=202)
+def retry_preview(job_id: str, shot_number: int, payload: VideoRegenerateRequest,
+                  background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Recover an image only. Video generation remains a separate paid action."""
+    try:
+        result, _ = job_service.video_source(db, job_id, shot_number)
+        if result.get("audio_assembly_pending"):
+            raise ValueError("Preview preparation is still running; please wait")
+        token = job_service.claim_still_retry(db, job_id, shot_number, payload.expected_attempt)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    background_tasks.add_task(_recover_missing_still, job_id, shot_number, token,
+                              payload.expected_attempt, "", False)
+    return {"status": "generating", "shot_number": shot_number}
 
 
 @router.get("/{job_id}/shots/{shot_number}/video-request")
@@ -396,6 +414,8 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
     if not result:
         raise HTTPException(status_code=409, detail="completed job has no stored result")
 
+    if result.get("generation_approved"):
+        return _job_out(job, result)
     updated_result = dict(result)
     updated_result["generation_approved"] = True
     updated_result["audio_assembly_pending"] = any(shot.get("has_dialogue") for shot in result.get("shots", []))
@@ -422,6 +442,26 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
     background_tasks.add_task(_run_voice_generation_in_background, job_id)
     db.refresh(job)
     return _job_out(job, updated_result)
+
+
+def _retry_preview_preparation(job_id):
+    from app.agents.director import finalize_audio_assembly
+    with SessionLocal() as db:
+        finalize_audio_assembly(db, job_id)
+
+
+@router.post("/{job_id}/previews/retry", response_model=JobOut)
+def retry_preview_preparation(job_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Resume after post-audio preparation failed, keeping the plan and real audio."""
+    try:
+        job_service.claim_preview_preparation(db, job_id)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    background_tasks.add_task(_retry_preview_preparation, job_id)
+    job = job_service.get_job(db, job_id)
+    return _job_out(job, job_service.job_result(job))
 
 
 @router.post("/{job_id}/shots/{shot_number}/regenerate", response_model=JobOut)
