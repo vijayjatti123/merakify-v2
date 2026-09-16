@@ -298,11 +298,10 @@ programmatic_reserved_words afterward, making the FINAL prompt 100-150 words. Ai
 target, not the minimum. Use 3-5 visual sentences including the no-text guard; code adds the audio guard.
 Use semicolons when necessary to fit these dimensions without a labeled seven-item list.
 Front-load the subject within the first 20-30 words, using its existing name where supplied.
-Never paste a stored description as a tag, quotation, apposition list or repeated sentence fragment.
-Integrate ALL identity facts grammatically into fresh sentences: same physical traits, garment
-colors and accessories, different sentence construction each shot. A locked identity locks FACTS,
-not its original prose. Never write "described as" or "locked description states". Preserve names,
-and identity facts. Code owns dialogue text, exact reference URLs and the reference-consistency sentence.
+Integrate supplied identity facts naturally. When has_locked_identity is true, their exact wording
+may repeat; do not spend reasoning or change facts merely to make a locked description sound new.
+Never write "described as" or "locked description states". Code owns dialogue text, exact reference
+URLs and the reference-consistency sentence.
 Age, nationality and occupation are identity facts too: preserve them, not just visible clothing.
 Use the structured gender in character_references and speaker_reference, never infer gender from
 a name, image, wardrobe, voice or a description. When neutral_pronouns_required is true, use the
@@ -316,40 +315,29 @@ is true, open on that object/detail, not a character merely retained in the upst
 Do not force an off-camera person into view. The character's reference remains attached by code;
 preserve visible identity facts only when the character is actually described as visible.
 For a visible vault character, use the opening sentence to introduce their name, supplied age, nationality
-and occupation in natural prose; vary their order from shot to shot. Weave their physical traits,
+and occupation in natural prose. Weave their physical traits,
 clothing and accessories through the action/light sentences. Privately check every supplied fact
 against the finished prose before returning; a reference URL does not excuse an omitted fact.
-Vary grammar rather than repeating an accessory list: one shot can describe clothing through the
-action, another can place hair/age in its opening and carry garments into the lighting sentence.
+Locked accessory/wardrobe facts may repeat unchanged; only their non-locked action or mood context needs variation.
 has_image_reference means code will append the exact URL and an explicit visual-consistency sentence.
 Do not generate a URL, reference placeholder, or reference-consistency sentence yourself. Describe
 the supplied identity naturally; programmatic insertion preserves the reference by construction.
 Use no more than visual_sentence_max sentences including the no-text guard, reserving space for
 the reference and audio sentences that code inserts. Aim for the supplied visual_word_target (120-130 after code insertion),
 leaving room below 150; preserve every identity fact rather than spending this budget on filler.
-Across the entire job, vary sentence structure, verbs and descriptive phrasing for the same scene
-and style bible. Restate the facts; do not repeat descriptive fragments except the grounded facts below.
-When has_locked_identity is true, literal identity/appearance facts from that character's supplied
-description may repeat for the SAME character within a scene or across scenes. This does not permit
-repeated action, setting, or camera prose beside those facts; do not paste the entire description.
-The other literal
-repetition allowed is required guards, Render style: label, proper names, exact dialogue/reference
-URLs, hardware identifiers and short factual anchors needed for a match cut. Do not recycle
-long palette/texture clauses. Give each shot a distinct emphasis while preserving the whole bible.
-Before drafting a multi-shot job, assign each style sentence a different grammatical opening:
-rendering-led, palette-led, texture-led, light-led, shadow-led, material-led, color-response-led,
-or grain-led. This varies wording, not the actual look. "Soft light from front-left" can become
-"The left-front key models..." or "...under the same softly diffused front-left illumination";
-do not repeat the full lighting clause to preserve a direction that only needs a short fact anchor.
-Unless grounded in the job's supplied rendering, palette or texture_grain field across DIFFERENT
-scenes, a clause such as "restrained natural rendering with true material fidelity" must not recur:
-one shot might specify faithful steel texture, the next natural tonal separation; retain both facts
-without the shared stock sentence. Required names/guards and those grounded cross-scene style facts
-are exceptions, descriptive boilerplate is not. Across different scenes, a genuine combination of
-contiguous locked excerpts from two or more of rendering, palette and texture_grain may repeat too;
-join them only with simple connectors (and/with/plus/alongside), retaining their exact content words.
-Do not assume synonyms, reordered words or invented attributes are grounded. A "Render style:" label alone grants no exemption.
-Preserve scene-specific lighting directions; the global-style exception does not cover lighting_motif.
+REPETITION CATEGORIES:
+LOCKED FACTS: Vault-grounded identity/appearance when has_locked_identity is true; the job's
+rendering, palette and texture_grain values; supplied lens specifications and hardware_reference.
+These facts may repeat verbatim within or across scenes. Preserve their actual values, including
+focal length and focus depth. Numeric versus spelled-out lens notation is equivalent. No requirement
+to find fresh synonyms for locked facts, vary their order, or invent a different technical setup.
+A combination of exact locked style excerpts may repeat using simple connectors. Do not invent
+attributes or assume an unrelated phrase is locked merely because it follows "Render style:".
+CREATIVE PROSE: all remaining action, narrative, mood, setting embellishment and optical explanation.
+Vary this prose across shots. The exemption never extends from a fact into its surrounding sentence.
+Existing exact guards, proper names, dialogue/reference URLs and match-cut anchors retain their rules.
+Physical lighting setup is only reusable under the existing unchanged scene/source/position rule;
+the global-style category does not treat lighting_motif as an unconditional locked fact.
 Vary long object noun phrases too: "the cup with its red handle" can become "the red-handled cup"
 or "the cup's handle, still red". Preserve the exact color/material facts without copying a long
 noun phrase on every appearance; short proper names may repeat.

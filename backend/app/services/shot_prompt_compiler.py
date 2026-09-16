@@ -1,3 +1,4 @@
+from app.services.repetition_categories import classify_repetition_tokens, creative_windows
 """One text-only compiler; consumes assembled data without revising upstream shots."""
 import copy
 import json
@@ -445,119 +446,6 @@ def _lighting_setup_phrases(prose):
     return contexts
 
 
-def _vault_fact_tokens(text):
-    # Ignore grammatical list glue, never synonyms or reordered content words.
-    return tuple(word for word in re.findall(r"\w+", text.casefold())
-                 if word not in {"a", "an", "the", "her", "his", "their", "its", "and"})
-
-
-def _vault_fact_ids(phrase, source, *, boundary=True):
-    needle = _vault_fact_tokens(" ".join(phrase))
-    if len(needle) < 6:
-        return set()
-    ids = set()
-    for ref in source.get("character_references", []):
-        locked = ref.get("locked_vault_description")
-        if not ref.get("character_id") or not isinstance(locked, str):
-            continue
-        words = _vault_fact_tokens(str(ref.get("name") or "") + " " + locked)
-        if any(words[i:i + len(needle)] == needle for i in range(len(words) - len(needle) + 1)):
-            ids.add(ref["character_id"])
-    if boundary:
-        # Sliding windows can straddle a locked fact and its neighboring prose.
-        # Permit at most two edge words around >=6 grounded content words; an
-        # eight-word generic/action clause still has its own unexempted window.
-        for left, right in ((0, 1), (1, 0), (0, 2), (2, 0), (1, 1)):
-            edge = phrase[:left] + (phrase[-right:] if right else ())
-            if not set(edge) <= {"sits", "stands", "walks", "holds", "looks", "turns", "pauses", "smiles"}:
-                continue
-            fragment = phrase[left:len(phrase)-right if right else None]
-            ids.update(_vault_fact_ids(fragment, source, boundary=False))
-    return ids
-
-
-def _job_style_fact(phrase, bible):
-    """Ground in exact locked spans, never the output's style label.
-
-    Lighting motifs may contain scene-specific source positions; those remain
-    subject to the existing physical-lighting continuity check instead.
-    """
-    if not isinstance(bible, dict):
-        return False
-    needle = _vault_fact_tokens(" ".join(phrase))
-    if len(needle) < 6:
-        return False
-    for field in ("rendering", "palette", "texture_grain"):
-        value = bible.get(field)
-        if not isinstance(value, str):
-            continue
-        words = _vault_fact_tokens(value)
-        if any(words[i:i + len(needle)] == needle for i in range(len(words) - len(needle) + 1)):
-            return True
-    # A combined clause can join exact excerpts from different locked fields.
-    # No bag-of-words/synonym matching, arbitrary omissions, or lighting fields.
-    # The optional suffix in the literal rendering compound "live-action-style"
-    # is grammatical glue ONLY for this multi-field path; the single-field exact
-    # matcher above is unchanged.
-    def combined_tokens(text):
-        text = re.sub(r"\blive[- ]action[- ]style\b", "live action", text, flags=re.I)
-        return _vault_fact_tokens(text)
-    combined = combined_tokens(" ".join(phrase))
-    fields = {key: combined_tokens(value) for key, value in bible.items()
-              if key in {"rendering", "palette", "texture_grain"} and isinstance(value, str)}
-    joins = {"with", "plus", "alongside"}  # Articles and "and" already normalize away.
-
-    def matches(offset, used):
-        if offset == len(combined):
-            return len(used) >= 2
-        if used and combined[offset] in joins:
-            offset += 1
-        for field, words in fields.items():
-            if field in used:
-                continue
-            # At least two content tokens establish each contributing field.
-            for end in range(offset + 2, len(combined) + 1):
-                span = combined[offset:end]
-                if any(words[i:i + len(span)] == span for i in range(len(words) - len(span) + 1)):
-                    if matches(end, used | {field}):
-                        return True
-        return False
-
-    return matches(0, set())
-
-
-def _technical_fact_boundaries(prose, source):
-    """Exclude exact supplied lens facts, not the optical explanation beside them.
-
-    Unique boundary tokens prevent sliding windows from joining unrelated words
-    across a removed fact. No free-form synonym inference or whole-clause waiver.
-    Only a concrete millimeter lens specification establishes provenance here.
-    """
-    lens = source.get("lens") or ""
-    focal = re.search(r"\b(\d+(?:\.\d+)?)\s*mm\b", lens, re.I)
-    if not focal:
-        return prose
-    value = focal.group(1)
-    aliases = [re.escape(value)]
-    # Spelling out a focal length is notation, not a change to the locked fact.
-    units = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
-    tens = "zero ten twenty thirty forty fifty sixty seventy eighty ninety".split()
-    if value.isdigit() and 0 < int(value) < 100:
-        n = int(value)
-        words = units[n] if n < 20 else tens[n // 10] + (" " + units[n % 10] if n % 10 else "")
-        aliases.append(r"[-\s]+".join(words.split()))
-    measure = r"(?:" + "|".join(aliases) + r")[-\s]*(?:mm|millimet(?:er|re)s?)"
-    def literal(text):
-        return r"[-\s]+".join(re.escape(word) for word in re.findall(r"\w+", text))
-    prefix, suffix = literal(lens[:focal.start()]), literal(lens[focal.end():])
-    pattern = r"\b" + (prefix + r"[-\s]+" if prefix else "") + measure
-    pattern += (r"[-\s]+" + suffix if suffix else "")
-    if not re.search(r"\blens\b", lens, re.I):
-        pattern += r"(?:[-\s]+lens)?"
-    pattern += r"\b"
-    return re.sub(pattern, f" technicalfactboundary{source['shot_number']} ", prose, flags=re.I)
-
-
 def validate_compiled(response, payload):
     """Deterministic checks plus a bounded compiler retry; no upstream QA changes.
 
@@ -594,7 +482,7 @@ def validate_compiled(response, payload):
                 if re.search(re.escape(ref["name"]) + r"\s+(?:screen[- ])?" + side + r"\b", source.get("composition_note") or "", re.I) and not re.search(r"\b" + side + r"\b", value, re.I):
                     problems.append(f"preserve {ref['name']}'s supplied {side} composition placement")
             description = ref.get("description") or ""
-            if len(description.split()) >= 6 and description.rstrip(".!? ").casefold() in value.casefold():
+            if not ref.get("locked_vault_description") and len(description.split()) >= 6 and description.rstrip(".!? ").casefold() in value.casefold():
                 problems.append("stored description pasted verbatim; integrate identical facts in fresh grammar")
             if ref.get("character_id") or ref.get("image_url"):
                 for field in ("name", "image_url"):
@@ -684,9 +572,11 @@ def validate_compiled(response, payload):
             technical = re.sub(re.escape(reference), " hardwareanchor ", technical, flags=re.I)
             technical = re.sub(r"['’]s\b", "", technical)
             tokens = re.findall(r"\w+", technical.casefold())
+            categories = classify_repetition_tokens(technical, source, payload.get("style_bible"))
             stop = {"the", "a", "an", "of", "to", "with", "as", "and", "s", "like", "its", "in", "on"}
             phrases = {tuple(tokens[i:i+3]) for i in range(len(tokens)-2)
                        if "hardwareanchor" in tokens[i:i+3]
+                       and all(t["category"] == "CREATIVE_PROSE" for t in categories[i:i+3])
                        and not any(t in stop for t in tokens[i:i+3])}
             repeats = phrases & hardware_seen.keys()
             if repeats:
@@ -694,44 +584,26 @@ def validate_compiled(response, payload):
                 errors.append(f"Shot {source['shot_number']}: repeated hardware phrasing: {phrase}; keep the hardware identity, vary its grounded optical explanation")
             for phrase in phrases:
                 hardware_seen[phrase] = source["shot_number"]
-        # Hardware identifiers already have their own exemption/check above.
-        # Add only source-grounded lens spans, never the surrounding explanation.
-        prose = _technical_fact_boundaries(prose, source)
-        for literal in (TEXT_GUARD, AUDIO_GUARD, source.get("dialogue_text") or "", reference or ""):
+        for literal in (TEXT_GUARD, AUDIO_GUARD, source.get("dialogue_text") or ""):
             if literal:
                 prose = prose.replace(literal, " ")
         prose = re.sub(r"https?://\S+|\[Shot[^\]]*\]", " ", prose)
-        # A fully grounded style sentence must not create false repeated windows
-        # with unrelated words on either side (e.g. "before her. Render style:").
-        # Keep its interior words checked, including for same-scene repetition.
-        def style_boundary(match):
-            body = match.group(1)
-            if not _job_style_fact(tuple(re.findall(r"\w+", body.casefold())), payload.get("style_bible")):
-                return match.group(0)
-            boundary = f"styleboundary{source['shot_number']}"
-            return f" {boundary} {body} {boundary} "
-        prose = re.sub(r"\bRender style:\s*([^.!?]+)[.!?]", style_boundary, prose, flags=re.I)
         # Required structural label, not descriptive prose or evidence of grounding.
         prose = re.sub(r"\bRender style:\s*", " ", prose, flags=re.I)
         # Reference-consistency instructions are technical guards, not descriptive
         # boilerplate; exclude their fixed introductory wording, just like URLs.
         prose = re.sub(r"(?:maintain(?:ing)?|preserv(?:e|ing)) visual consistency with (?:the supplied |the |this )?reference(?: image)?(?: at)?", " ", prose, flags=re.I)
-        words = re.findall(r"\w+", prose.casefold())
-        phrases = {tuple(words[i:i+8]) for i in range(len(words)-7)}
+        classified = classify_repetition_tokens(prose, source, payload.get("style_bible"))
+        phrases = creative_windows(classified)
         setups = _lighting_setup_phrases(prose)
-        vault_facts = {phrase: _vault_fact_ids(phrase, source) for phrase in phrases}
-        style_facts = {phrase for phrase in phrases if _job_style_fact(phrase, payload.get("style_bible"))}
-        scene = source.get("scene_number")
+        # Physical light continuity retains its separate scene-specific policy.
         repeats = [phrase for phrase in phrases if phrase in seen and not all(
-            (group == lighting_group and signatures & setups.get(phrase, set()))
-            or (scene is not None and prior_scene is not None
-                and (prior_ids & vault_facts[phrase]
-                     or (scene != prior_scene and phrase in style_facts)))
-            for group, signatures, prior_scene, prior_ids in seen[phrase])]
+            group == lighting_group and signatures & setups.get(phrase, set())
+            for group, signatures in seen[phrase])]
         if repeats:
             errors.append(f"Shot {source['shot_number']}: repeated descriptive clause; vary phrasing: {' '.join(sorted(repeats)[0])}")
         for phrase in phrases:
-            seen.setdefault(phrase, []).append((lighting_group, setups.get(phrase, set()), scene, vault_facts[phrase]))
+            seen.setdefault(phrase, []).append((lighting_group, setups.get(phrase, set())))
     for boundary in payload["boundaries"]:
         if boundary["type"] == "match cut":
             left, right = (int(n) for n in boundary["between"].split("-"))

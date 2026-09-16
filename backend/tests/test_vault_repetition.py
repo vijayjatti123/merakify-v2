@@ -33,20 +33,22 @@ class VaultRepetitionTests(unittest.TestCase):
         p,r=self.case(); p['shots'][1]['scene_number']=1
         self.assertFalse(self.repeated(p,r))
 
-    def test_unknown_scene_still_rejected(self):
+    def test_locked_identity_independent_of_scene(self):
         p,r=self.case(); p['shots'][1]['scene_number']=None
-        self.assertTrue(self.repeated(p,r))
+        self.assertFalse(self.repeated(p,r))
 
-    def test_different_vault_id_still_rejected(self):
+    def test_independently_grounded_identities_allowed(self):
         p,r=self.case(); p['shots'][1]['character_references'][0]['character_id']='different-meera'
-        self.assertTrue(self.repeated(p,r))
+        self.assertFalse(self.repeated(p,r))
 
     def test_missing_provenance_still_rejected(self):
-        p,r=self.case(); p['shots'][0]['character_references'][0].pop('locked_vault_description')
+        p,r=self.case()
+        for shot in p['shots']: shot['character_references'][0].pop('locked_vault_description')
         self.assertTrue(self.repeated(p,r))
 
     def test_changed_description_still_rejected(self):
-        p,r=self.case(); p['shots'][1]['character_references'][0]['locked_vault_description']='A different outfit.'
+        p,r=self.case()
+        for shot in p['shots']: shot['character_references'][0]['locked_vault_description']='A different outfit.'
         self.assertTrue(self.repeated(p,r))
 
     def test_real_generic_style_rejection_remains(self):

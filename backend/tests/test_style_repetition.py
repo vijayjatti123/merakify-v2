@@ -1,6 +1,7 @@
 import copy
 import unittest
 from test_vault_repetition import VaultRepetitionTests
+from app.services.repetition_categories import classify_repetition_tokens
 
 CLAUSE = 'restrained natural rendering carrying fine grain across the'
 
@@ -27,10 +28,10 @@ class StyleRepetitionTests(unittest.TestCase):
             self.p['style_bible'] = bible
             self.assertTrue(self.errors())
 
-    def test_same_or_unknown_scene_rejects(self):
+    def test_locked_style_independent_of_scene(self):
         for scene in (1, None):
             self.p['shots'][1]['scene_number'] = scene
-            self.assertTrue(self.errors())
+            self.assertFalse(self.errors())
 
     def test_generic_prose_not_exempted_by_style_label(self):
         for shot in self.r['shots']:
@@ -50,7 +51,7 @@ class StyleRepetitionTests(unittest.TestCase):
     def test_mixed_scene_history(self):
         self.p['shots'].append({**copy.deepcopy(self.p['shots'][0]), 'shot_number': 3})
         self.r['shots'].append({'shot_number': 3, 'compiled_prompt': CLAUSE + '.'})
-        self.assertTrue(any('Shot 3' in e for e in self.errors()))
+        self.assertFalse(self.errors())
 
     def test_no_word_bag_or_synonym_matching(self):
         self.p['style_bible'] = {'rendering': 'grain fine carrying natural restrained rendering across the'}
@@ -64,11 +65,11 @@ class StyleRepetitionTests(unittest.TestCase):
             shot['compiled_prompt'] += ' She opens the notebook slowly beside the window every morning.'
         self.assertTrue(self.errors())
 
-    def test_grounded_sentence_same_scene_still_rejected(self):
+    def test_grounded_sentence_same_scene_allowed(self):
         for shot in self.r['shots']:
             shot['compiled_prompt'] = 'Before her. Render style: ' + CLAUSE + ' image.'
         self.p['shots'][1]['scene_number'] = 1
-        self.assertTrue(self.errors())
+        self.assertFalse(self.errors())
 
     def test_real_combined_rendering_palette_clause(self):
         self.p, self.r = self.fixture.case('natural live action rendering with muted warm browns')
@@ -78,18 +79,14 @@ class StyleRepetitionTests(unittest.TestCase):
         }
         self.assertFalse(self.errors())
         self.p['shots'][1]['scene_number'] = 1
-        self.assertTrue(self.errors())  # Same-scene extension is identity-only.
+        self.assertFalse(self.errors())  # Locked job style is global.
 
-    def test_combination_requires_distinct_fields_and_exact_spans(self):
-        self.p, self.r = self.fixture.case('restrained natural rendering with muted warm brown surfaces')
-        self.p['style_bible'] = {'rendering': 'restrained natural rendering', 'palette': 'muted warm brown surfaces'}
-        self.assertFalse(self.errors())
-        self.p['style_bible'] = {'rendering': 'restrained natural rendering and muted warm brown surfaces'}
-        self.assertTrue(self.errors())  # Not an exact single-field span ("with" was added).
-        self.p['style_bible'] = {'rendering': 'restrained natural rendering', 'palette': 'warm muted brown surfaces'}
-        self.assertTrue(self.errors())
-        self.p['style_bible'] = {'rendering': 'restrained natural rendering', 'lighting_motif': 'muted warm brown surfaces'}
-        self.assertTrue(self.errors())
+    def test_unsupported_words_remain_creative(self):
+        p,r=self.fixture.case('natural live action rendering with vivid golden browns')
+        bible={'rendering':'natural live action rendering','palette':'muted warm browns'}
+        tokens=classify_repetition_tokens(r['shots'][0]['compiled_prompt'],p['shots'][0],bible)
+        self.assertTrue(all(t['category']=='CREATIVE_PROSE' for t in tokens if t['text'] in {'vivid','golden','browns'}))
+        self.assertTrue(all(t['category']=='LOCKED_FACT' for t in tokens if t['text'] in {'natural','live','action','rendering'}))
 
     def test_combined_facts_do_not_swallow_action_or_new_attributes(self):
         self.p, self.r = self.fixture.case('natural live action rendering with muted warm browns')
@@ -99,4 +96,5 @@ class StyleRepetitionTests(unittest.TestCase):
         self.assertTrue(self.errors())
         self.p, self.r = self.fixture.case('natural live action rendering with vivid golden browns')
         self.p['style_bible'] = {'rendering':'natural live action rendering', 'palette':'muted warm browns'}
-        self.assertTrue(self.errors())
+        tokens=classify_repetition_tokens(self.r['shots'][0]['compiled_prompt'],self.p['shots'][0],self.p['style_bible'])
+        self.assertTrue(all(t['category']=='CREATIVE_PROSE' for t in tokens if t['text'] in {'vivid','golden','browns'}))

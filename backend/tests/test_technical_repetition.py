@@ -22,7 +22,7 @@ class TechnicalRepetitionTests(unittest.TestCase):
         self.assertFalse(self.repetition("85mm shallow-depth lens, the Arri Alexa keeps"))
 
     def test_ungrounded_focal_length_or_depth_is_not_exempt(self):
-        text = "eighty-five-millimeter shallow-depth lens, the Arri Alexa keeps"
+        text = "eighty-five-millimeter shallow-depth lens preserves exceptional bright background contours"
         for lens in ("", "normal lens", "50mm shallow depth", "85mm deep focus"):
             self.assertTrue(self.repetition(text, lens), lens)
 
