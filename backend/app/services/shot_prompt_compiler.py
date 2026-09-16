@@ -154,12 +154,18 @@ def word_range(payload, shot):
 def first_movement(value):
     """Reduce compound instructions in compiler input only; never edit the shot."""
     value = str(value or "static").strip()
-    parts = re.split(r"\s+(?:then|and then|followed by|while|and|with)\s+|[,;/+&]", value, maxsplit=1, flags=re.I)
+    # Recognize explicit absence of movement before discarding comma qualifiers.
+    # "none, locked-off tripod" starts with a stationary instruction, not a
+    # movement named "none". Do not scan later stages and override a real pan.
+    normalized = re.sub(r"[‐‑‒–—−]", "-", value)
+    parts = re.split(r"\s+(?:then|and then|followed by|while|and|with)\s+|[,;/+&]", normalized, maxsplit=1, flags=re.I)
     first = parts[0].strip()
+    if re.fullmatch(r"(?:none|no (?:camera )?(?:movement|motion)|(?:camera )?(?:stationary|motionless|unmoving))", first, re.I):
+        return "static", value != "static"
     moves = list(MOVES.finditer(first))
     if len(moves) > 1:
         first = first[:moves[1].start()].rstrip(" -")
-    if re.search(r"\b(?:static|locked(?:-off)?|fixed)\b", first, re.I):
+    if re.search(r"\b(?:static|locked(?:[- ]off)?|fixed|stationary|motionless|unmoving)\b", first, re.I):
         first = "static"  # Speed and settling cannot modify a motionless camera.
     return first or "static", first != value
 
