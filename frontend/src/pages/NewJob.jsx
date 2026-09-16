@@ -1,6 +1,6 @@
 import { Sparkles, FileText, ChevronUp, ImagePlus, Loader2, Plus, X, Smartphone, Monitor, Clock3 } from "lucide-react";
 import { useState } from "react";
-import { Alert, Button, Card, TextField, ToggleButton, ToggleButtonGroup } from "@mui/material";
+import { Alert, Button, Card, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import ActionProgress from "../components/ActionProgress";
 import { friendlyMessage } from "../utils/presentation";
 
@@ -62,6 +62,18 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const effectiveLanguage = language === "Other" ? customLanguage.trim() : language;
   const effectiveDuration = duration === "Custom" ? customDuration.trim() : duration;
   const canSubmit = Boolean(brief.trim() && effectiveDuration && effectiveLanguage && !submitting);
+  // Guidance mirrors ClarifierPanel's existing gates; it does not control activation.
+  const needsRefinementCharacters = brief.trim().length < 20;
+  const needsRefinementWords = brief.trim().split(/\s+/).length < 4;
+  const refinementHint = scriptMode
+    ? "AI refinement is available in the standard idea input — choose ‘Use an idea instead’ below."
+    : needsRefinementCharacters && needsRefinementWords
+      ? "Describe your video idea (a full sentence works best) to unlock AI refinement."
+      : needsRefinementWords
+        ? "A few more words will unlock AI refinement."
+        : needsRefinementCharacters
+          ? "Add a little more detail to reach 20 characters and unlock AI refinement."
+          : "";
 
   function handleLanguageChange(event) {
     setLanguage(event.target.value);
@@ -198,6 +210,10 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               minRows={3} autoFocus sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7 } }} /> :
               <BriefCharacterInput value={brief} onChange={setBrief} selections={characterSelections}
                 onSelections={setCharacterSelections} disabled={collapsed || submitting} />}
+            {!collapsed && !submitting && refinementHint && <Typography variant="body2" color="text.secondary"
+              role="status" aria-live="polite" data-testid="clarifier-activation-hint" sx={{ mt: -1.5 }}>
+              {refinementHint}
+            </Typography>}
             <ClarifierPanel brief={brief} onUse={setBrief} disabled={collapsed || scriptMode || submitting}
               knownFields={{ duration: effectiveDuration, aspect_ratio: aspectRatio, content_type: contentType,
                 color_grade: colorGrade, visual_style: visualStyle, quality, language: effectiveLanguage, ai_model: aiModel }} />
