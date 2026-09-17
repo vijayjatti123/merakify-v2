@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Alert, Avatar, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
   DialogContent, DialogTitle, IconButton, List, ListItemButton, ListItemText, Paper, Stack, TextField, Typography } from "@mui/material";
 import { AtSign, Plus, X } from "lucide-react";
 import { listCharacters, uploadCharacter, setCharacterVoice, approveCharacter } from "../api/client";
-import { activeMentions, mentionPattern, mentionToken, mentionsDiscovered, rememberMentions } from "../utils/characterMentions";
+import { activeMentions, mentionPattern, mentionToken, mentionsDiscovered, rememberMentions, resolveTypedMentions, mentionSegments, typedMentions } from "../utils/characterMentions";
 import VoicePreviewPicker from "./VoicePreviewPicker";
 
 export default function BriefCharacterInput({ value, onChange, selections, onSelections, disabled, scriptMode }) {
@@ -16,14 +17,24 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
   const [voice, setVoice] = useState(""), [file, setFile] = useState(null), [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false), busyRef = useRef(false), [uploadError, setUploadError] = useState("");
   const [savedWarning, setSavedWarning] = useState("");
+  const [loaded, setLoaded] = useState(false), [mirrorHost, setMirrorHost] = useState(null), [scrollTop, setScrollTop] = useState(0);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { setMirrorHost(input.current?.parentElement || null); }, []);
+  useEffect(() => { if (value.includes("@") && !loaded && !disabled) refresh(); }, [value, loaded, disabled]);
+  useEffect(() => {
+    if (!loaded || disabled) return;
+    const next = resolveTypedMentions(value, selections, characters);
+    if (Object.keys(next).length !== Object.keys(selections).length) {
+      onSelections(next); discover();
+    }
+  }, [value, characters, loaded, selections, disabled, onSelections]);
   useEffect(() => { popup.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [index]);
   async function refresh() {
     if (loadingRef.current) return;
     loadingRef.current = true; setLoading(true); setError("");
     try { const data = await listCharacters(); if (alive.current) setCharacters(data.filter(c => c.status === "approved" && c.catalog_status === "customer" && c.display_name?.trim())); }
     catch { if (alive.current) setError("We couldn't load your characters. Try again."); }
-    finally { loadingRef.current = false; if (alive.current) setLoading(false); }
+    finally { loadingRef.current = false; if (alive.current) { setLoading(false); setLoaded(true); } }
   }
   function discover() { rememberMentions(); setTip(false); }
   function inspect(text, position) {
@@ -35,6 +46,12 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
   const filtered = characters.filter(c => c.display_name.toLocaleLowerCase().replace(/\s+/g, "_")
     .includes((query?.text || "").toLocaleLowerCase()));
   const linked = activeMentions(value, selections);
+  const highlighted = Object.keys(linked).length > 0 && mirrorHost;
+  const unlinked = [...new Set(typedMentions(value))].filter(token => !linked[token]);
+  useEffect(() => {
+    input.current?.setCustomValidity(unlinked.length
+      ? `Choose a saved character for ${unlinked.join(", ")}, or remove the @ to use ordinary text.` : "");
+  }, [value, selections, characters]);
   function openPicker() {
     if (query === null) {
       refresh();
@@ -71,6 +88,7 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
   return <Box data-testid="brief-character-input" onBlur={event => {
     if (!event.currentTarget.contains(event.relatedTarget)) setQuery(null);
   }}>
+    <Box sx={{ position: "relative" }}>
     <TextField multiline fullWidth label={scriptMode ? "Your script" : "Your idea"} inputRef={input}
       value={value} disabled={disabled} autoFocus minRows={3}
       placeholder={scriptMode ? "Paste your script… type @ to add a character" : "Describe your video… type @ to add a character"}
@@ -84,11 +102,18 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
         }
         if (e.key === "Enter") { e.preventDefault(); if (!loading && filtered[index]) choose(filtered[index]); }
       }}
-      slotProps={{ htmlInput: { "data-testid": "brief-input", "aria-autocomplete": "list",
+      slotProps={{ htmlInput: { "data-testid": "brief-input", "aria-autocomplete": "list", onScroll: e => setScrollTop(e.currentTarget.scrollTop),
         "aria-controls": query !== null ? "character-options" : undefined,
         "aria-activedescendant": query !== null && filtered[index] ? `character-option-${index}` : undefined } }}
-      sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7 } }} />
-    {query !== null && <Paper ref={popup} data-testid="character-dropdown" sx={{ mt: 1, p: 1, maxHeight: 300, overflow: "auto" }}>
+      sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7, ...(highlighted ? { color: "transparent", WebkitTextFillColor: "transparent", caretColor: "text.primary" } : {}) } }} />
+    {highlighted && createPortal(<Box aria-hidden="true" data-testid="mention-highlights" sx={{
+      position: "absolute", inset: 0, p: "inherit", pointerEvents: "none", overflow: "hidden",
+      fontFamily: "inherit", fontSize: "1.1rem", lineHeight: 1.7, letterSpacing: "inherit", color: disabled ? "text.disabled" : "text.primary",
+    }}><Box sx={{ whiteSpace: "pre-wrap", overflowWrap: "break-word", transform: `translateY(-${scrollTop}px)` }}>
+      {mentionSegments(value, selections).map((part, i) => part.token ? <Box component="span" key={i} data-mention={part.token}
+        sx={{ color: "primary.main", bgcolor: "action.selected", borderRadius: "4px" }}>{part.text}</Box> : part.text)}{"\u200b"}
+    </Box></Box>, mirrorHost)}
+    {query !== null && <Paper ref={popup} data-testid="character-dropdown" elevation={8} sx={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 12, mt: 1, p: 1, maxHeight: 260, overflow: "auto" }}>
       {header && <Typography variant="overline" sx={{ px: 2 }}>Your saved characters</Typography>}
       {loading ? <Stack direction="row" gap={1} sx={{ p: 2 }} role="status"><CircularProgress size={18} />Loading characters…</Stack> :
         error ? <Alert severity="error" action={<Button type="button" onClick={refresh}>Retry</Button>}>{error}</Alert> :
@@ -96,13 +121,15 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
           {filtered.map((c, i) => <ListItemButton component="li" tabIndex={0} role="option" id={`character-option-${i}`} key={c.id}
             aria-selected={i === index} selected={i === index} onMouseDown={e => e.preventDefault()} onClick={() => choose(c)}
             onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(c); } }}>
-            <Avatar src={c.image_url} alt="" sx={{ mr: 1.5, width: 28, height: 28 }} /><ListItemText primary={c.display_name} />
+            <Avatar src={c.image_url} alt="" sx={{ mr: 1.5, width: 28, height: 28 }} /><ListItemText primary={c.display_name}
+              secondary={filtered.filter(other => other.display_name === c.display_name).length > 1 ? `Saved character · ${c.id.slice(0, 6)}` : undefined} />
           </ListItemButton>)}
         </List> : <Box sx={{ p: 2 }} data-testid="characters-empty">
           <Typography>{characters.length ? "No matching characters." : "No characters yet."}</Typography>
           <Button type="button" startIcon={<Plus size={16} />} onClick={add}>Add a character here</Button>
         </Box>}
     </Paper>}
+    </Box>
     <Stack spacing={1} sx={{ mt: 1.5 }}>
       {tip && <Stack direction="row" alignItems="center" data-testid="mention-tip">
         <Typography variant="body2" color="text.secondary">Tip: type @ to bring in a saved character.</Typography>
@@ -121,6 +148,9 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
           onSelections(Object.fromEntries(Object.entries(selections).filter(([key]) => key !== token)));
         }} />)}
       </Stack>}
+      {loaded && !loading && unlinked.length > 0 && <Typography variant="body2" color="warning.main" data-testid="unlinked-mentions">
+        {unlinked.join(", ")} isn’t linked yet. Finish the saved name or choose a character from the list; duplicate names need a selection.
+      </Typography>}
       {savedWarning && <Alert severity="warning">{savedWarning}</Alert>}
     </Stack>
     <Dialog open={adding} onClose={() => !busy && setAdding(false)} fullWidth maxWidth="sm">
