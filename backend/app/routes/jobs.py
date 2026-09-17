@@ -2,7 +2,7 @@ import asyncio
 import json
 import re
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, ConfigDict
@@ -68,6 +68,68 @@ def enhance_face(job_id: str, shot_number: int, payload: FaceEnhanceRequest, db:
 class VideoGenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     audio_model: AudioVideoModel | None = None
+
+
+class PreviewReplacementRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_key: str = Field(default="", max_length=1024)
+    hint: str = Field(default="", max_length=1000)
+
+
+class PreviewDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=1, max_length=64)
+    accept: bool
+    acknowledge: bool = False
+
+
+@router.post("/{job_id}/shots/{shot_number}/preview/replacement", status_code=202)
+def regenerate_preview_image(job_id: str, shot_number: int, payload: PreviewReplacementRequest,
+                             background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    from app.services import preview_replacement as replacement
+    try:
+        token, snapshot = replacement.claim(db, job_id, shot_number, payload.expected_key, "generated")
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    background_tasks.add_task(replacement.run, job_id, shot_number, token, snapshot, payload.hint)
+    return {"status": "working", "token": token}
+
+
+@router.post("/{job_id}/shots/{shot_number}/preview/upload", status_code=202)
+async def upload_preview_image(job_id: str, shot_number: int, background_tasks: BackgroundTasks,
+                               file: UploadFile = File(...), expected_key: str = Form(""),
+                               fit: str = Form("crop"), db: Session = Depends(get_db)):
+    from app.services import preview_replacement as replacement
+    job = job_service.get_job(db, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    try:
+        data = await file.read(replacement.MAX_BYTES + 1)
+        data = replacement.normalize_upload(data, job.aspect_ratio, fit)
+        token, snapshot = replacement.claim(db, job_id, shot_number, expected_key, "uploaded")
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    finally:
+        await file.close()
+    background_tasks.add_task(replacement.run, job_id, shot_number, token, snapshot, upload=data)
+    return {"status": "working", "token": token}
+
+
+@router.post("/{job_id}/shots/{shot_number}/preview/decision")
+def decide_preview_image(job_id: str, shot_number: int, payload: PreviewDecisionRequest,
+                         db: Session = Depends(get_db)):
+    from app.services import preview_replacement as replacement
+    try:
+        replacement.decide(db, job_id, shot_number, payload.token, payload.accept, payload.acknowledge)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"status": "accepted" if payload.accept else "discarded"}
 
 
 class VideoRegenerateRequest(VideoGenerateRequest):

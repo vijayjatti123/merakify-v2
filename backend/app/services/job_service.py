@@ -296,6 +296,16 @@ def job_result(job: Job) -> Optional[Any]:
         from app.services.still_frame_service import invalidate_changed_stills
         invalidate_changed_stills(result)
         for shot in result.get("shots", []):
+            replacement = shot.get("preview_replacement")
+            if replacement:
+                from app.services.preview_replacement import expired
+                if replacement.get("status") == "working" and expired(replacement):
+                    replacement.update(status="failed", warning="Image replacement timed out. Your current image is unchanged; try again.")
+                if replacement.get("key"):
+                    try:
+                        replacement["url"] = storage_service.asset_url(replacement["key"])
+                    except Exception:
+                        replacement["url"] = None
             # Initial batch generation has no manual-retry lease. Absence of that
             # lease must not turn a live preview into a false timeout on read.
             if shot.get("still_frame_status") == "generating" and shot.get("still_retry_token") and still_retry_expired(shot):
@@ -357,6 +367,29 @@ def job_result(job: Job) -> Optional[Any]:
         result["shots_needing_attention"] = [s["shot_number"] for s in result.get("shots", [])
             if s.get("still_frame_status") == "failed" and not s.get("still_frame_url") and not s.get("video_url")]
     return result
+
+
+def mutate_preview_replacement(db, job_id, number, mutate):
+    """CAS the latest plan; a background candidate cannot overwrite sibling edits."""
+    for _ in range(4):
+        db.expire_all()
+        job = get_job(db, job_id)
+        if not job:
+            raise LookupError("Job not found")
+        old = job.result_json
+        result = json.loads(old or "{}")
+        shot = next((s for s in result.get("shots", []) if s.get("shot_number") == number), None)
+        if shot is None:
+            raise LookupError("Shot not found")
+        value = mutate(job, result, shot)
+        count = db.query(Job).filter(Job.id == job_id, Job.result_json == old).update(
+            {Job.result_json: json.dumps(result)}, synchronize_session=False)
+        if count == 1:
+            db.commit()
+            db.expire_all()
+            return value
+        db.rollback()
+    raise ValueError("Your plan changed. Refresh before trying again.")
 
 
 def video_source(db, job_id, number):

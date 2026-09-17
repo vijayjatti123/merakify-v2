@@ -178,7 +178,7 @@ class StillFramesTests(unittest.TestCase):
         shot = self.result["shots"][0]
         shot.update(still_frame_key="stored", still_frame_url="expired")
         shot["still_frame_source_hash"] = service.shot_fingerprint(shot)
-        job = SimpleNamespace(result_json=json.dumps(self.result))
+        job = SimpleNamespace(result_json=json.dumps(self.result), video_model=None)
         self.assertEqual(job_service.job_result(job)["shots"][0]["still_frame_url"], "https://renewed")
         shot["description"] = "A different red bowl"
         job.result_json = json.dumps(self.result)

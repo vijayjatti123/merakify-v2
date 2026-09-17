@@ -2,6 +2,7 @@ import { AlertTriangle, Check, Clapperboard, Clock3, Loader2, Pencil, RefreshCw,
 import { useEffect, useState } from "react";
 import { Alert, AlertTitle, Button, Card, Stepper, Step, StepLabel, Box, Stack, Typography } from "@mui/material";
 import ActionProgress from "../components/ActionProgress";
+import ShotImageActions from "../components/ShotImageActions";
 import { friendlyMessage, progressMessage } from "../utils/presentation";
 import { retryFailedJob, retryShotPreview, retryPreviewPreparation } from "../api/client";
 import { previewState, previewSummary } from "../utils/previewState";
@@ -83,7 +84,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const videoBusy = final?.result?.audio_assembly_pending || final?.result?.preview_preparation_pending || final?.status === "running" || final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
 
   useEffect(() => {
-    if (!videoBusy) return;
+    if (!videoBusy && !final?.result?.shots?.some(s => s.preview_replacement?.status === "working")) return;
     let stopped = false;
     let timer;
     async function refresh() {
@@ -97,7 +98,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
     }
     timer = setTimeout(refresh, 1000);
     return () => { stopped = true; clearTimeout(timer); };
-  }, [jobId, videoBusy]);
+  }, [jobId, videoBusy, final?.result?.shots?.some(s => s.preview_replacement?.status === "working")]);
 
   async function handleVideo(shotNumber) {
     setVideoSubmitting(shotNumber);
@@ -402,6 +403,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         <figcaption className="mt-1 text-xs" style={{ color: COLORS.muted }}>Opening still preview</figcaption>
                       </figure>
                     ) : null}
+                    {approved && (shot.still_frame_url || shot.preview_input || shot.compiled_prompt) && <ShotImageActions jobId={jobId} shot={shot} aspectRatio={result.aspect_ratio || final.aspect_ratio} disabled={previews.busy || videoBusy || editBlocksApproval} onRefresh={async () => setFinal(await getJob(jobId))} />}
                     {shot.still_frame_status === "generating" ? <ActionProgress label={`Creating and checking the preview for shot ${shot.shot_number}…`} /> : previewState(shot).key === "failed" && <Alert severity="warning" sx={{ my: 2 }}>
                       <AlertTitle>This preview couldn't be created</AlertTitle>
                       {shot.video_url ? "Your existing video is still available below." : "Try this preview again. Video generation is a separate step."}
@@ -409,8 +411,9 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     </Alert>}
 
                     {shot.video_url && <ShotVideo shot={shot} />}
+                    {shot.video_url && shot.video_source_changed && <Alert severity="info" sx={{ my: 2 }}>This video uses an earlier version of the shot. Click “Regenerate video” to use your current image before combining the final video.</Alert>}
                     <FaceEnhancement jobId={jobId} shot={shot} onRefresh={async () => setFinal(await getJob(jobId))} />
-                    {shot.video_status && <p className="text-sm my-2" role="status">Video: {{done: "Ready", error: "Needs attention", processing: "Generating", submitting: "Starting", submission_unknown: "Checking the request"}[shot.video_status] || "Checking progress"}{shot.has_dialogue && shot.video_status === "done" ? ((shot.video_provider === "hedra" || shot.video_audio_model) ? " · Spoken performance with audio" : " · Voice recording has not been added yet") : ""}</p>}
+                    {shot.video_status && <p className="text-sm my-2" role="status">Video: {shot.video_source_changed && shot.video_status === "done" ? "Previous version — needs regeneration" : {done: "Ready", error: "Needs attention", processing: "Generating", submitting: "Starting", submission_unknown: "Checking the request"}[shot.video_status] || "Checking progress"}{shot.has_dialogue && shot.video_status === "done" ? ((shot.video_provider === "hedra" || shot.video_audio_model) ? " · Spoken performance with audio" : " · Voice recording has not been added yet") : ""}</p>}
                     {(videoSubmitting === shot.shot_number || regeneratingShot === shot.shot_number || ["submitting", "processing"].includes(shot.video_status)) && <ActionProgress label={shot.video_phase === "preparing_voice" ? `Preparing the saved voice for shot ${shot.shot_number}…` : `Generating video for shot ${shot.shot_number}…`} />}
                     {savingShot === shot.shot_number && <ActionProgress label="Saving your changes and checking the shot…" />}
                     {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
@@ -454,7 +457,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         <>
                           <Button type="button" disabled={previews.busy || videoBusy || editBlocksApproval} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot text ${shot.shot_number}`}><Pencil size={13} /> Edit text</Button>
                           {(shot.video_url || shot.video_status === "error") && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
-                            {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate
+                            {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate video
                           </Button>}
                           {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && shot.video_provider !== "hedra" && shot.video_url && (
                             <Button type="button" onClick={() => handleRegenerate(shot.shot_number, true)} disabled={!(videoHints[shot.shot_number] || "").trim() || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action" style={{ background: "transparent", border: `1px solid ${COLORS.border}`, fontSize: "0.62rem", padding: "0.3rem 0.45rem" }} aria-label={`Edit shot video ${shot.shot_number}`}>

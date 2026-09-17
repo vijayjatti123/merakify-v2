@@ -1,5 +1,18 @@
 const BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
+export async function replaceShotPreview(jobId, number, action, payload) {
+  const multipart = payload instanceof FormData;
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${number}/preview/${action}`, {
+    method: "POST", ...(multipart ? {} : { headers: { "Content-Type": "application/json" } }),
+    body: multipart ? payload : JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(typeof body.detail === "string" ? body.detail : "Couldn't update this image. Please try again.");
+  }
+  return res.json();
+}
+
 export async function listJobs(offset = 0) {
   const res = await fetch(`${BASE_URL}/api/jobs?limit=30&offset=${offset}`, { cache: "no-store" });
   if (!res.ok) throw new Error("Could not load job history. Please try again.");

@@ -352,7 +352,7 @@ def _continuous_pair(previous, shot, result):
                 re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I))
 
 
-def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on_progress=None):
+def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on_progress=None, feedback_by_shot=None):
     """Keep the plan reviewable, but explicitly mark missing output as failed."""
     characters = {c["name"].strip().casefold(): c for c in result.get("continuity", {}).get("characters", [])}
     # References live only in this job's result JSON, pointing to its own stills.
@@ -397,6 +397,8 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
         try:
             from app.services.preview_plan import preview_visual
             visual = preview_visual(shot["preview_input"]) if shot.get("preview_input") else visual_description(shot["compiled_prompt"])
+            if (feedback_by_shot or {}).get(number):
+                visual += "\nRequested image adjustment (preserve locked identity and style): " + feedback_by_shot[number]
             entities = match_entities(result, shot, visual)
             references = []
             for name in shot.get("characters_in_shot", []):
@@ -511,7 +513,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
     return result["shots"]
 
 
-def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progress=None):
+def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progress=None, feedback_by_shot=None):
     """Two bounded workers; only the owning thread persists progress or emits DB events.
 
     Dependencies serialize shared job entities and accepted action anchors. Each
@@ -578,7 +580,7 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
                 started = time.monotonic()
                 def work(snapshot=snapshot, number=number):
                     _generate_still_frames_serial(snapshot, job_id=job_id,
-                        emit=lambda k, n: events.put((k, n)), shot_numbers={number})
+                        emit=lambda k, n: events.put((k, n)), shot_numbers={number}, feedback_by_shot=feedback_by_shot)
                     return snapshot
                 futures[pool.submit(work)] = (number, started)
             if not futures and pending:
