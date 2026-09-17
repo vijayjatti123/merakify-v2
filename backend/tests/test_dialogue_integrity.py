@@ -27,7 +27,9 @@ class DialogueIntegrityTests(unittest.TestCase):
             if system==prompts.CINEMATOGRAPHY_FIX: return {'shots':copy.deepcopy(after)}
             if system==prompts.SHOT_ASSEMBLER: return {'total_duration_sec':10,'transitions':[]}
             raise AssertionError('Unexpected call')
-        with patch('app.agents.director.call_agent',side_effect=call):
+        # Exercise the retained full-plan fallback with adversarial model replies.
+        # Field-patch isolation has separate integration tests in test_planning_patch.
+        with patch('app.agents.director.call_agent',side_effect=call), patch('app.agents.director.patch_permissions',return_value=None):
             result=validate_and_correct(copy.deepcopy(before),[],10,source_script_text=source,emit=lambda key,note:events.append(note))
         return result,events,seen
 

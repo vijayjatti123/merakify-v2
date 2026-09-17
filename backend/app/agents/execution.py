@@ -43,7 +43,7 @@ def current_execution():
 def stage_name(system):
     from app.agents import prompts
     for name in ("FORMAT_CLASSIFIER", "SCRIPT_ARCHITECT_FROM_SCRIPT", "CONTINUITY_AGENT",
-                 "CINEMATOGRAPHY_AGENT", "CINEMATOGRAPHY_FIX", "CINEMATOGRAPHY_TRIM",
+                 "CINEMATOGRAPHY_AGENT", "CINEMATOGRAPHY_FIX", "CINEMATOGRAPHY_PATCH", "CINEMATOGRAPHY_TRIM",
                  "QA_AGENT", "SHOT_ASSEMBLER"):
         if system == getattr(prompts, name):
             return name.lower()
@@ -82,7 +82,9 @@ def execute(call, system, content, kwargs, scope):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        attempt_budget = min(remaining, budget * .67) if attempt == 1 else remaining
+        # Do not reserve time for a timeout retry we deliberately never make.
+        # Early transport/rate-limit failures may retry once with what remains.
+        attempt_budget = remaining
         emit("pipeline_timing", json.dumps({"stage": stage, "phase": "request_started",
              "attempt": attempt, "budget_sec": round(attempt_budget, 3), "total_budget_sec": budget}))
         completed = queue.Queue()
@@ -121,7 +123,7 @@ def execute(call, system, content, kwargs, scope):
             required = {"format_classifier": {"format", "structure", "num_scenes", "duration_target_sec"},
                 "script_architect": {"scenes", "logline"}, "script_architect_from_script": {"scenes", "logline"},
                 "continuity_agent": {"characters", "locations", "visual_style"},
-                "cinematography_agent": {"shots"}, "cinematography_fix": {"shots"},
+                "cinematography_agent": {"shots"}, "cinematography_fix": {"shots"}, "cinematography_patch": {"patches"},
                 "cinematography_trim": {"shots"}, "qa_agent": {"approved"},
                 "shot_assembler": {"transitions"}}.get(stage, set())
             if not isinstance(value, dict) or not required <= value.keys():

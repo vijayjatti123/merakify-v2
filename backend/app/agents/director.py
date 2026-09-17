@@ -1,3 +1,5 @@
+from app.services.planning_contract import creative_references, camera_options, render_camera_summaries, check_mechanics
+from app.services.planning_patch import patch_permissions, apply_patch_response
 from app.services.speech_mode import is_voiceover
 from app.services.camera_direction import check_plan as check_camera_plan
 import json
@@ -320,6 +322,7 @@ def validate_and_correct(
     source_script_text: str | None = None,
     defer_audio_assembly: bool = True,
     emit: EventFn | None = None,
+    minimum_shot_seconds: float | None = None,
 ) -> dict:
     """Run the pipeline's single QA and duration self-correction sequence.
 
@@ -331,7 +334,7 @@ def validate_and_correct(
         if emit:
             emit(agent_key, note)
 
-    current_shots = shots
+    current_shots = render_camera_summaries(shots)
 
     # Continuity QA Agent, with one autonomous self-correction pass.
     notify("qa", "Checking the shot list for continuity and film-grammar violations...")
@@ -341,7 +344,7 @@ def validate_and_correct(
         max_tokens=3072,
     )
 
-    qa = check_camera_plan(qa, current_shots)
+    qa = check_mechanics(check_camera_plan(qa, current_shots), current_shots, characters, minimum_shot_seconds)
     protected = protected_dialogue(current_shots, source_script_text)
     issues, verified, rejected, limitations = screen_issues(current_shots, qa.get("issues", []), protected, notify)
     qa = {**qa, "issues": issues}
@@ -355,18 +358,29 @@ def validate_and_correct(
             notify("qa", f"Shot {issue['shot_number']}: {issue['problem']}")
 
         notify("cinematography", "Revising flagged shots per QA feedback...")
-        cine = call_agent(
-            prompts.CINEMATOGRAPHY_FIX,
-            f"Current shots: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}"
-            + (f"\nProtected user-scripted dialogue shot numbers: {json.dumps(list(protected))}. "
-               "Keep these shots present and preserve their dialogue_text, has_dialogue and scene_number exactly. "
-               "Only apply compatible visual corrections." if protected else ""),
-            max_tokens=4096,
-        )
+        permissions = patch_permissions(current_shots, qa['issues'])
+        if permissions:
+            notify('cinematography', 'Applying targeted field corrections; other shot content is preserved.')
+            patch_response = call_agent(
+                prompts.CINEMATOGRAPHY_PATCH,
+                f"Read-only plan: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}"
+                + f"\nallowed_fields: {json.dumps(permissions)}",
+                max_tokens=min(4096, 2048 + 256 * len(permissions)),
+            )
+            cine = {'shots': apply_patch_response(current_shots, patch_response, permissions)}
+        else:
+            cine = call_agent(
+                prompts.CINEMATOGRAPHY_FIX,
+                f"Current shots: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}"
+                + (f"\nProtected user-scripted dialogue shot numbers: {json.dumps(list(protected))}. "
+                   "Keep these shots present and preserve their dialogue_text, has_dialogue and scene_number exactly. "
+                   "Only apply compatible visual corrections." if protected else ""),
+                max_tokens=4096,
+            )
         loss_warnings = warn_dialogue_loss(current_shots, cine["shots"], verified, notify)
         revised, violations = restore_protected(current_shots, cine["shots"], protected, notify)
         limitations.extend(violations)
-        current_shots = _attach_voice_refs(revised, characters, narrator_voice_ref, emit=emit)
+        current_shots = render_camera_summaries(_attach_voice_refs(revised, characters, narrator_voice_ref, emit=emit))
         notify("cinematography", "Revision complete.")
 
         notify("qa", "Re-checking the revised shot list...")
@@ -375,7 +389,7 @@ def validate_and_correct(
             f"Shots: {json.dumps(current_shots)}\nCharacters: {json.dumps(characters)}",
             max_tokens=3072,
         )
-        qa = check_camera_plan(qa, current_shots)
+        qa = check_mechanics(check_camera_plan(qa, current_shots), current_shots, characters, minimum_shot_seconds)
         remaining, _, rejected_again, blocked_again = screen_issues(current_shots, qa.get("issues", []), protected, notify)
         rejected.extend(rejected_again)
         limitations.extend(blocked_again)
@@ -690,14 +704,19 @@ def run_pipeline(db: Session, job_id: str) -> None:
         # stopping the total from drifting well past what was asked for.
         emit("cinematography", "Assigning camera, lens and lighting per shot...")
         cinematography_input = (
-            f"Scenes: {json.dumps(script['scenes'])}\nCharacters: {json.dumps(continuity['characters'])}"
+            f"Scenes: {json.dumps(script['scenes'])}\nCharacters: {json.dumps(creative_references(continuity['characters']))}"
             f"\ncontinuity.visual_style: {json.dumps(continuity['visual_style'])}"
         )
+        cinematography_input += f"\nDialogue source: {'user-supplied script; preserve words verbatim' if source_script else 'AI-written scene breakdown; use the selected language and its native script'}. Selected spoken language: {language}."
+        cinematography_input += f"\ncamera_options: {json.dumps(camera_options())}"
         if source_script:
             cinematography_input += f"\nLocations: {json.dumps(continuity['locations'])}"
         cinematography_input += f"\nSelected video model: {job.video_model or job.ai_model}. Use plain natural-language camera instructions; no invented provider control tokens."
         if job.video_model == "kling_avatar_fal":
             cinematography_input += "\nExperimental speaking-avatar model: prefer a held viewpoint and restrained performance; complex scene-camera motion is unverified."
+        minimum_shot_seconds = 4 if job.ai_model == "Seedance 2.0" else 3 if job.video_model == "kling_voice_fal" else None
+        if minimum_shot_seconds:
+            cinematography_input += f"\nMinimum generated shot duration: {minimum_shot_seconds} seconds. Group compatible sequential actions into complete beats; do not buy many tiny shots. Never merge distinct complete speaking turns or omit story events."
         cinematography_input += f"\nTarget total duration: {fmt['duration_target_sec']} seconds"
         from app.services.voice_timing import measured_budget
         cinematography_input += f"\nMeasured dialogue budget: {json.dumps(measured_budget(db, language))}"
@@ -716,6 +735,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             on_response=record_cinematography_usage,
         )
         from app.services.dialogue_duration import preflight_dialogue_durations
+        render_camera_summaries(cine["shots"])
         preflight_dialogue_durations(cine["shots"], emit=emit)
         assigned_voice_count += voice_generation_service.assign_missing_voice_ids(continuity, cine["shots"], emit=emit)
         if assigned_voice_count:
@@ -746,6 +766,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             narrator_voice_ref=continuity.get("narrator_voice_ref"),
             source_script_text=source_script,
             emit=emit,
+            minimum_shot_seconds=minimum_shot_seconds,
         )
         cine["shots"] = _attach_voice_refs(
             validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")

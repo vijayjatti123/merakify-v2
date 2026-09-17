@@ -124,6 +124,35 @@ class LatencyPipelineTests(unittest.TestCase):
         self.assertEqual(claimed[0], "test")
         self.assertIsNone(job_service.claim_pipeline_task(self.db))
 
+    def test_request_can_complete_after_old_two_thirds_cutoff(self):
+        events, budgets = [], []
+        def provider(*args, **kwargs):
+            budgets.append(kwargs["request_timeout"])
+            time.sleep(.15)
+            return {"approved": True}
+        scope = (self.db, "test", lambda k,n: events.append(json.loads(n)), threading.get_ident())
+        with patch("app.agents.execution.stage_budget", return_value=.2):
+            result = execute(provider, prompts.QA_AGENT, "full-budget", {}, scope)
+        self.assertTrue(result["approved"])
+        self.assertGreater(budgets[0], .19)
+        self.assertEqual(len(budgets), 1)
+        self.assertEqual(events[-1]["phase"], "completed")
+
+    def test_early_transient_failure_retries_with_remaining_budget(self):
+        import anthropic, httpx
+        budgets = []
+        def provider(*args, **kwargs):
+            budgets.append(kwargs["request_timeout"])
+            if len(budgets) == 1:
+                raise anthropic.RateLimitError("busy", response=httpx.Response(429,
+                    request=httpx.Request("POST", "https://example.test")), body=None)
+            return {"approved": True}
+        scope = (self.db, "test", lambda *args: None, threading.get_ident())
+        with patch("app.agents.execution.stage_budget", return_value=2):
+            self.assertTrue(execute(provider, prompts.QA_AGENT, "rate-limit", {}, scope)["approved"])
+        self.assertEqual(len(budgets), 2)
+        self.assertLess(budgets[1], budgets[0])
+
     def test_hard_timeout_never_saves_late_response_or_launches_duplicate(self):
         events, calls = [], []
         def provider(*args, **kwargs):

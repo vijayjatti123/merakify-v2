@@ -276,3 +276,23 @@ the existing pipeline's bounded continuity review to distinguish progression
 from a genuine contradictory same-instant state; verified results are cached
 only for unchanged source inputs. Accepted previews can be reused on instruction
 retry without new image generation.
+
+### Focused shot planning
+
+Cinematography keeps the existing Sonnet route and whole-story context, but returns
+creative shot decisions rather than repeating fixed reference metadata and camera
+summaries. The reference projection retains identity descriptions while omitting
+URLs, database IDs and voice fields; authoritative originals remain in the Director.
+Structured camera decisions are rendered deterministically using the existing
+camera vocabulary. Duration, cast-name and speech-field checks add findings to
+the existing QA/FIX loop; semantic continuity and complete dialogue still receive
+QA review. The silent 9-second and voiceover 15-second planning caps are retained;
+real audio and provider timing checks remain downstream. This extends the existing
+core planning/asset-generation milestone, not a second pipeline or model switch.
+
+Recognized local visual QA findings use a field-patch response instead of returning
+the whole shot list. Code restricts patch shot IDs and field names, preserves all
+other content, and runs full semantic QA again. Structural/dialogue/boundary repairs
+retain the existing full-plan correction and dialogue protections. Invalid patches
+fail explicitly rather than silently applying broader changes. Existing exact-input
+checkpoints and provider system-prefix caching remain in use.
