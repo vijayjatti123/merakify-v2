@@ -37,6 +37,7 @@ JOB_COLUMN_DDL = {
     "video_model": "VARCHAR",
     "script_text": "TEXT",
     "resolutions_json": "TEXT",
+    "creative_direction_json": "TEXT",
 }
 
 ASSET_COLUMN_DDL = {

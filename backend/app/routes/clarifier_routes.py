@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -14,6 +14,8 @@ class Start(BaseModel):
     model_config = ConfigDict(extra="forbid")
     raw_brief: str = Field(min_length=1, max_length=20000)
     known_fields: dict[str, Any] = Field(default_factory=dict)
+    input_mode: Literal["idea", "script"] = "idea"
+    product_ids: list[str] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")
     def validate_fields(self):
@@ -45,7 +47,14 @@ class Edit(Write):
 @router.post("/start", status_code=201)
 def start(body: Start):
     with SessionLocal() as db:
-        return service.snapshot(service.start(db, body.raw_brief, body.known_fields))
+        from app.services.product_service import selected
+        try:
+            products = selected(db, body.product_ids)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        context = {"input_mode": body.input_mode,
+            "products": [{"id": p.id, "name": p.name} for p in products]}
+        return service.snapshot(service.start(db, body.raw_brief, body.known_fields, context))
 
 
 @router.get("/{session_id}")

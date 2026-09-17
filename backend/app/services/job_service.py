@@ -8,9 +8,10 @@ from app.models import AgentEvent, Job, VideoTask, FinalAssembly, FaceEnhancemen
 from app.schemas import ColorGrade, VisualStyle, style_from_brief
 
 
-def create_clarifier_session(db, raw_brief, known_fields):
+def create_clarifier_session(db, raw_brief, known_fields, context=None):
     from app.models import ClarifierSession
-    row = ClarifierSession(raw_brief=raw_brief, known_fields=known_fields)
+    row = ClarifierSession(raw_brief=raw_brief, known_fields=known_fields,
+        gathered={"_context": context} if context else {})
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -52,6 +53,7 @@ def create_job(
     script_text: str | None = None,
     resolutions: dict | None = None,
     product_ids: list[str] | None = None,
+    creative_direction: dict | None = None,
 ) -> Job:
     from app.video_models import validate_selection
     validate_selection(video_model, ai_model, language, quality)
@@ -84,6 +86,7 @@ def create_job(
         video_model=video_model,
         script_text=script_text,
         resolutions_json=json.dumps(resolutions, ensure_ascii=False) if resolutions is not None else None,
+        creative_direction_json=json.dumps(creative_direction, ensure_ascii=False) if creative_direction else None,
         status="queued",
     )
     db.add(job)
@@ -114,7 +117,7 @@ def copy_job_for_retry(db: Session, source: Job) -> Job:
     # source script and vault resolutions. Do not re-fold style prose.
     job = Job(**{field: getattr(source, field) for field in (
         "brief", "aspect_ratio", "visual_style", "color_grade", "quality",
-        "language", "ai_model", "video_model", "script_text", "resolutions_json",
+        "language", "ai_model", "video_model", "script_text", "resolutions_json", "creative_direction_json",
     )}, status="queued")
     db.add(job)
     db.commit()

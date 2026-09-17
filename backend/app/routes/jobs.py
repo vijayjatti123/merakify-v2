@@ -290,6 +290,7 @@ def _create_and_start_job(
     script_text: str | None = None,
     resolutions: dict | None = None,
     product_ids: list[str] | None = None,
+    creative_direction: dict | None = None,
 ) -> JobOut:
     job = job_service.create_job(
         db,
@@ -304,6 +305,7 @@ def _create_and_start_job(
         script_text=script_text,
         resolutions=resolutions,
         product_ids=product_ids,
+        creative_direction=creative_direction,
     )
     job_service.queue_pipeline_task(db, job.id, "plan")
     return _job_out(job)
@@ -406,6 +408,11 @@ def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Sessio
         selected(db, payload.product_ids)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    from app.services.clarifier_service import accepted_direction
+    try:
+        direction = accepted_direction(db, payload)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
     brief, script, resolutions = _resolve_brief_mentions(payload, db)
     return _create_and_start_job(
         brief,
@@ -421,6 +428,7 @@ def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Sessio
         script_text=script,
         resolutions=resolutions,
         product_ids=payload.product_ids,
+        creative_direction=direction,
     )
 
 

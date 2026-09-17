@@ -3,15 +3,19 @@ import { Alert, Box, Button, Card, Chip, LinearProgress, Stack, TextField, Typog
 import { Sparkles } from "lucide-react";
 import { clarifierRequest } from "../api/clarifier";
 
+const topicLabels = { product: "Product benefit", audience: "Audience", outcome: "Viewer takeaway", execution: "Visual execution",
+  script_clarity: "Script details", tone: "Tone", differentiator: "Main selling point", constraints: "Must-haves and exclusions" };
+
 // A new brief/settings snapshot starts a new conversation, never reuses stale answers.
-export default function ClarifierPanel({ brief, knownFields, onUse, disabled = false }) {
+export default function ClarifierPanel({ brief, knownFields, onUse, inputMode = "idea", productIds = [], disabled = false }) {
   const [appliedBrief, setAppliedBrief] = useState(null);
-  if (brief === appliedBrief || brief.trim().length < 20 || brief.trim().split(/\s+/).length < 4 || disabled) return null;
-  return <Conversation key={JSON.stringify([brief, knownFields])} brief={brief} knownFields={knownFields}
-    onUse={text => { setAppliedBrief(text); onUse(text); }} />;
+  const context = JSON.stringify([knownFields, inputMode, productIds]);
+  if (JSON.stringify([brief, context]) === appliedBrief || brief.trim().length < 20 || brief.trim().split(/\s+/).length < 4 || disabled) return null;
+  return <Conversation key={JSON.stringify([brief, context])} brief={brief} knownFields={knownFields} inputMode={inputMode} productIds={productIds}
+    onUse={(text, row) => { setAppliedBrief(JSON.stringify([inputMode === "script" ? brief : text, context])); onUse(text, row); }} />;
 }
 
-function Conversation({ brief, knownFields, onUse }) {
+function Conversation({ brief, knownFields, onUse, inputMode, productIds }) {
   const [session, setSession] = useState(null);
   const [answer, setAnswer] = useState("");
   const [draft, setDraft] = useState("");
@@ -69,7 +73,7 @@ function Conversation({ brief, knownFields, onUse }) {
     await run(async () => {
       const row = draft === latest.current.refined_prompt ? latest.current
         : await post(latest.current, "edit", { refined_prompt: draft });
-      if (alive.current) { accepted.current = true; onUse(row.refined_prompt); setDismissed(true); }
+      if (alive.current) { accepted.current = true; onUse(row.refined_prompt, row); setDismissed(true); }
       return row;
     });
   }
@@ -88,19 +92,22 @@ function Conversation({ brief, knownFields, onUse }) {
       {session?.status === "degraded" && <Alert severity="warning" data-testid="clarifier-degraded">
         We couldn't fully process this right now — {session.refined_prompt ? "this draft uses the details you provided." : "here are some general questions instead."}
       </Alert>}
+      {!!session?.assessment?.unverified?.length && <Alert severity="info" data-testid="clarifier-unverified">Some details couldn't be confirmed from your input. We'll ask rather than assume.</Alert>}
       {!session && <Stack spacing={2} data-testid="clarifier-initial">
-        <Typography color="text.secondary">Answer a couple of quick questions to help us understand your idea better.</Typography>
+        <Typography color="text.secondary">We'll read your {inputMode === "script" ? "script" : "idea"} and ask about missing product details, your audience, and how you want the ad to look. Up to five questions; skip whenever you like.</Typography>
         <Stack direction="row" spacing={1}><Button type="button" variant="contained" startIcon={<Sparkles size={18} />} data-testid="clarifier-start" disabled={busy}
-          onClick={() => run(() => clarifierRequest("/start", { raw_brief: brief, known_fields: Object.fromEntries(Object.entries(knownFields).filter(([,v]) => v?.trim())) }))}>Refine with AI</Button>
+          onClick={() => run(() => clarifierRequest("/start", { raw_brief: brief, input_mode: inputMode, product_ids: productIds, known_fields: Object.fromEntries(Object.entries(knownFields).filter(([,v]) => v?.trim())) }))}>Refine with AI</Button>
           <Button type="button" data-testid="clarifier-skip" onClick={leave}>Skip</Button></Stack>
       </Stack>}
+      {session?.assessment?.understanding && <Box data-testid="clarifier-understanding"><Typography variant="subtitle2">Here's what we understand</Typography><Typography variant="body2" color="text.secondary">{session.assessment.understanding}</Typography></Box>}
       {!!session?.turns?.length && <Stack component="ol" spacing={1.5} sx={{ m: 0, pl: 2.5 }} data-testid="clarifier-history">
         {session.turns.filter(t => t.answer !== null).map((t, i) => <Box component="li" key={i}>
           <Typography variant="body2" fontWeight={600}>{t.question}</Typography><Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "pre-wrap" }}>{t.answer}</Typography>
         </Box>)}
       </Stack>}
       {pending && <Stack spacing={2} data-testid="clarifier-question">
-        <Typography variant="overline" aria-live="polite">Question {session.turns.length} of up to 3</Typography>
+        <Typography variant="overline" aria-live="polite">Question {session.turns.length} of up to {session.max_questions || 5}</Typography>
+        {!degraded && pending.source === "fallback" && <Chip size="small" label="General question" sx={{ alignSelf: "flex-start" }} />}
         <Typography fontWeight={600} data-testid="clarifier-question-text">{pending.question}</Typography>
         <TextField inputRef={answerInput} fullWidth size="small" label="Your answer" value={answer} disabled={busy}
           onChange={e => setAnswer(e.target.value)} slotProps={{ htmlInput: { "data-testid": "clarifier-answer", maxLength: 8000 } }}
@@ -119,20 +126,24 @@ function Conversation({ brief, knownFields, onUse }) {
       {session?.refined_prompt && <Stack spacing={2} data-testid="clarifier-refined">
         {highConfidence ? <Alert severity="success" data-testid="clarifier-ready-high">Your idea has a clear direction. Review your brief before using it.</Alert>
           : <Alert severity="warning" data-testid="clarifier-ready-low"><strong>More detail would help.</strong> This is our best attempt — feel free to add more detail yourself.
-            {session.turns.length >= 3 && " We've reached the question limit, but some details are still uncertain."}</Alert>}
+            {session.turns.length >= (session.max_questions || 5) && " We've reached the question limit, but some details are still uncertain."}</Alert>}
+        {!!session.assessment?.unresolved?.length && <Typography variant="body2" color="text.secondary" data-testid="clarifier-unresolved">
+          Still open: {session.assessment.unresolved.map(topic => topicLabels[topic] || "Creative detail").join(", ")}. You can add these details to the draft below.
+        </Typography>}
         <Stack spacing={2} data-testid="clarifier-result-box" sx={{ borderLeft: "5px solid",
           borderLeftColor: highConfidence ? "success.main" : "warning.main", pl: 2, py: 1 }}>
           <Chip size="small" variant="outlined" color={highConfidence ? "success" : "warning"}
             sx={{ alignSelf: "flex-start" }} data-testid="clarifier-result-badge"
             label={highConfidence ? "Clear direction" : "Needs more detail"} />
-          <TextField inputRef={editor} multiline fullWidth minRows={5} label="Your refined brief" value={draft} disabled={busy}
+          {inputMode === "script" && <Typography variant="body2">Your script and dialogue stay unchanged. These notes guide how we plan and produce it.</Typography>}
+          <TextField inputRef={editor} multiline fullWidth minRows={5} label={inputMode === "script" ? "Your production direction" : "Your refined brief"} value={draft} disabled={busy}
             onChange={e => setDraft(e.target.value)} slotProps={{ htmlInput: { "data-testid": "clarifier-draft", maxLength: 20000 } }} />
         </Stack>
         <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 1 }}>
           <Button type="button" data-testid="clarifier-regenerate" disabled={busy || !draft.trim()} onClick={refine}>Regenerate</Button>
           <Button type="button" data-testid="clarifier-edit" disabled={busy} onClick={() => editor.current?.focus()}>Edit</Button>
           <Button type="button" data-testid="clarifier-cancel" onClick={leave}>Cancel</Button>
-          <Button type="button" data-testid="clarifier-use" variant="contained" disabled={busy || !draft.trim()} onClick={useRefined}>Use refined brief</Button>
+          <Button type="button" data-testid="clarifier-use" variant="contained" disabled={busy || !draft.trim()} onClick={useRefined}>{inputMode === "script" ? "Use production direction" : "Use refined brief"}</Button>
         </Stack>
       </Stack>}
     </Stack>

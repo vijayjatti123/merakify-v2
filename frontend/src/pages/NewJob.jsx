@@ -65,18 +65,22 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const [assetLabel, setAssetLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [clarification, setClarification] = useState(null);
 
   const effectiveLanguage = language === "Other" ? customLanguage.trim() : language;
   const effectiveDuration = duration === "Custom" ? customDuration.trim() : duration;
+  const knownFields = { duration: effectiveDuration, aspect_ratio: aspectRatio, content_type: contentType,
+    color_grade: colorGrade, visual_style: visualStyle, quality, language: effectiveLanguage, ai_model: aiModel };
+  const clarificationContext = JSON.stringify([knownFields, scriptMode, products.map(p => p.id)]);
+  const activeClarification = clarification?.brief === brief && clarification?.context === clarificationContext ? clarification : null;
+  const clarificationPayload = activeClarification ? { clarifier_session_id: activeClarification.id, clarifier_revision: activeClarification.revision } : {};
   const modelError = videoModel === "kling_voice_fal" && !["english", "chinese", "en", "zh", "mandarin"].includes(effectiveLanguage.toLowerCase())
     ? "Kling Voice ID supports English/Chinese only. Choose Seedance for this language." : "";
   const canSubmit = Boolean(brief.trim() && effectiveDuration && effectiveLanguage && !submitting && !modelError);
   // Guidance mirrors ClarifierPanel's existing gates; it does not control activation.
   const needsRefinementCharacters = brief.trim().length < 20;
   const needsRefinementWords = brief.trim().split(/\s+/).length < 4;
-  const refinementHint = scriptMode
-    ? "AI refinement is available in the standard idea input — choose ‘Use an idea instead’ below."
-    : needsRefinementCharacters && needsRefinementWords
+  const refinementHint = needsRefinementCharacters && needsRefinementWords
       ? "Describe your video idea (a full sentence works best) to unlock AI refinement."
       : needsRefinementWords
         ? "A few more words will unlock AI refinement."
@@ -149,6 +153,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     setError("");
     try {
       await onSubmit({
+        ...clarificationPayload,
         brief: briefParts.join("\n\n"),
         product_ids: products.map(p => p.id),
         character_mentions: activeMentions(brief, characterSelections),
@@ -172,6 +177,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     const briefParts = [brief.trim(), `Target duration: ${effectiveDuration}. Content type: ${contentType}.`];
     if (selectedAsset) briefParts.push(`Reference image: ${selectedAsset.url}`);
     await onSubmit({
+      ...clarificationPayload,
       brief: briefParts.join("\n\n"),
         product_ids: products.map(p => p.id),
       aspect_ratio: aspectRatio,
@@ -231,9 +237,14 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               {refinementHint}
             </Typography>}
             <ProductPicker selected={products} onChange={setProducts} disabled={collapsed || submitting} />
-            <ClarifierPanel brief={brief} onUse={setBrief} disabled={collapsed || scriptMode || submitting}
-              knownFields={{ duration: effectiveDuration, aspect_ratio: aspectRatio, content_type: contentType,
-                color_grade: colorGrade, visual_style: visualStyle, quality, language: effectiveLanguage, ai_model: aiModel }} />
+            <ClarifierPanel brief={brief} inputMode={scriptMode ? "script" : "idea"} productIds={products.map(p => p.id)}
+              knownFields={knownFields} disabled={collapsed || submitting} onUse={(text, row) => {
+                const acceptedBrief = scriptMode ? brief : text;
+                if (!scriptMode) setBrief(text);
+                setClarification({ brief: acceptedBrief, context: clarificationContext, id: row.session_id, revision: row.revision, text });
+              }} />
+            {activeClarification && <Alert severity="success" data-testid="production-direction-saved">Your reviewed direction will guide shot planning.{scriptMode && <details><summary>View production notes (script unchanged)</summary><Typography sx={{ whiteSpace: "pre-wrap" }}>{activeClarification.text}</Typography></details>}</Alert>}
+            {clarification && !activeClarification && <Alert severity="info">Your inputs changed. Refine again to update your production direction, or continue with the current inputs.</Alert>}
             <Button
               type="button"
               className="script-mode-toggle" startIcon={<FileText size={18} />}

@@ -246,6 +246,25 @@ and generative scenes cannot guarantee pixel-perfect small packaging text.
 This extends the README real-asset-generation milestone and existing core
 workflow; it introduces no character voice or second Director pipeline.
 
+### Script-aware creative direction
+
+AI refinement is available in both idea and script intake. It assesses the
+product benefit, audience, intended takeaway, execution, script ambiguity, tone,
+differentiator and exclusions, using the current eight toolbar settings and
+selected approved product names. It asks one targeted question at a time, up to
+five; unresolved or unverified details cannot receive a confident-ready status.
+Provider failure retains the visible generic-question fallback. Text calls have
+a 50-second request budget and one optional truncation recovery inside it.
+
+Script refinement produces separate, editable production notes; it never replaces
+the source script. On explicit acceptance, session ID/revision resolve to an
+immutable job snapshot in the optional `creative_direction_json` column. The
+existing startup migration adds that column to existing SQLite/Postgres jobs.
+The single Director supplies reviewed direction and answers to planning; the
+Compiler receives the same direction, and job retries retain it. No media is
+generated merely by refining or accepting direction. This extends core intake
+and the existing asset-generation workflow, not a new planning pipeline.
+
 ### Compiler fixed instructions and transition continuity
 
 The existing Compiler serializes locked rendering/character placement alongside

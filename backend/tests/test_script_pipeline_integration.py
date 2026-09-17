@@ -119,6 +119,8 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
             quality="720p",
             language="English",
             ai_model="Seedance 2.5",
+            video_model=None,
+            creative_direction_json=json.dumps({"production_brief": "Show the lamp adjustment clearly; no invented claims."}),
             script_text=source_script,
             resolutions_json=json.dumps(resolutions) if resolutions else None,
         )
@@ -184,6 +186,9 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
 
         self.assertEqual(calls[1][0], prompts.SCRIPT_ARCHITECT_FROM_SCRIPT)
         self.assertIn(source, calls[1][1])
+        for system in (prompts.SCRIPT_ARCHITECT_FROM_SCRIPT, prompts.CONTINUITY_AGENT, prompts.CINEMATOGRAPHY_AGENT):
+            self.assertIn("Show the lamp adjustment clearly; no invented claims.", next(c[1] for c in calls if c[0] == system))
+        self.assertEqual(result['creative_direction']['production_brief'], 'Show the lamp adjustment clearly; no invented claims.')
         self.assertEqual(result["source_script_text"], source)
         continuity_call = next(c for c in calls if c[0] == prompts.CONTINUITY_AGENT)
         self.assertIn('"visual_style": "Cartoon / Anime", "color_grade": "Warm"', continuity_call[1])

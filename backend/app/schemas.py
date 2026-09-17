@@ -93,9 +93,13 @@ class JobCreate(BaseModel):
     resolutions: Optional[ScriptResolutionMap] = None
     product_ids: list[str] = Field(default_factory=list, max_length=4)
     character_mentions: dict[str, str] = Field(default_factory=dict, max_length=20)
+    clarifier_session_id: Optional[str] = None
+    clarifier_revision: Optional[int] = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_request(self):
+        if (self.clarifier_session_id is None) != (self.clarifier_revision is None):
+            raise ValueError("Clarifier session and revision must be supplied together")
         validate_selection(self.video_model, self.ai_model, self.language, self.quality)
         if (self.script_text is None) != (self.resolutions is None):
             raise ValueError("script_text and resolutions must be provided together")

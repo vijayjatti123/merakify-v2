@@ -292,6 +292,7 @@ def hardware_reference(language):
 
 def compiler_input(result, *, brief="", emit, camera_contract=False):
     from app.services.boundary_continuity import reviewed_boundaries
+    from app.services.clarifier_service import planning_direction
     verified = reviewed_boundaries(result, brief)
     assembly = result.get("assembly", {})
     if assembly.get("provisional"):
@@ -435,6 +436,7 @@ def compiler_input(result, *, brief="", emit, camera_contract=False):
         item["tagged_product_references"] = [copy.deepcopy(a) for a in shot.get("reference_assets", []) if a.get("role") == "product"]
         inputs.append(item)
     return {"ai_model": result["ai_model"], "model_family": family, "content_type": content_type,
+            "production_direction": planning_direction(result.get("creative_direction")),
             "format": result.get("format"), "style_bible": bible, "multi_shot_context": len(shots) > 1,
             "locations": continuity.get("locations", []), "props": continuity.get("props", []),
             "boundaries": boundaries, "shots": inputs}

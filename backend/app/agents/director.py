@@ -620,10 +620,16 @@ def run_pipeline(db: Session, job_id: str) -> None:
         language = job.language or "English"
         source_script = job.script_text
         resolutions = json.loads(job.resolutions_json) if job.resolutions_json else None
+        direction = json.loads(job.creative_direction_json) if job.creative_direction_json else None
+        from app.services.clarifier_service import planning_direction
+        direction_note = ("\nUser-reviewed production direction (not spoken dialogue; preserve source-script words):\n"
+            + json.dumps(planning_direction(direction), ensure_ascii=False)) if direction else ""
+        if direction:
+            emit("clarifier_handoff", "User-reviewed production direction and answers supplied to planning.")
 
         # 1. Format Classifier — cheap/fast model, this step is pure classification.
         emit("format", "Reading the request, choosing format and structure...")
-        fmt = call_agent(prompts.FORMAT_CLASSIFIER, brief, fast=True)
+        fmt = call_agent(prompts.FORMAT_CLASSIFIER, brief + direction_note, fast=True)
         emit("format", f"Classified as {fmt['format']}, {fmt['structure']} structure, {fmt['num_scenes']} scenes.")
 
         # 2. Script Architect — pasted scripts use a distinct preservation
@@ -636,12 +642,12 @@ def run_pipeline(db: Session, job_id: str) -> None:
                 f"Source script:\n{source_script}\n\nProduction format: {fmt['format']}\n"
                 f"Target duration: {fmt['duration_target_sec']} seconds\n"
                 f"Named characters: {json.dumps(list(resolved_names.get('characters', {})), ensure_ascii=False)}\n"
-                f"Named locations: {json.dumps(list(resolved_names.get('locations', {})), ensure_ascii=False)}",
+                f"Named locations: {json.dumps(list(resolved_names.get('locations', {})), ensure_ascii=False)}" + direction_note,
             )
         else:
             script = call_agent(
                 prompts.SCRIPT_ARCHITECT % language,
-                f"Brief: {brief}\nFormat: {fmt['format']}\nStructure: {fmt['structure']}\nNumber of scenes: {fmt['num_scenes']}",
+                f"Brief: {brief}\nFormat: {fmt['format']}\nStructure: {fmt['structure']}\nNumber of scenes: {fmt['num_scenes']}" + direction_note,
             )
         emit("script", f"Logline locked: \"{script['logline']}\"")
 
@@ -658,7 +664,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
                 f"Characters: {json.dumps(list((resolutions or {}).get('characters', {})), ensure_ascii=False)}\n"
                 f"Locations: {json.dumps(list((resolutions or {}).get('locations', {})), ensure_ascii=False)}"
             )
-        continuity = call_agent(prompts.CONTINUITY_AGENT, continuity_input)
+        continuity = call_agent(prompts.CONTINUITY_AGENT, continuity_input + direction_note)
         override_stats = _apply_continuity_overrides(db, continuity, resolutions, job_brief=brief, emit=emit)
         assigned_voice_count = voice_generation_service.assign_missing_voice_ids(continuity, emit=emit)
         if override_stats["automatic_characters"]:
@@ -704,7 +710,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
 
         cine = call_agent(
             prompts.CINEMATOGRAPHY_AGENT,
-            cinematography_input,
+            cinematography_input + direction_note,
             max_tokens=token_budget,
             truncation_retry_tokens=min(32768, token_budget * 2),
             on_response=record_cinematography_usage,
@@ -781,6 +787,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             "generation_approved": False,
             "assembly": assembly,
             "qa": qa,
+            "creative_direction": direction,
         }
         if source_script:
             result["source_script_text"] = source_script

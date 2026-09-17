@@ -41,6 +41,7 @@ class Job(Base):
     video_model = Column(String, nullable=True)
     script_text = Column(Text, nullable=True)
     resolutions_json = Column(Text, nullable=True)
+    creative_direction_json = Column(Text, nullable=True)
     status = Column(String, default="queued")  # queued | running | done | error
     error_message = Column(Text, nullable=True)
     result_json = Column(Text, nullable=True)  # full pipeline output, stored as JSON text

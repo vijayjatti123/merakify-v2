@@ -8,7 +8,34 @@ from app.db import Base
 from app.services import clarifier_service as service, job_service as storage
 
 
+def assessment(missing=(), confidence=.9):
+    return {"confidence": confidence, "understanding": "A lamp ad.", "coverage": {
+        k: {"status": "missing" if k in missing else "provided", "evidence": "Lamp",
+            "question": service.QUESTIONS[k]} for k in service.QUESTIONS}}
+
+
 class ClarifierTests(unittest.TestCase):
+    def test_existing_jobs_receive_optional_direction_column_idempotently(self):
+        from sqlalchemy import inspect, text
+        from app import db as database
+        legacy = create_engine('sqlite://')
+        with legacy.begin() as conn:
+            conn.execute(text('CREATE TABLE jobs (id VARCHAR PRIMARY KEY, brief TEXT)'))
+            conn.execute(text("INSERT INTO jobs VALUES ('old-job','Unchanged source')"))
+        with patch.object(database, 'engine', legacy):
+            database.ensure_job_intake_columns()
+            database.ensure_job_intake_columns()
+        self.assertIn('creative_direction_json', {c['name'] for c in inspect(legacy).get_columns('jobs')})
+        with legacy.connect() as conn:
+            self.assertEqual(tuple(conn.execute(text('SELECT brief, creative_direction_json FROM jobs')).one()), ('Unchanged source', None))
+        legacy.dispose()
+
+    def test_evidence_allows_only_ordered_verbatim_elision(self):
+        source = "no additional product claims beyond what's stated; keep details open for interpretation."
+        self.assertTrue(service._grounded_excerpt("No additional product claims... open for interpretation.", source))
+        self.assertFalse(service._grounded_excerpt("No additional product claims... guaranteed strongest bond", source))
+        self.assertFalse(service._grounded_excerpt("open for interpretation... no additional product", source))
+
     def setUp(self):
         self.engine = create_engine("sqlite://")
         Base.metadata.create_all(self.engine)
@@ -20,14 +47,14 @@ class ClarifierTests(unittest.TestCase):
         self.engine.dispose()
 
     def test_confidence_stops_without_question(self):
-        with patch.object(service, "call_agent", return_value={"topic": None, "confidence": .8}):
-            row = service.start(self.db, "A complete brief", {})
+        with patch.object(service, "call_agent", return_value=assessment()):
+            row = service.start(self.db, "Lamp complete brief", {})
         self.assertEqual(row.status, "ready")
         self.assertEqual(row.turns, [])
 
     def test_known_creative_topics_are_not_reasked_even_on_failure(self):
         with patch.object(service, "call_agent", side_effect=RuntimeError("outage")):
-            row = service.start(self.db, "Lamp", {"tone": "quiet", "constraints": "no people"})
+            row = service.start(self.db, "Lamp", {k: "known" for k in service.QUESTIONS if k != "differentiator"})
             self.assertEqual(row.turns[0]["topic"], "differentiator")
             row = service.act(self.db, row, "answer", "Adjustable arm")
         self.assertEqual(len(row.turns), 1)
@@ -37,8 +64,69 @@ class ClarifierTests(unittest.TestCase):
         with patch.object(service, "call_agent", return_value={"topic": "language", "confidence": .3}):
             row = service.start(self.db, "Lamp", {"language": "Tamil"})
         self.assertEqual(row.status, "degraded")
-        self.assertEqual(row.turns[0]["topic"], "tone")
+        self.assertEqual(row.turns[0]["topic"], "product")
         self.assertTrue(row.turns[0]["warning"])
+
+    def test_high_score_cannot_skip_product_gap(self):
+        known = {k: "known" for k in ("duration", "aspect_ratio", "content_type", "color_grade", "visual_style", "quality", "language", "ai_model")}
+        with patch.object(service, "call_agent", return_value=assessment(["product"], .99)):
+            row = service.start(self.db, "Lamp", known)
+        self.assertEqual(row.turns[0]["topic"], "product")
+        self.assertLess(row.confidence, .8)
+        self.assertNotIn(row.status, ("ready", "refined", "degraded"))
+
+    def test_bounded_questions_and_no_repeated_topics(self):
+        with patch.object(service, "call_agent", return_value=assessment(list(service.QUESTIONS), .99)):
+            row = service.start(self.db, "Lamp", {})
+            for _ in range(service.MAX_QUESTIONS):
+                row = service.act(self.db, row, "answer", "Please decide")
+        self.assertEqual(len(row.turns), service.MAX_QUESTIONS)
+        self.assertEqual(len({t['topic'] for t in row.turns}), service.MAX_QUESTIONS)
+        self.assertEqual(row.status, "ready")
+        self.assertLess(row.confidence, .8)
+
+    def test_invented_evidence_is_unresolved_without_discarding_valid_assessment(self):
+        result = assessment()
+        result['coverage']['product']['evidence'] = 'Never supplied benefit'
+        with patch.object(service, "call_agent", return_value=result):
+            row = service.start(self.db, "Lamp", {})
+        self.assertLess(row.confidence, .8)
+        self.assertEqual(row.turns[0]['topic'], 'product')
+        self.assertEqual(row.turns[0]['source'], 'fallback')
+        self.assertEqual(row.gathered['_assessment']['unverified'], ['product'])
+        self.assertEqual(row.gathered['_assessment']['coverage']['tone']['status'], 'provided')
+
+    def test_script_handoff_keeps_source_and_rejects_stale_revision(self):
+        from app.schemas import JobCreate
+        row = storage.create_clarifier_session(self.db, 'Meera: "Hello."', {}, context={'input_mode':'script','products':[]})
+        row = storage.update_clarifier_session(self.db, row.session_id, row.revision, {'refined_prompt':'Keep it warm.', 'status':'refined'})
+        payload = JobCreate(brief='Meera: "Hello."', script_text='Meera: "Hello."', resolutions={}, clarifier_session_id=row.session_id, clarifier_revision=row.revision)
+        handoff = service.accepted_direction(self.db, payload)
+        self.assertEqual(handoff['original_input'], 'Meera: "Hello."')
+        job = storage.create_job(self.db, payload.brief, creative_direction=handoff)
+        self.assertIn('Keep it warm.', job.creative_direction_json)
+        payload.clarifier_revision -= 1
+        with self.assertRaises(ValueError):
+            service.accepted_direction(self.db, payload)
+
+    def test_script_refinement_is_separate_bounded_notes_not_rewritten_script(self):
+        row = storage.create_clarifier_session(self.db, 'Meera: "Exact dialogue."', {'language':'Hindi'}, context={'input_mode':'script'})
+        notes = {k:'Use the supplied detail.' for k in service.DIRECTION_FIELDS}
+        with patch.object(service, 'call_agent', return_value={'production_direction':notes}), patch.object(service, 'lookup_techniques', return_value=[]):
+            row = service.act(self.db,row,'refine')
+        self.assertEqual(row.raw_brief,'Meera: "Exact dialogue."')
+        self.assertNotIn('Exact dialogue.',row.refined_prompt)
+        self.assertNotIn('Locked settings',row.refined_prompt)
+        self.assertEqual(row.known_fields,{'language':'Hindi'})
+        self.assertIn('Visual execution:',row.refined_prompt)
+
+    def test_changed_settings_cannot_reuse_old_review(self):
+        from app.schemas import JobCreate
+        row = storage.create_clarifier_session(self.db, 'Lamp', {'language':'Hindi'}, context={'input_mode':'idea','products':[]})
+        row = storage.update_clarifier_session(self.db,row.session_id,row.revision,{'refined_prompt':'Lamp ad','status':'refined'})
+        payload = JobCreate(brief='Lamp ad', language='English',clarifier_session_id=row.session_id,clarifier_revision=row.revision)
+        with self.assertRaisesRegex(ValueError,'settings changed'):
+            service.accepted_direction(self.db,payload)
 
     def test_atomic_stale_writer_cannot_overwrite(self):
         row = storage.create_clarifier_session(self.db, "Lamp", {})
