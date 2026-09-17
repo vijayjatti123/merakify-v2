@@ -220,3 +220,28 @@ paid calls. No automatic model fallback is performed. Request/persistence/UI
 regressions are tested; real rendered voice fidelity and sync remain unverified
 for the new routes. This extends the existing core rendering workflow rather
 than introducing another orchestrator.
+
+### Approved product references
+
+The intake screen accepts up to four named products separately from characters.
+Upload a photo, select its product area, optionally prepare a clean background
+through fal `pixelcut/product-photo`, then explicitly approve the prepared image
+or cropped original. Preparation uses the existing server-side `FAL_API_KEY`;
+the UI shows the published approximate per-image charge before submission.
+Original, cropped and prepared images are stored separately in S3. Approved
+products are immutable and reusable without further preparation charges.
+
+New `products` and `job_products` tables use the existing metadata startup
+creation pattern. Jobs snapshot approved product keys, including script intake
+and retries. Preview generation and visual QA receive those locked references
+within the existing reference cap. Existing packaging lettering is preserved;
+invented captions remain prohibited. Video requests keep the accepted scene
+image as their starting/reference image, never the standalone product cutout.
+
+Preparation uses a durable single-submission claim and a saved fal request ID.
+Opening a pending product resumes polling. An uncertain submission is not
+automatically resubmitted; failures retain the original and offer an explicit
+original-image choice. Review is necessary: cutouts may retain unwanted props,
+and generative scenes cannot guarantee pixel-perfect small packaging text.
+This extends the README real-asset-generation milestone and existing core
+workflow; it introduces no character voice or second Director pipeline.

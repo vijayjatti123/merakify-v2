@@ -223,6 +223,7 @@ def _reference_parts(references, continuation, *, checking=False, emit=None):
 
 def generate_still(visual, references, aspect_ratio, feedback="", *, continuation=None, emit=None):
     parts = _reference_parts(references, continuation, emit=emit)
+    product_reference = any(len(ref) > 2 and ref[2].startswith("product:") for ref in references)
     parts.append({"text": (
         "Generate ONE still image: the opening frame of this compiled film shot. "
         "Freeze the first described physical instant; later motion and transition descriptions are "
@@ -230,7 +231,8 @@ def generate_still(visual, references, aspect_ratio, feedback="", *, continuatio
         "framing, subject placement, lighting, palette and rendering style. Supplied reference images "
         "lock each named character's identity, face, hair and clothing; do not replace their face. "
         "Reference sheets are identity guides, never reproduce their layout. No collage, captions, "
-        "logos, readable text or audio.\nCompiled visual description:\n" + visual
+        + ("invented logos, captions or audio. Preserve existing product packaging text/logos exactly as shown in approved product references.\nCompiled visual description:\n" if product_reference
+           else "logos, readable text or audio.\nCompiled visual description:\n") + visual
         + ("\nCorrect the previous visual check: " + feedback if feedback else "")
     )})
     response = _google(parts, aspect_ratio=aspect_ratio)
@@ -249,10 +251,12 @@ def generate_still(visual, references, aspect_ratio, feedback="", *, continuatio
 
 
 def check_still(visual, references, image, *, emit=None, entities=None, continuation=None):
+    product_reference = any(len(ref) > 2 and ref[2].startswith("product:") for ref in references)
     parts = [{"text": (
         "Check this single opening-frame preview against the compiled visual description and any "
         "locked character references. Reject clear identity/outfit changes, wrong subject or framing, "
-        "collages, readable text, or a later completed action instead of the described opening. "
+        + ("collages, invented captions, changed product branding/shape/packaging, or a later completed action. Existing text/logos on approved product packaging are required and must NOT be rejected as readable text. " if product_reference
+           else "collages, readable text, or a later completed action instead of the described opening. ") +
         "Ignore motion/audio requirements that cannot be depicted in a still. Do not demand new "
         "details absent from the description. Return JSON only: {\"approved\": boolean, \"reason\": string}.\n"
         + visual
@@ -360,6 +364,10 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
     reference_map = result.setdefault("entity_references", {}) if shot_numbers is not None else {}
     result["entity_references"] = reference_map
     reference_bytes = {}
+    from app.db import SessionLocal
+    from app.services.product_service import job_references
+    with SessionLocal() as product_db:
+        products = job_references(product_db, job_id)
     ordered = sorted(result.get("shots", []), key=lambda s: s["shot_number"])
     previous_image = None
     # This loop was already synchronous for Module P. Keep generation, QA and
@@ -401,6 +409,8 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                 visual += "\nRequested image adjustment (preserve locked identity and style): " + feedback_by_shot[number]
             entities = match_entities(result, shot, visual)
             references = []
+            if products:
+                shot["approved_product_references"] = products
             for name in shot.get("characters_in_shot", []):
                 character = characters.get(name.strip().casefold(), {})
                 if character.get("character_id"):
@@ -408,6 +418,17 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                         raise StillFrameError("Locked character has no reference image")
                     references.append((name, _download_reference_image(fresh_reference(character["image_url"])),
                                        character["image_url"], 0, 0))
+            for product in products:
+                key = product["object_key"]
+                if key not in reference_bytes:
+                    reference_bytes[key] = _download_reference_image(storage_service.asset_url(key))
+                references.append(("Product " + product["name"] + "; preserve packaging, geometry, color, logo and printed text. Use only when this shot calls for the product; never copy the reference layout or unrelated props",
+                                   reference_bytes[key], "product:" + key, 0, 0))
+                emit("still_frame", f"Shot {number}: approved product reference {product['product_id']} attached for generation and QA.")
+            if products:
+                visual += "\nApproved product images lock product identity, NOT this scene's framing. Do not insert a product into a shot that does not call for it."
+                if len(references) > MAX_REFERENCE_IMAGES:
+                    raise StillFrameError("Too many locked character/product references for this shot; reduce the selected references.")
             for entity_id in entities:
                 if entity_id in reference_map and reference_map[entity_id]["shot_number"] < number:
                     if entity_id not in reference_bytes:

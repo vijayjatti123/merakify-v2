@@ -256,3 +256,13 @@ export async function enhanceShotFace(jobId, shot) {
   if (!res.ok) throw new Error(data.detail || "Could not start face enhancement");
   return data;
 }
+
+export async function productRequest(path = "", payload) {
+  const multipart = payload instanceof FormData;
+  const res = await fetch(`${BASE_URL}/api/products${path}`, {
+    method: payload === undefined ? "GET" : "POST", cache: "no-store",
+    ...(payload === undefined ? {} : {headers: multipart ? {} : {"Content-Type":"application/json"}, body: multipart ? payload : JSON.stringify(payload)})
+  });
+  if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(typeof body.detail === "string" ? body.detail : "Couldn't update your product. Please try again."); }
+  return res.json();
+}

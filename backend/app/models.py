@@ -185,3 +185,26 @@ class KlingVoice(Base):
     status = Column(String, nullable=False)
     data_json = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Product(Base):
+    __tablename__ = "products"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False)
+    original_key = Column(String, nullable=False)
+    crop_key = Column(String, nullable=False)
+    prepared_key = Column(String)
+    accepted_key = Column(String)
+    status = Column(String, nullable=False, default="uploaded")
+    request_id = Column(String)
+    started_at = Column(DateTime)
+    error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class JobProduct(Base):
+    __tablename__ = "job_products"
+    job_id = Column(String, ForeignKey("jobs.id"), primary_key=True)
+    product_id = Column(String, ForeignKey("products.id"), primary_key=True)
+    name = Column(String, nullable=False)
+    object_key = Column(String, nullable=False)  # immutable job reference snapshot

@@ -289,6 +289,7 @@ def _create_and_start_job(
     video_model: str | None = None,
     script_text: str | None = None,
     resolutions: dict | None = None,
+    product_ids: list[str] | None = None,
 ) -> JobOut:
     job = job_service.create_job(
         db,
@@ -302,6 +303,7 @@ def _create_and_start_job(
         video_model=video_model,
         script_text=script_text,
         resolutions=resolutions,
+        product_ids=product_ids,
     )
     job_service.queue_pipeline_task(db, job.id, "plan")
     return _job_out(job)
@@ -399,6 +401,11 @@ def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Sessio
         raise HTTPException(status_code=400, detail="brief cannot be empty")
     if not payload.language.strip():
         raise HTTPException(status_code=400, detail="language cannot be empty")
+    from app.services.product_service import selected
+    try:
+        selected(db, payload.product_ids)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     brief, script, resolutions = _resolve_brief_mentions(payload, db)
     return _create_and_start_job(
         brief,
@@ -413,6 +420,7 @@ def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Sessio
         video_model=payload.video_model,
         script_text=script,
         resolutions=resolutions,
+        product_ids=payload.product_ids,
     )
 
 
@@ -653,6 +661,8 @@ def retry_job(
     job = job_service.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
+    from app.services.product_service import job_references
+    product_ids = [p["product_id"] for p in job_references(db, job.id)]
     enriched_brief = _retry_brief(job, payload.change_request if payload else None)
     retried = _create_and_start_job(
         enriched_brief,
@@ -665,6 +675,7 @@ def retry_job(
         language=job.language,
         ai_model=job.ai_model,
         video_model=job.video_model,
+        product_ids=product_ids,
     )
     return {"id": retried.id}
 

@@ -1,3 +1,4 @@
+import ProductPicker from "../components/ProductPicker";
 import { VIDEO_MODELS, modelNote } from "../utils/videoModels";
 import { Sparkles, FileText, ChevronUp, ImagePlus, Loader2, Plus, X, Smartphone, Monitor, Clock3 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -56,6 +57,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   }, [savedJob]);
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [assets, setAssets] = useState([]);
+  const [products, setProducts] = useState([]);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [loadingAssets, setLoadingAssets] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -148,6 +150,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     try {
       await onSubmit({
         brief: briefParts.join("\n\n"),
+        product_ids: products.map(p => p.id),
         character_mentions: activeMentions(brief, characterSelections),
         aspect_ratio: aspectRatio,
         visual_style: visualStyle,
@@ -170,6 +173,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     if (selectedAsset) briefParts.push(`Reference image: ${selectedAsset.url}`);
     await onSubmit({
       brief: briefParts.join("\n\n"),
+        product_ids: products.map(p => p.id),
       aspect_ratio: aspectRatio,
       visual_style: visualStyle,
       color_grade: colorGrade,
@@ -226,6 +230,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               role="status" aria-live="polite" data-testid="clarifier-activation-hint" sx={{ mt: -1.5 }}>
               {refinementHint}
             </Typography>}
+            <ProductPicker selected={products} onChange={setProducts} disabled={collapsed || submitting} />
             <ClarifierPanel brief={brief} onUse={setBrief} disabled={collapsed || scriptMode || submitting}
               knownFields={{ duration: effectiveDuration, aspect_ratio: aspectRatio, content_type: contentType,
                 color_grade: colorGrade, visual_style: visualStyle, quality, language: effectiveLanguage, ai_model: aiModel }} />

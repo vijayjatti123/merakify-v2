@@ -44,6 +44,16 @@ def fresh_url(url):
 
 
 def translate(result, shot, *, audio_model=None):
+    translated = _translate(result, shot, audio_model=audio_model)
+    if shot.get("approved_product_references"):
+        prompt = translated["request"]["prompt"]
+        prompt = prompt.replace("no readable text, logos or extra subjects", "no added captions, invented logos or extra subjects")
+        prompt = prompt.replace("No on-screen text, logos or readable signage; composite text in post.", "No added captions or invented logos.")
+        translated["request"]["prompt"] = prompt + "\nPreserve the product geometry, materials, colors and existing packaging lettering/logos visible in the accepted scene image. Do not insert any product absent from that scene."
+    return translated
+
+
+def _translate(result, shot, *, audio_model=None):
     if is_onscreen_speech(shot):
         from app.services import audio_video_service
         return audio_video_service.translate(result, shot, audio_model)

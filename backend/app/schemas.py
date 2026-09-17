@@ -91,6 +91,7 @@ class JobCreate(BaseModel):
     video_model: Optional[VideoModel] = None
     script_text: Optional[str] = None
     resolutions: Optional[ScriptResolutionMap] = None
+    product_ids: list[str] = Field(default_factory=list, max_length=4)
     character_mentions: dict[str, str] = Field(default_factory=dict, max_length=20)
 
     @model_validator(mode="after")

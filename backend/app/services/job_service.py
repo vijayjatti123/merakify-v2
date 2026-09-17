@@ -51,6 +51,7 @@ def create_job(
     video_model: str | None = None,
     script_text: str | None = None,
     resolutions: dict | None = None,
+    product_ids: list[str] | None = None,
 ) -> Job:
     from app.video_models import validate_selection
     validate_selection(video_model, ai_model, language, quality)
@@ -68,6 +69,10 @@ def create_job(
         brief = "\n".join(line for line in brief.split("\n") if line.strip() not in metadata_lines).rstrip()
         if selected != values[0]:
             brief += f"\n\n{label}: {selected}."
+    from app.services.product_service import selected, JobProduct
+    products = selected(db, product_ids or [])
+    if products:
+        brief += "\n\nApproved product references: " + ", ".join(p.name for p in products) + ". Preserve the named products and their packaging; no voice or character identity is attached to them."
     job = Job(
         brief=brief,
         aspect_ratio=aspect_ratio,
@@ -82,6 +87,9 @@ def create_job(
         status="queued",
     )
     db.add(job)
+    db.flush()
+    for product in products:
+        db.add(JobProduct(job_id=job.id, product_id=product.id, name=product.name, object_key=product.accepted_key))
     db.commit()
     db.refresh(job)
     return job
