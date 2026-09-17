@@ -3,6 +3,15 @@ from app.services.repetition_categories import classify_repetition_tokens, creat
 
 
 class CategoryTests(unittest.TestCase):
+    def test_short_wardrobe_facts_do_not_exempt_surrounding_action(self):
+        source = {"character_references": [{"character_id": "carpenter", "locked_vault_description":
+            "A middle aged indian carpenter, wearing casual shirt and pant with tool kit fixed around his waist"}]}
+        classified = self.classify("at his waist over his casual shirt and", source)
+        self.assertTrue(any(t['category'] == 'LOCKED_FACT' and t['text'] == 'shirt' for t in classified))
+        phrase = "he turns toward the door and slowly smiles again"
+        self.assertEqual(creative_windows(self.classify(phrase, source)), creative_windows(self.classify(phrase)))
+        self.assertTrue(creative_windows(self.classify(phrase, source)))
+
     def classify(self, text, source=None, style=None):
         return classify_repetition_tokens(text, source or {}, style or {})
 

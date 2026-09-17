@@ -17,7 +17,10 @@ def _vault_fact_tokens(text):
 
 def _vault_fact_ids(phrase, source):
     needle = _vault_fact_tokens(" ".join(phrase))
-    if len(needle) < 6:
+    # Short exact wardrobe/accessory facts ("casual shirt", "tool kit")
+    # are still Vault facts. Require two content words and contiguous source
+    # provenance; never exempt isolated common words or inferred synonyms.
+    if len(needle) < 2:
         return set()
     ids = set()
     for ref in source.get("character_references", []):

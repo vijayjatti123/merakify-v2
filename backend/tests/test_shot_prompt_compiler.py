@@ -37,6 +37,20 @@ def creative_prose():
 
 
 class CompilerTests(unittest.TestCase):
+    def test_serialization_supplies_missing_style_and_character_placement(self):
+        result = source()
+        result['continuity']['characters'] = [{'name':'Meera','gender':'female'}]
+        result['shots'][0].update(characters_in_shot=['Meera'], composition_note='Meera screen right', description='Meera holds a cup')
+        payload = compiler.compiler_input(result, emit=Mock(), camera_contract=True)
+        raw = {'shots':[{'shot_number':1,'compiled_prompt':'Meera holds the cup beside the window. The light describes the blue ceramic.'}]}
+        before = compiler.validate_compiled(raw, payload)
+        self.assertTrue(any('Render style sentence missing' in e for e in before))
+        final = compiler.insert_dialogue(raw, payload)
+        self.assertIn('Render style: natural; Composition: Meera screen right.', final['shots'][0]['compiled_prompt'])
+        after = compiler.validate_compiled(final, payload)
+        self.assertFalse(any('Render style sentence missing' in e or 'composition placement' in e for e in after))
+        self.assertTrue(any('word count' in e for e in after))  # Other quality checks remain enforced.
+
     def test_shared_physical_state_reaches_both_shots_and_boundary(self):
         result = source()
         state = "Glass half-full; stream still entering from above."

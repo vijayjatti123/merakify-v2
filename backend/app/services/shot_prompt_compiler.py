@@ -80,6 +80,19 @@ def insert_dialogue(response, payload):
             continue
         # Fixed boundary after visual prose. Source bytes/codepoints are untouched.
         visual = value.removesuffix(TEXT_GUARD).rstrip()
+        # Like camera/audio serialization, required style and screen placement
+        # are source facts owned by code, not optional prose the model may omit.
+        if source.get("locked_visual_instruction"):
+            instruction = source["locked_visual_instruction"]
+            if "Render style:" not in visual:
+                label = re.match(r"\[Shot \d+:[^\]]*\]\s*", visual)
+                if label:
+                    visual = visual[:label.end()] + instruction + " " + visual[label.end():]
+                else:
+                    visual = instruction + " " + visual
+            elif source.get("placement_instruction") and source["placement_instruction"] not in visual:
+                # Compatibility with old/cached prose: still preserve placement.
+                visual = visual.rstrip(".") + "; " + source["placement_instruction"] + "."
         if source.get("camera_instruction") and source["camera_instruction"] not in visual:
             visual += " " + source["camera_instruction"]
         image_reference = reference_insert(source)
@@ -278,6 +291,8 @@ def hardware_reference(language):
 
 
 def compiler_input(result, *, brief="", emit, camera_contract=False):
+    from app.services.boundary_continuity import reviewed_boundaries
+    verified = reviewed_boundaries(result, brief)
     assembly = result.get("assembly", {})
     if assembly.get("provisional"):
         raise ValueError("Shot compiler requires real, completed Assembly transitions")
@@ -302,14 +317,21 @@ def compiler_input(result, *, brief="", emit, camera_contract=False):
             raise ValueError(f"Shot compiler missing Assembler boundary {key}; will not invent a cut")
         boundary = copy.deepcopy(by_boundary[key])
         end_state, start_state = left.get("state_at_shot_end"), right.get("state_at_shot_start")
+        review = verified.get(key)
+        if review:
+            boundary["temporal_relation"] = review["relation"]
+            boundary.pop("shared_physical_state", None)
+            if review["relation"] == "same_instant":
+                boundary["shared_physical_state"] = review["shared_physical_state"]
         if (left.get("scene_number") is not None and left.get("scene_number") == right.get("scene_number")
                 and boundary["type"] in {"cut", "match cut"}
-                and not re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I)
+                and not review
                 and (end_state or start_state)):
             # Never invent or silently reconcile contradictory upstream physical facts.
             if not isinstance(end_state, str) or not isinstance(start_state, str) or end_state.strip() != start_state.strip():
                 raise ValueError(f"Physical state boundary {key}: end/start must describe the same instant with identical text; replan this boundary")
             boundary["shared_physical_state"] = end_state.strip()
+            boundary["temporal_relation"] = "same_instant"
             emit("shot_prompt_compiler", f"Physical state boundary {key}: matching end/start supplied to both shots.")
         if boundary["type"] == "cut" and similar_framing(left.get("camera_angle", ""), right.get("camera_angle", "")):
             boundary["similar_framing_risk"] = True
@@ -351,6 +373,17 @@ def compiler_input(result, *, brief="", emit, camera_contract=False):
                 ref["locked_vault_description"] = character.get("description")
             refs.append(ref)
         item["character_references"] = refs
+        if camera_contract:
+            placements = []
+            for ref in refs:
+                for side in ("left", "right"):
+                    if re.search(re.escape(ref["name"]) + r"\s+(?:screen[- ])?" + side + r"\b", shot.get("composition_note") or "", re.I):
+                        placements.append(f'{ref["name"]} screen {side}')
+            item["placement_instruction"] = "Composition: " + "; ".join(placements) if placements else ""
+            item["locked_visual_instruction"] = "Render style: " + bible["rendering"].rstrip(". ")
+            if placements:
+                item["locked_visual_instruction"] += "; " + item["placement_instruction"]
+            item["locked_visual_instruction"] += "."
         item["subject_anchor"] = refs[0]["name"] if refs else shot.get("description", "").rstrip(".!?। ")
         # An upstream cast tag is not necessarily the visible foreground subject:
         # "Close on cup resting on table" must open on the cup, not its owner.
@@ -483,7 +516,8 @@ def validate_compiled(response, payload):
         minimum, maximum = word_range(payload, source)
         if not minimum <= len(words) <= maximum:
             problems.append(f"word count {len(words)}; requires {minimum}-{maximum}")
-        opening_tokens = set(re.findall(r"\w+", " ".join(words[:30]).casefold()))
+        subject_prose = value.replace(source.get("locked_visual_instruction") or "\x00", "")
+        opening_tokens = set(re.findall(r"\w+", " ".join(subject_prose.split()[:30]).casefold()))
         anchor_tokens = set(re.findall(r"\w+", source["subject_anchor"].casefold())) - {"a", "an", "the"}
         # Subject facts may be separated by articles or grounded modifiers:
         # "clear bottle" -> "clear water bottle", without requiring pasted prose.
@@ -584,6 +618,9 @@ def validate_compiled(response, payload):
         prose = output.get("compiled_prompt", "")
         if source.get("camera_instruction"):
             prose = prose.replace(source["camera_instruction"], "")
+        for field in ("locked_visual_instruction", "placement_instruction"):
+            if source.get(field):
+                prose = prose.replace(source[field], "")
         if reference_insert(source):
             prose = prose.replace(reference_insert(source), "")
         if source["has_dialogue"]:
@@ -633,11 +670,20 @@ def validate_compiled(response, payload):
             left, right = (int(n) for n in boundary["between"].split("-"))
             left_visual = by_number[left].split("\nDialogue:")[0].replace(TEXT_GUARD, "").replace(AUDIO_GUARD, "")
             left_source = next(s for s in payload["shots"] if s["shot_number"] == left)
+            right_source = next(s for s in payload["shots"] if s["shot_number"] == right)
+            right_visual = by_number[right]
+            # Code-owned style/placement must not masquerade as the matched
+            # opening action or make unrelated shots share a visual motif.
+            for field in ("locked_visual_instruction", "placement_instruction"):
+                if left_source.get(field):
+                    left_visual = left_visual.replace(left_source[field], "")
+                if right_source.get(field):
+                    right_visual = right_visual.replace(right_source[field], "")
             if reference_insert(left_source):
                 left_visual = left_visual.replace(reference_insert(left_source), "")
             left_visual = re.sub(r"https?://\S+", "", left_visual)
             tail = " ".join(re.split(r"[.!?]\s+", left_visual.strip())[-2:])
-            opening = re.split(r"[.!?]\s+", by_number[right])[0]
+            opening = re.split(r"[.!?]\s+", right_visual.strip())[0]
             stop = set("the a an and or in on at to of with as its it her his their this that same shot frame camera from into is stays remains holds".split())
             shared = (set(re.findall(r"\w+", tail.casefold())) & set(re.findall(r"\w+", opening.casefold()))) - stop
             # Natural final action can establish the ending without literally
@@ -662,6 +708,8 @@ def shot_batches(payload):
 
 
 def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=None):
+    from app.services.boundary_continuity import prepare_boundaries
+    prepare_boundaries(result, brief=brief, emit=emit, call_agent=call_agent)
     started = time.monotonic()
     payload = compiler_input(result, brief=brief, emit=emit, camera_contract=True)
     groups = list(shot_batches(payload))
@@ -684,7 +732,7 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=No
     model_input = copy.deepcopy(payload)
     for source, item in zip(payload["shots"], model_input["shots"]):
         reference = dialogue_insert(source, payload["model_family"])
-        reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split()) + len(TEXT_GUARD.split()) + len(source.get("camera_instruction", "").split())
+        reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split()) + len(TEXT_GUARD.split()) + len(source.get("camera_instruction", "").split()) + len(source.get("locked_visual_instruction", "").split())
         for ref in item["character_references"]:
             ref["has_image_reference"] = bool(ref.pop("image_url", None))
             ref["has_locked_identity"] = bool(ref.get("locked_vault_description"))
@@ -698,7 +746,7 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=No
         item["visual_word_target"] = [max(1, n - reserved) for n in target]
         item["visual_word_range"] = [max(1, minimum - reserved), maximum - reserved]
         item["programmatic_reserved_words"] = reserved
-        item["visual_sentence_max"] = 4 - int(bool(reference)) - int(bool(reference_insert(source)))
+        item["visual_sentence_max"] = max(1, 4 - int(bool(reference)) - int(bool(reference_insert(source))) - int(bool(source.get("locked_visual_instruction"))))
         # The validator retains the original lookup. The model gets the required
         # identifier separately from its optical purpose, never a copyable stock
         # phrase that its repetition check correctly rejects across shots.

@@ -470,6 +470,10 @@ def assemble_shots(shots, characters, target_duration_sec, *, narrator_voice_ref
 
 def _prepare_media_parallel(db, job_id, result, *, brief, emit):
     """Private branch snapshots; only this owning thread writes the job or events."""
+    from app.services.boundary_continuity import prepare_boundaries
+    # Resolve boundary meaning BEFORE either paid preview work or Compiler work starts.
+    # Historical retries keep accepted previews; only this review metadata is added.
+    prepare_boundaries(result, brief=brief, emit=emit, call_agent=call_agent)
     messages = queue.Queue()
     started = time.monotonic()
     result["video_prompts_pending"] = True

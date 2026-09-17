@@ -245,3 +245,15 @@ original-image choice. Review is necessary: cutouts may retain unwanted props,
 and generative scenes cannot guarantee pixel-perfect small packaging text.
 This extends the README real-asset-generation milestone and existing core
 workflow; it introduces no character voice or second Director pipeline.
+
+### Compiler fixed instructions and transition continuity
+
+The existing Compiler serializes locked rendering/character placement alongside
+camera/audio instructions, reserving their word budget. Source-grounded short
+Vault wardrobe facts are excluded from repetition; creative prose, hardware
+explanations and word limits remain validated. Code-owned style cannot satisfy
+a match-cut action check by itself. Mismatched same-scene boundary snapshots use
+the existing pipeline's bounded continuity review to distinguish progression
+from a genuine contradictory same-instant state; verified results are cached
+only for unchanged source inputs. Accepted previews can be reused on instruction
+retry without new image generation.
