@@ -1,4 +1,5 @@
 from app.services.speech_mode import is_voiceover
+from app.services.camera_direction import check_plan as check_camera_plan
 import json
 import copy
 import queue
@@ -340,6 +341,7 @@ def validate_and_correct(
         max_tokens=3072,
     )
 
+    qa = check_camera_plan(qa, current_shots)
     protected = protected_dialogue(current_shots, source_script_text)
     issues, verified, rejected, limitations = screen_issues(current_shots, qa.get("issues", []), protected, notify)
     qa = {**qa, "issues": issues}
@@ -373,6 +375,7 @@ def validate_and_correct(
             f"Shots: {json.dumps(current_shots)}\nCharacters: {json.dumps(characters)}",
             max_tokens=3072,
         )
+        qa = check_camera_plan(qa, current_shots)
         remaining, _, rejected_again, blocked_again = screen_issues(current_shots, qa.get("issues", []), protected, notify)
         rejected.extend(rejected_again)
         limitations.extend(blocked_again)
@@ -486,7 +489,8 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
                     on_progress=lambda current: messages.put(("preview_progress", copy.deepcopy(current))))
                 messages.put(("preview_progress", snapshot))
             else:
-                shots = compile_shot_prompts(snapshot, brief=brief, emit=notify, call_agent=call_agent)
+                shots = compile_shot_prompts(snapshot, brief=brief, emit=notify, call_agent=call_agent,
+                    on_checkpoint=lambda checkpoint: messages.put(("compiler_checkpoint", copy.deepcopy(checkpoint))))
                 expected = {s["shot_number"] for s in snapshot["shots"]}
                 if len(shots) != len(expected) or {s["shot_number"] for s in shots} != expected or any(
                         not isinstance(s.get("compiled_prompt"), str) or not s["compiled_prompt"].strip() for s in shots):
@@ -520,7 +524,11 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
                     if k.startswith("still_frame_") or k in {"preview_input", "preview_dependencies"}})
             result["entity_references"] = current.get("entity_references", {})
             job_service.set_result(db, job_id, result)
+        elif action == "compiler_checkpoint":
+            result["video_prompt_checkpoint"] = message[1]
+            job_service.set_result(db, job_id, result)
         elif action == "compiled":
+            result.pop("video_prompt_checkpoint", None)
             compiled = {s["shot_number"]: s["compiled_prompt"] for s in message[1]}
             for shot in result["shots"]:
                 shot["compiled_prompt"] = compiled[shot["shot_number"]]
@@ -677,6 +685,9 @@ def run_pipeline(db: Session, job_id: str) -> None:
         )
         if source_script:
             cinematography_input += f"\nLocations: {json.dumps(continuity['locations'])}"
+        cinematography_input += f"\nSelected video model: {job.video_model or job.ai_model}. Use plain natural-language camera instructions; no invented provider control tokens."
+        if job.video_model == "kling_avatar_fal":
+            cinematography_input += "\nExperimental speaking-avatar model: prefer a held viewpoint and restrained performance; complex scene-camera motion is unverified."
         cinematography_input += f"\nTarget total duration: {fmt['duration_target_sec']} seconds"
         from app.services.voice_timing import measured_budget
         cinematography_input += f"\nMeasured dialogue budget: {json.dumps(measured_budget(db, language))}"

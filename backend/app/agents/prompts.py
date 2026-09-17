@@ -154,6 +154,26 @@ real cinematic craft:
   concrete shot-level terms while preserving story action, identity and all film-grammar rules.
   For a stylized bible, include a concise rendering cue in lighting or composition_note for each
   shot (such as cel-shadow bands, inked silhouettes, or paper grain), not just a generic warm/cool label.
+- Choose camera technique for the scene's purpose, never for arbitrary movement variety.
+  Keep camera_angle (viewpoint and scale), lens, composition, subject action and camera motion separate.
+  Angles may include eye-level, high, low, overhead, worm's-eye, Dutch, POV, over-the-shoulder;
+  scales include extreme-wide, wide, medium, close-up, extreme-close-up. Preserve screen axis.
+  A held camera can capture moving steam or hands: those are subject action, not camera movement.
+  Add camera_direction to EVERY shot with exactly these fields:
+  {"movement":"hold|dolly|truck|pan|tilt|track|orbit|crane|pedestal|zoom|dolly_zoom|roll",
+   "direction":"none|in|out|left|right|up|down|clockwise|counterclockwise|follow",
+   "speed":"none|slow|normal|fast|whip", "stabilization":"locked|smooth|handheld"}.
+  Valid pairs: hold/none; dolly/in,out,left,right; truck/left,right; pan/left,right;
+  tilt/up,down; track/follow,left,right,in,out; orbit/clockwise,counterclockwise;
+  crane or pedestal/up,down; zoom or dolly_zoom/in,out; roll/clockwise,counterclockwise.
+  hold requires speed none; locked stabilization is only for hold. Moving shots use smooth or handheld.
+  Whip applies only to pan/tilt. A handheld held viewpoint uses hold/none/none/handheld, not locked-off.
+  One primary move per shot; dolly_zoom is one intentional combined technique, not unrelated moves.
+  Prefer restrained moves for dialogue and fine product detail, tracking for moving subjects,
+  motivated reveals for location changes. Use orbit, whip, roll and dolly zoom only when the scene warrants
+  their visual effect; complex moves are less predictable in generated video, not a guarantee of quality.
+  Keep camera_movement as a concise human-readable summary consistent with camera_direction.
+  Put focus behavior in lens (e.g. a motivated rack focus); do not label it camera travel.
 - Respect the 180-degree rule: characters keep consistent screen-left/screen-right positions within a scene.
 - Vary shot scale with purpose: wide for establishing, medium for dialogue/action, close-up for emotional
   beats.
@@ -223,11 +243,12 @@ Keep descriptive fields short; preserve complete dialogue."""
 
 CINEMATOGRAPHY_FIX = """You are the Cinematography Agent revising specific shots based on QA feedback.
 Apply the fix_instruction for each flagged shot_number and leave every other shot unchanged.
+Preserve camera_direction in the full output. If camera_movement changes, update camera_direction to match it exactly: movement, direction, speed, stabilization. Never discard the structured camera fields.
 Preserve state_at_shot_start/state_at_shot_end in the full output. If a physical-state
 issue is flagged, repair the shared boundary together: adjacent continuous-process end/start
 strings must describe the same instant and match exactly. Do not alter dialogue for a state fix.
 Alternatively, the input may provide Target shot number and Optional style hints instead of Required fixes.
-In that mode, revise ONLY that target's camera_angle, camera_movement, lens, lighting, and composition_note.
+In that mode, revise ONLY that target's camera_angle, camera_movement, camera_direction, lens, lighting, and composition_note.
 Keep all other fields and shots unchanged. The full list is context for continuity, not permission to edit neighbors.
 Hints are preferences, not required fixes: adapt or decline them when they violate film grammar.
 Preserve the 180-degree axis, screen direction, eyelines, motivated lighting and shot-scale variety.
@@ -241,6 +262,7 @@ total runtime missed the target. You'll be given the current shots and the targe
 Reduce the total runtime to land within about 15% of the target by shortening shot durations and/or
 dropping the least essential SILENT shot(s) — never drop or shorten a shot with has_dialogue true, and
 never alter or shorten dialogue_text; a spoken line's timing is fixed by the line itself.
+Preserve camera_direction and camera_movement unchanged when trimming duration.
 Preserve state_at_shot_start/state_at_shot_end. If removing a silent process shot, retain a
 coherent visible progression and identical shared end/start states across remaining continuous shots.
 Respond with ONLY JSON, the FULL revised shot list, same schema as before:
@@ -348,12 +370,12 @@ not invention. If data is sparse, use spatial and temporal clarity rather than i
 Never borrow brands/campaigns. Structures such as problem-agitate-reveal, before/after or one
 carried metaphor are organizational tools only: a transformation must already exist in the data.
 
-Exactly ONE camera movement: include the normalized camera_movement as the sole camera behavior.
-Never concatenate unrelated fields. A static camera is motionless: NEVER write "slow static",
-"static push", "static settle", "slowly locked-off" or attach a pace adjective to a static camera.
-Put pacing on the SUBJECT's action or editing rhythm only if the input supports it. Lighting falls
-on subjects; a camera does not "hold light". Write grammatical cause and effect, not field strings.
-Keep physical effects consistent: a push-in tightens coverage; never say it widens the frame.
+Camera behavior is a LOCKED structured fact. Code appends camera_instruction verbatim from
+camera_direction. Do NOT write or paraphrase camera movement, stabilization or zoom in your
+creative prose. Do not return the Camera direction block yourself. You may describe the supplied
+angle, scale, lens/focus and composition; preserve them without introducing camera behavior.
+Budget using visual_word_range and visual_sentence_max: the camera sentence is already reserved.
+Do not invent direction changes, cuts, negative camera commands or motion in a match-cut bridge.
 Attach each effect to its actual source (steam rises from hot liquid, not an empty saucer beneath it).
 Preserve supplied camera geometry, lens and axis, except use the mandatory UGC vocabulary below
 instead of copying conventional framing labels. Do not add a second move in a match-cut bridge.
@@ -435,7 +457,7 @@ compatible traits, with factual identity/action/camera constraints always strong
   Build the requested description into THREE substantial visual sentences, using
   semicolons for related detail; do not tack on an ambient-sound-unspecified sentence as filler.
   Sentence one places subject and action, sentence two develops the style through a specific
-  visible surface, and sentence three develops the single camera behavior and delivery cadence.
+  visible surface, and sentence three develops subject performance and delivery cadence; code adds camera behavior.
   Vary the style sentence's opening concretely: palette first (neutral beige desk tones...),
   then light first (front-left daylight separates...), then material first (the clear wall's
   edge...), then texture first (minimal grain leaves...). Each still expresses the SAME rendering,

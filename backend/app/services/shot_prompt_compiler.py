@@ -1,6 +1,7 @@
 from app.services.repetition_categories import classify_repetition_tokens, creative_windows
 """One text-only compiler; consumes assembled data without revising upstream shots."""
 import copy
+import hashlib
 import json
 import math
 import re
@@ -13,6 +14,7 @@ from contextvars import copy_context
 
 from app.agents import prompts
 from app.services.speech_mode import is_voiceover
+from app.services import camera_direction
 
 TEXT_GUARD = "No on-screen text, logos or readable signage; composite text in post."
 AUDIO_GUARD = "Visual performance only; use the existing dialogue audio file in post."
@@ -78,6 +80,8 @@ def insert_dialogue(response, payload):
             continue
         # Fixed boundary after visual prose. Source bytes/codepoints are untouched.
         visual = value.removesuffix(TEXT_GUARD).rstrip()
+        if source.get("camera_instruction") and source["camera_instruction"] not in visual:
+            visual += " " + source["camera_instruction"]
         image_reference = reference_insert(source)
         if image_reference:
             visual += " " + image_reference
@@ -273,7 +277,7 @@ def hardware_reference(language):
     return language
 
 
-def compiler_input(result, *, brief="", emit):
+def compiler_input(result, *, brief="", emit, camera_contract=False):
     assembly = result.get("assembly", {})
     if assembly.get("provisional"):
         raise ValueError("Shot compiler requires real, completed Assembly transitions")
@@ -317,12 +321,24 @@ def compiler_input(result, *, brief="", emit):
         item = {k: shot.get(k) for k in ("shot_number", "scene_number", "camera_angle", "lens", "lighting",
                                         "composition_note", "description", "dialogue_text", "has_dialogue", "speech_mode", "characters_in_shot",
                                         "state_at_shot_start", "state_at_shot_end")}
-        move, reduced = first_movement(shot.get("camera_movement"))
-        item["camera_movement"] = move
-        if not str(shot.get("camera_movement") or "").strip():
-            emit("shot_prompt_compiler", f"Shot {shot['shot_number']}: source camera_movement missing; using static for compiler input only.")
-        if reduced:
-            emit("shot_prompt_compiler", f"Warning: shot {shot['shot_number']} compound movement reduced for compiled text only: {shot.get('camera_movement')!r} -> {move!r}.")
+        if camera_contract:
+            try:
+                spec = camera_direction.for_shot(shot)
+            except ValueError as error:
+                raise ValueError(f"Shot {shot['shot_number']}: {error}") from error
+            item["camera_direction"] = spec
+            item["camera_instruction"] = camera_direction.render(spec)
+            item["camera_movement"] = item["camera_instruction"]
+            emit("camera_direction", json.dumps({"shot_number": shot["shot_number"], "camera_direction": spec}))
+        else:
+            # Historical replay compatibility only. Live compilation always opts
+            # into structured facts; no first-clause reduction is used there.
+            move, reduced = first_movement(shot.get("camera_movement"))
+            if not str(shot.get("camera_movement") or "").strip():
+                emit("shot_prompt_compiler", "Legacy replay: source camera_movement missing; using static")
+            item["camera_movement"] = move
+            if reduced:
+                emit("shot_prompt_compiler", f"Legacy camera replay: shot {shot['shot_number']} compound movement reduced to {move!r}.")
         refs = []
         for name in shot.get("characters_in_shot", []):
             if _name(name) not in characters:
@@ -368,7 +384,7 @@ def compiler_input(result, *, brief="", emit):
         item["scene_context"] = {k: scene.get(k) for k in ("heading", "description", "mood")}
         category = _category(shot, content_type, bible)
         item["category"] = category
-        if category == "anime" and re.search(r"hand[- ]?held|shake", item["camera_movement"], re.I):
+        if not camera_contract and category == "anime" and re.search(r"hand[- ]?held|shake", item["camera_movement"], re.I):
             item["camera_movement"] = "static"
             emit("shot_prompt_compiler", f"Shot {shot['shot_number']}: anime rendering uses a static drawn viewpoint instead of live-action handheld shake; upstream camera data preserved.")
         lens = str(shot.get("lens") or "")
@@ -490,7 +506,13 @@ def validate_compiled(response, payload):
                         problems.append(f"locked {field} missing or altered for {ref['name']}")
                 if ref.get("image_url") and not re.search(r"consisten\w*.*reference|reference.*consisten\w*", value, re.I):
                     problems.append("explicit visual reference consistency missing")
-        if not movement_present(source["camera_movement"], re.sub(r"[.,;:]", " ", value)):
+        if source.get("camera_instruction"):
+            if value.count(source["camera_instruction"]) != 1:
+                problems.append("serialized camera instruction missing or duplicated")
+            creative = value.replace(dialogue_insert(source, payload["model_family"]), "") if source["has_dialogue"] else value
+            if camera_direction.conflicting_prose(creative, source["camera_instruction"]):
+                problems.append("camera behavior belongs only in the code-owned Camera direction block; remove camera movement from creative prose")
+        elif not movement_present(source["camera_movement"], re.sub(r"[.,;:]", " ", value)):
             problems.append("supplied single camera movement missing")
         if source.get("hardware_language") and hardware_reference(source["hardware_language"]) not in value:
             problems.append("mandatory selected hardware_language reference missing")
@@ -515,7 +537,7 @@ def validate_compiled(response, payload):
             problems.append("unsupported gendered pronoun; use the character name, role, or they/them because gender is not concrete")
         if re.search(r"\b(?:slow(?:ly)?|fast|gentle)\s+static\b|\bstatic\s+(?:push|settle|pan)\b", prose, re.I):
             problems.append("contradictory static camera pacing")
-        if re.search(r"push[- ]?in|pushes in", source["camera_movement"], re.I) and re.search(r"\b(?:frame|view|framing)\s+(?:widens|expands|opens out)\b", prose, re.I):
+        if ((source.get("camera_direction", {}).get("movement") == "dolly" and source["camera_direction"]["direction"] == "in") or re.search(r"push[- ]?in|pushes in", source["camera_movement"], re.I)) and re.search(r"\b(?:frame|view|framing)\s+(?:widens|expands|opens out)\b", prose, re.I):
             problems.append("push-in cannot widen the frame; describe tighter coverage")
         if source["category"] == "ugc":
             if re.search(r"\beye[- ]level\b|\b(?:medium[- ]wide|wide|medium)\s+(?:shot|frame|framing)\b", prose, re.I):
@@ -560,6 +582,8 @@ def validate_compiled(response, payload):
             lighting_group += 1
         previous_lighting = lighting_key
         prose = output.get("compiled_prompt", "")
+        if source.get("camera_instruction"):
+            prose = prose.replace(source["camera_instruction"], "")
         if reference_insert(source):
             prose = prose.replace(reference_insert(source), "")
         if source["has_dialogue"]:
@@ -637,20 +661,30 @@ def shot_batches(payload):
         start = end
 
 
-def compile_shot_prompts(result, *, brief="", emit, call_agent):
+def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=None):
     started = time.monotonic()
-    payload = compiler_input(result, brief=brief, emit=emit)
+    payload = compiler_input(result, brief=brief, emit=emit, camera_contract=True)
     groups = list(shot_batches(payload))
     deadline = started + _compiler_time_budget(groups)
     from app.services.prompt_technique_service import shot_knowledge, knowledge_addendum
     knowledge = shot_knowledge(payload, emit)
     systems = {index: prompts.SHOT_PROMPT_COMPILER + knowledge_addendum(group, knowledge)
                for index, group in enumerate(groups, 1)}
+    fingerprint = hashlib.sha256(json.dumps([payload, systems], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    saved = result.get("video_prompt_checkpoint") or {}
+    cached = {s["shot_number"]: s for s in saved.get("shots", [])
+              if isinstance(s, dict) and isinstance(s.get("shot_number"), int) and isinstance(s.get("compiled_prompt"), str)} if saved.get("fingerprint") == fingerprint else {}
+    def checkpoint(shots, affected=None):
+        for number in affected or []:
+            cached.pop(number, None)
+        cached.update({s["shot_number"]: copy.deepcopy(s) for s in shots})
+        if on_checkpoint:
+            on_checkpoint({"fingerprint": fingerprint, "shots": list(cached.values())})
     emit("shot_prompt_compiler", f"Compiling {len(payload['shots'])} shots in {len(groups)} batches of at most {COMPILER_BATCH_SIZE} after real Assembly; text only, {payload['model_family']} syntax.")
     model_input = copy.deepcopy(payload)
     for source, item in zip(payload["shots"], model_input["shots"]):
         reference = dialogue_insert(source, payload["model_family"])
-        reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split()) + len(TEXT_GUARD.split())
+        reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split()) + len(TEXT_GUARD.split()) + len(source.get("camera_instruction", "").split())
         for ref in item["character_references"]:
             ref["has_image_reference"] = bool(ref.pop("image_url", None))
             ref["has_locked_identity"] = bool(ref.get("locked_vault_description"))
@@ -664,7 +698,7 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
         item["visual_word_target"] = [max(1, n - reserved) for n in target]
         item["visual_word_range"] = [max(1, minimum - reserved), maximum - reserved]
         item["programmatic_reserved_words"] = reserved
-        item["visual_sentence_max"] = 5 - int(bool(reference)) - int(bool(reference_insert(source)))
+        item["visual_sentence_max"] = 4 - int(bool(reference)) - int(bool(reference_insert(source)))
         # The validator retains the original lookup. The model gets the required
         # identifier separately from its optical purpose, never a copyable stock
         # phrase that its repetition check correctly rejects across shots.
@@ -677,12 +711,13 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
             "Describe the supplied lens's spatial breadth in shot-specific words."
             if selected else None)
     raw_done, rendered_done, pending = [], [], {}
-    def input_for(index):
+    def input_for(index, include_cached=False):
         group = groups[index-1]
         numbers = {s["shot_number"] for s in group}
         touching = [b for b in payload["boundaries"] if set(map(int, b["between"].split("-"))) & numbers]
         neighbor_numbers = {n for b in touching for n in map(int, b["between"].split("-"))} - numbers
-        return {**model_input, "shots": [s for s in model_input["shots"] if s["shot_number"] in numbers],
+        return {**model_input, "shots": [s for s in model_input["shots"] if s["shot_number"] in numbers and (include_cached or s["shot_number"] not in cached)],
+                "readonly_compiled_shots": [cached[n] for n in numbers if n in cached],
                 "batch_index": index, "batch_count": len(groups), "boundaries": touching,
                 "readonly_neighbors": [s for s in model_input["shots"] if s["shot_number"] in neighbor_numbers],
                 "prior_compiled_shots": list(raw_done)}
@@ -698,25 +733,33 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
                 attempt_started = time.monotonic()
                 numbers = [s["shot_number"] for s in groups[index-1]]
                 _timing(emit, started, attempt_started, deadline, index, numbers, 1, "start")
-                body = json.dumps(input_for(index), ensure_ascii=False)
+                request_input = input_for(index)
+                body = json.dumps(request_input, ensure_ascii=False)
                 tokens = compiler_token_budget(len(groups[index-1]))
                 budget = min(_provider_time_budget(tokens), max(0.001, deadline - time.monotonic()))
                 usage = queue.Queue()
                 recorder = _response_recorder(usage, attempt_started)
+                if not request_input["shots"]:
+                    completed = queue.Queue()
+                    completed.put((True, {"shots": []}, time.monotonic()))
+                else:
+                    completed = _start_provider_call(lambda body=body, budget=budget, tokens=tokens, system=systems[index], record=recorder: call_agent(
+                        system, body, max_tokens=tokens, request_timeout=budget, on_response=record))
                 pending[index] = {"started": attempt_started, "deadline": attempt_started + budget,
                                   "claimed": False, "usage": usage,
-                                  "completed": _start_provider_call(lambda body=body, budget=budget, tokens=tokens, system=systems[index], record=recorder: call_agent(
-                                      system, body, max_tokens=tokens, request_timeout=budget, on_response=record))}
+                                  "cached": request_input["readonly_compiled_shots"],
+                                  "requested": [s["shot_number"] for s in request_input["shots"]],
+                                  "completed": completed}
             numbers = {s["shot_number"] for s in group}
             prefix_numbers = {s["shot_number"] for s in rendered_done} | numbers
             targets = {**payload, "shots": group}
             validation_payload = {**payload, "shots": [s for s in payload["shots"] if s["shot_number"] in prefix_numbers],
                                   "boundaries": [b for b in payload["boundaries"] if set(map(int, b["between"].split("-"))) <= prefix_numbers]}
             pending[batch_index]["claimed"] = True
-            raw, rendered = _compile_batch(targets, input_for(batch_index), validation_payload=validation_payload,
+            raw, rendered = _compile_batch(targets, input_for(batch_index, include_cached=True), validation_payload=validation_payload,
                                           rendered_done=rendered_done, started=started, deadline=deadline,
                                           batch_index=batch_index, emit=emit, call_agent=call_agent,
-                                          initial=pending[batch_index], system=systems[batch_index])
+                                          initial=pending[batch_index], system=systems[batch_index], on_checkpoint=checkpoint)
             raw_done.extend(raw)
             rendered_done.extend(rendered)
     except Exception:
@@ -735,9 +778,11 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent):
 
 
 def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
-                   started, deadline, batch_index, emit, call_agent, initial, system):
+                   started, deadline, batch_index, emit, call_agent, initial, system, on_checkpoint=None):
     content = json.dumps(model_input, ensure_ascii=False)
     errors = []
+    retry_kept = []
+    retry_numbers = None
     tokens = compiler_token_budget(len(payload["shots"]))
     # Strong reasoning model is deliberate: immutable identities, model-specific
     # syntax and coordinated boundary reasoning. One call normally; one retry only
@@ -761,6 +806,18 @@ def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
                     system, body,
                     max_tokens=token_budget, request_timeout=budget, on_response=record),
                 deadline=attempt_deadline)
+            if attempt == 0 and initial.get("cached"):
+                returned = response.get("shots") if isinstance(response, dict) else None
+                if not isinstance(returned, list) or [s.get("shot_number") for s in returned if isinstance(s, dict)] != initial["requested"]:
+                    raise ValueError("Compiler must return only the uncached requested shots")
+                combined = {s["shot_number"]: s for s in initial["cached"] + returned}
+                response = {"shots": [combined[s["shot_number"]] for s in payload["shots"]]}
+            if retry_numbers is not None:
+                returned = response.get("shots") if isinstance(response, dict) else None
+                if not isinstance(returned, list) or [s.get("shot_number") for s in returned if isinstance(s, dict)] != retry_numbers:
+                    raise ValueError("Corrective camera/prompt retry must return only its requested shot numbers")
+                combined = {s["shot_number"]: s for s in retry_kept + returned}
+                response = {"shots": [combined[s["shot_number"]] for s in payload["shots"]]}
             errors = []
             if isinstance(response, dict) and isinstance(response.get("shots"), list):
                 for output in response["shots"]:
@@ -806,8 +863,30 @@ def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
         timing("end", outcome="validation_rejected" if errors else "accepted", validation_errors=errors)
         if not errors:
             generated = rendered["shots"]
+            if on_checkpoint:
+                on_checkpoint(response["shots"])
             emit("shot_prompt_compiler", f"Compiler batch {batch_index} validated, including previous-batch repetition and transition checks; awaiting whole-job completion before persistence.")
             return response["shots"], generated
         emit("shot_prompt_compiler", "Compiler validation failed; " + ("retrying once: " if attempt == 0 else "stopping: ") + " | ".join(errors))
-        content = json.dumps({"input": model_input, "rejected_output": response, "required_corrections": errors}, ensure_ascii=False)
+        # Repair only identified targets; immutable accepted siblings remain in
+        # context and the combined result goes through ALL cross-shot checks.
+        matches = [re.match(r"Shot (\d+):", error) for error in errors]
+        bad = {int(m[1]) for m in matches if m}
+        own = {s["shot_number"] for s in payload["shots"]}
+        if on_checkpoint:
+            keep = [s for s in response["shots"] if s["shot_number"] not in bad] if all(matches) and bad <= own else []
+            on_checkpoint(keep, own)
+        if attempt == 0 and all(matches) and bad and bad < own:
+            retry_kept = [s for s in response["shots"] if s["shot_number"] not in bad]
+            retry_numbers = [s["shot_number"] for s in payload["shots"] if s["shot_number"] in bad]
+            correction_input = {**model_input,
+                "shots": [s for s in model_input["shots"] if s["shot_number"] in bad],
+                "readonly_compiled_shots": retry_kept}
+            content = json.dumps({"input": correction_input,
+                "rejected_output": {"shots": [s for s in response["shots"] if s["shot_number"] in bad]},
+                "required_corrections": errors}, ensure_ascii=False)
+            tokens = compiler_token_budget(len(retry_numbers))
+            emit("shot_prompt_compiler", f"Corrective retry targets only shots {retry_numbers}; valid siblings retained and full-plan checks will run again.")
+        else:
+            content = json.dumps({"input": model_input, "rejected_output": response, "required_corrections": errors}, ensure_ascii=False)
     raise ValueError("Shot Prompt Compiler failed validation: " + " | ".join(errors))

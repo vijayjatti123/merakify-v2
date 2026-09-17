@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from app.services import shot_prompt_compiler as compiler
-from test_shot_prompt_compiler import source, prose
+from test_shot_prompt_compiler import source, creative_prose as prose
 
 
 class CompilerUsageTests(unittest.TestCase):

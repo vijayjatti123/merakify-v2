@@ -531,9 +531,11 @@ def regenerate_shot(
             candidate = candidates[0]
             if any(not isinstance(candidate.get(key), str) or not candidate[key].strip() for key in visual_fields):
                 raise ValueError("Missing visual fields")
+            from app.services.camera_direction import for_shot as camera_for_shot
+            camera = camera_for_shot(candidate)
             # Copy only visual fields: dialogue, timing, identity and all neighbors remain authoritative.
             proposed = [
-                {**shot, **{key: candidate[key] for key in visual_fields}} if shot["shot_number"] == shot_number else dict(shot)
+                {**shot, **{key: candidate[key] for key in visual_fields}, "camera_direction": camera} if shot["shot_number"] == shot_number else dict(shot)
                 for shot in result["shots"]
             ]
             continuity = result["continuity"]

@@ -274,11 +274,11 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
             <FinalVideo data={result?.final_video} shots={shots} busy={assembling || result?.final_video?.status === "running"} onAssemble={handleAssemble} />
           ) : (
             <Card className="director-progress-card" data-testid="preview-progress">
-              <div><p className="eyebrow">Shot previews</p><h2>{canResumePreviews ? "Preparation paused" : result?.video_prompts_pending && previews.ready === previews.total ? "Your previews are ready to review" : "Preparing your previews"}</h2>
-                <p>{result?.video_prompts_pending ? "Images appear as they're ready. We're also preparing instructions for your video clips; no videos are being generated yet." : "We prepare speech and timing, then create and check your images. No video clips are being generated yet."}</p>
+              <div><p className="eyebrow">Shot previews</p><h2>{canResumePreviews ? (result?.video_prompt_error ? "Video instructions paused" : "Preparation paused") : result?.video_prompts_pending && previews.ready === previews.total ? "Your previews are ready to review" : "Preparing your previews"}</h2>
+                <p>{result?.video_prompt_error ? "Your accepted previews are saved. We paused while preparing the instructions for your video clips; no videos have been generated yet." : result?.video_prompts_pending ? "Images appear as they're ready. We're also preparing instructions for your video clips; no videos are being generated yet." : "We prepare speech and timing, then create and check your images. No video clips are being generated yet."}</p>
                 <p role="status">{previews.ready} of {previews.total} previews ready</p>
                 {previews.busy && <ActionProgress label={result?.video_prompts_pending && shots.some(s => s.still_frame_status === "generating") ? "Creating previews and preparing video instructions…" : result?.video_prompts_pending ? "Preparing video instructions…" : shots.some(s => s.still_frame_status === "generating") ? "Creating and checking your images…" : "Preparing speech and shot details…"} />}
-                {canResumePreviews && <Alert severity="warning">Your plan, completed speech and accepted previews are saved. Retry preparation to continue.</Alert>}
+                {canResumePreviews && <Alert severity="warning">{result?.video_prompt_error ? "Click Retry video instructions to continue with your saved plan and previews." : "Your plan, completed speech and accepted previews are saved. Retry preparation to continue."}</Alert>}
               </div>
             </Card>
           )
@@ -337,7 +337,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
         {compilerTimeout ? <Alert severity="warning" sx={{ m: 2 }} action={<Button color="inherit" disabled={retrying} onClick={handleTimeoutRetry}>{retrying ? "Retrying…" : "Retry"}</Button>}>
           <AlertTitle>This shot is taking longer than expected.</AlertTitle>
           {canResumePreviews ? "Your written plan and completed speech are saved. Retry continues preview preparation without generating your speech again." : "Planning stopped before it could finish. Retry starts a new attempt with the same brief, script and settings. Your original job stays in history."}
-        </Alert> : errored && <Alert severity="error" sx={{ m: 2 }}>{friendlyMessage(final.error_message, "We couldn't finish your video plan. Please try again.")}</Alert>}
+        </Alert> : errored && <Alert severity="error" sx={{ m: 2 }}>{result?.video_prompt_error ? "Your accepted previews are saved. Video instructions could not be prepared. Click Retry video instructions to continue." : friendlyMessage(final.error_message, "We couldn't finish your video plan. Please try again.")}</Alert>}
         {retrying && <ActionProgress label="Restarting your video plan…" />}
         {retryError && <Alert severity="error" sx={{ m: 2 }}>{friendlyMessage(retryError)}</Alert>}
 
@@ -479,8 +479,8 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
         <Box role="status">{editingShot !== null ? <>
           <Typography fontWeight={600}>Editing shot {editingShot}</Typography>
           <Typography id="shot-edit-approval-hint" variant="body2">{savingShot !== null ? "Saving and checking your edit…" : hasUnsavedEdit ? "Save your edit first" : "No unsaved changes"}</Typography>
-        </> : canResumePreviews ? "Preview preparation paused · your plan is saved" : !approved ? (previews.ready ? `${previews.ready} of ${shots.length} previews ready` : "No previews yet · your written plan is ready") : previews.busy ? `${previews.ready} of ${shots.length} previews ready · working…` : `${shots.filter(videoReady).length} of ${shots.length} videos ready`}</Box>
-        {canResumePreviews ? <Button variant="contained" disabled={retrying} onClick={handleTimeoutRetry}>Retry preview preparation</Button>
+        </> : canResumePreviews ? (result?.video_prompt_error ? "Video instructions paused · your previews are saved" : "Preview preparation paused · your plan is saved") : !approved ? (previews.ready ? `${previews.ready} of ${shots.length} previews ready` : "No previews yet · your written plan is ready") : previews.busy ? `${previews.ready} of ${shots.length} previews ready · working…` : `${shots.filter(videoReady).length} of ${shots.length} videos ready`}</Box>
+        {canResumePreviews ? <Button variant="contained" disabled={retrying} onClick={handleTimeoutRetry}>{result?.video_prompt_error ? "Retry video instructions" : "Retry preview preparation"}</Button>
           : !approved ? <Button variant="contained" data-testid="create-previews" aria-describedby={editingShot !== null ? "shot-edit-approval-hint" : undefined} disabled={approving || editBlocksApproval} onClick={handleApprove}>{approving ? "Starting…" : previews.ready === shots.length ? "Generate video clips" : "Create shot previews"}</Button>
           : previews.busy ? <span>Keep this page open or come back later.</span>
           : allVideosReady ? <Button variant="contained" disabled={assembling || result.final_video?.status === "running"} onClick={handleAssemble}>{result.final_video?.url ? "Update final video" : "Create final video"}</Button>

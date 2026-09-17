@@ -28,6 +28,14 @@ def prose():
             + compiler.TEXT_GUARD)
 
 
+def creative_prose():
+    # New Compiler contract: camera behavior is inserted by code, not generated.
+    return ("Blue cup occupies the supplied central position, keeping its existing outline clear against the surrounding space. "
+            "Render style: natural blue tones with the supplied window light, preserving the established appearance without adding a new surface treatment. "
+            "At the given wide angle the existing lighting describes the cup through its visible contours while leaving the surrounding setting as supplied; Arri Alexa tonal latitude provides a rendering comparison while the composition remains centered, with attention on the supplied object throughout the full duration and ambient sound unspecified. "
+            + compiler.TEXT_GUARD)
+
+
 class CompilerTests(unittest.TestCase):
     def test_shared_physical_state_reaches_both_shots_and_boundary(self):
         result = source()
@@ -109,7 +117,7 @@ class CompilerTests(unittest.TestCase):
         result["continuity"]["characters"]=[{"name":"Meera","gender":"female","image_url":url}]
         result["shots"][0]["characters_in_shot"]=["Meera"]
         payload=compiler.compiler_input(result,emit=Mock())
-        raw={"shots":[{"shot_number":1,"compiled_prompt":prose().replace("Blue cup","Meera")}]}
+        raw={"shots":[{"shot_number":1,"compiled_prompt":creative_prose().replace("Blue cup","Meera")}]}
         rendered=compiler.insert_dialogue(raw,payload)
         self.assertIn(compiler.reference_insert(payload["shots"][0]),rendered["shots"][0]["compiled_prompt"])
         self.assertIn(url,rendered["shots"][0]["compiled_prompt"])
@@ -193,7 +201,7 @@ class CompilerTests(unittest.TestCase):
 
     def test_valid_compile_adds_only_prompt_and_uses_existing_model_call(self):
         result = source(); original = copy.deepcopy(result)
-        call = Mock(return_value={"shots": [{"shot_number": 1, "compiled_prompt": prose()}]})
+        call = Mock(return_value={"shots": [{"shot_number": 1, "compiled_prompt": creative_prose()}]})
         compiled = compiler.compile_shot_prompts(result, emit=Mock(), call_agent=call)
         self.assertEqual(result, original)
         self.assertEqual({k:v for k,v in compiled[0].items() if k != "compiled_prompt"}, original["shots"][0])
@@ -335,7 +343,7 @@ class CompilerTests(unittest.TestCase):
             line='रुको—यहाँ देखो।  Don’t change "this"!'
             result['shots'][0]['dialogue_text']=line
             original=copy.deepcopy(result)
-            visual=prose().replace('Arri Alexa tonal latitude','35mm f/1.4 intimate optical separation')
+            visual=creative_prose().replace('Arri Alexa tonal latitude','35mm f/1.4 intimate optical separation')
             call=Mock(return_value={'shots':[{'shot_number':1,'compiled_prompt':visual}]})
             compiled=compiler.compile_shot_prompts(result,emit=Mock(),call_agent=call)
             self.assertIn('"'+line+'"',compiled[0]['compiled_prompt'])
@@ -351,7 +359,7 @@ class CompilerTests(unittest.TestCase):
         def blocked(*args,**kwargs):
             release.wait(2)
             finished.set()
-            return {'shots':[{'shot_number':1,'compiled_prompt':prose()}]}
+            return {'shots':[{'shot_number':1,'compiled_prompt':creative_prose()}]}
         start=time.monotonic()
         try:
             with patch.object(compiler,'_compiler_time_budget',return_value=0.04):
@@ -432,7 +440,7 @@ class CompilerTests(unittest.TestCase):
         original=copy.deepcopy(result)
         def answer(system, content, **kwargs):
             data=json.loads(content);data=data.get('input',data)
-            return {'shots':[{'shot_number':data['shots'][0]['shot_number'],'compiled_prompt':prose()}]}
+            return {'shots':[{'shot_number':data['shots'][0]['shot_number'],'compiled_prompt':creative_prose()}]}
         call=Mock(side_effect=answer)
         with patch.object(compiler,'COMPILER_BATCH_SIZE',1):
             with self.assertRaisesRegex(ValueError,'repeated'):
@@ -442,12 +450,12 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual([s['shot_number'] for s in second['shots']],[2])
         self.assertEqual(second['prior_compiled_shots'],[])
         correction=json.loads(call.call_args_list[-1].args[1])['input']
-        self.assertEqual(correction['prior_compiled_shots'][0]['compiled_prompt'],prose())
+        self.assertEqual(correction['prior_compiled_shots'][0]['compiled_prompt'],creative_prose())
         self.assertEqual(second['readonly_neighbors'][0]['shot_number'],1)
 
     def test_malformed_provider_json_uses_only_existing_retry(self):
         call=Mock(side_effect=[ValueError('Model response was not valid JSON (bad delimiter)'),
-                              {'shots':[{'shot_number':1,'compiled_prompt':prose()}]}])
+                              {'shots':[{'shot_number':1,'compiled_prompt':creative_prose()}]}])
         emit=Mock()
         self.assertEqual(len(compiler.compile_shot_prompts(source(),emit=emit,call_agent=call)),1)
         self.assertEqual(call.call_count,2)
@@ -464,7 +472,7 @@ class CompilerTests(unittest.TestCase):
         def answer(system,content,**kwargs):
             data=json.loads(content)
             rendezvous.wait(timeout=0.5)
-            return {'shots':[{'shot_number':data['shots'][0]['shot_number'],'compiled_prompt':prose()}]}
+            return {'shots':[{'shot_number':data['shots'][0]['shot_number'],'compiled_prompt':creative_prose()}]}
         with patch.object(compiler,'COMPILER_BATCH_SIZE',1), patch.object(compiler,'_compiler_time_budget',return_value=1), patch.object(compiler,'validate_compiled',return_value=[]) as validate:
             compiled=compiler.compile_shot_prompts(result,emit=Mock(),call_agent=answer)
         self.assertEqual([s['shot_number'] for s in compiled],[1,2])
