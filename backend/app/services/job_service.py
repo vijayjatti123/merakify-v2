@@ -48,9 +48,12 @@ def create_job(
     quality: str = "720p",
     language: str = "English",
     ai_model: str = "Seedance 2.5",
+    video_model: str | None = None,
     script_text: str | None = None,
     resolutions: dict | None = None,
 ) -> Job:
+    from app.video_models import validate_selection
+    validate_selection(video_model, ai_model, language, quality)
     visual_style = visual_style if visual_style is not None else style_from_brief(brief, "visual_style")
     color_grade = color_grade if color_grade is not None else style_from_brief(brief, "color_grade")
     if visual_style not in get_args(VisualStyle) or color_grade not in get_args(ColorGrade):
@@ -73,6 +76,7 @@ def create_job(
         quality=quality,
         language=language,
         ai_model=ai_model,
+        video_model=video_model,
         script_text=script_text,
         resolutions_json=json.dumps(resolutions, ensure_ascii=False) if resolutions is not None else None,
         status="queued",
@@ -102,7 +106,7 @@ def copy_job_for_retry(db: Session, source: Job) -> Job:
     # source script and vault resolutions. Do not re-fold style prose.
     job = Job(**{field: getattr(source, field) for field in (
         "brief", "aspect_ratio", "visual_style", "color_grade", "quality",
-        "language", "ai_model", "script_text", "resolutions_json",
+        "language", "ai_model", "video_model", "script_text", "resolutions_json",
     )}, status="queued")
     db.add(job)
     db.commit()
@@ -287,6 +291,7 @@ def get_events_since(db: Session, job_id: str, after_id: Optional[str] = None) -
 def job_result(job: Job) -> Optional[Any]:
     result = json.loads(job.result_json) if job.result_json else None
     if result:
+        result["video_model"] = job.video_model
         from app.services import storage_service
         from app.services.still_frame_service import invalidate_changed_stills
         invalidate_changed_stills(result)
@@ -361,7 +366,7 @@ def video_source(db, job_id, number):
     result = job_result(job) or {}
     if job.status != "done" or result.get("audio_assembly_pending") or result.get("assembly", {}).get("provisional"):
         raise ValueError("Finish final shot planning and audio approval first")
-    result.update(ai_model=job.ai_model, quality=job.quality, aspect_ratio=job.aspect_ratio)
+    result.update(ai_model=job.ai_model, quality=job.quality, aspect_ratio=job.aspect_ratio, language=job.language, video_model=job.video_model)
     shot = next((s for s in result.get("shots", []) if s.get("shot_number") == number), None)
     if shot is None:
         raise LookupError("Shot not found")
@@ -710,3 +715,51 @@ def face_submission_slot(db, *, defer_seconds=None):
         {ProviderSubmissionGate.next_at: target}, synchronize_session=False)
     db.commit()
     return 0 if changed == 1 else 0.1
+
+
+def claim_kling_voice(db, key, fields):
+    from app.models import KlingVoice
+    from sqlalchemy.exc import IntegrityError
+    row = db.get(KlingVoice, key, populate_existing=True)
+    if row is not None:
+        return json.loads(row.data_json), False
+    row = KlingVoice(key=key, status="submitting", data_json=json.dumps({**fields, "status": "submitting"}))
+    db.add(row)
+    try:
+        db.commit()
+        return json.loads(row.data_json), True
+    except IntegrityError:
+        db.rollback()
+        return json.loads(db.get(KlingVoice, key, populate_existing=True).data_json), False
+
+
+def read_kling_voice(db, key):
+    from app.models import KlingVoice
+    row = db.get(KlingVoice, key, populate_existing=True)
+    return json.loads(row.data_json) if row else None
+
+
+def update_kling_voice(db, key, **fields):
+    from app.models import KlingVoice
+    row = db.get(KlingVoice, key, populate_existing=True)
+    data = {**json.loads(row.data_json), **fields}
+    row.data_json, row.status = json.dumps(data), data["status"]
+    db.commit()
+    return data
+
+
+def claim_kling_video_submission(db, job_id, number, task, request):
+    """Only one worker may advance a prepared voice to a paid scene render."""
+    row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).populate_existing().one()
+    old = row.data_json
+    data = json.loads(old)
+    if row.status != "processing" or data.get("video_task_id") != task or data.get("video_phase") != "preparing_voice":
+        return False
+    from datetime import timezone
+    data.update(video_phase="generating", video_status="submitting", video_retry_request=request,
+                video_submitted_at=datetime.now(timezone.utc).isoformat())
+    changed = db.query(VideoTask).filter_by(id=row.id, data_json=old).update(
+        {VideoTask.status: "submitting", VideoTask.data_json: json.dumps(data)}, synchronize_session=False)
+    db.commit()
+    db.expire_all()
+    return changed == 1

@@ -194,3 +194,29 @@ narration spanning multiple visual clips is not implemented by this module.
 This extends README's core brief-to-finished-video workflow; it adds no new
 provider, orchestrator, or Vault submission flow. Module K protection remains
 unchanged and applies equally to supplied narration text.
+
+
+### Native speaking-video models and job-level selection
+
+The setup selector stores an optional `video_model` on each job, independently
+of the Compiler's `ai_model` family. All shots inherit the saved provider/tier;
+refresh, script intake, and job retries preserve it. Existing jobs retain their
+legacy nullable selection. Seedance 2.0 Standard/Fast/Mini are available through
+EvoLink and fal. Fast/Mini are limited to 480p/720p.
+
+Visible speaking shots now use the accepted scene preview plus approved audio
+with Seedance, or experimental Kling Avatar. There is no new external lip-sync
+pass and no portrait fallback. Historical Hedra tasks remain recoverable.
+Kling 3 Voice ID uses the accepted scene preview, approved dialogue text, and a
+reusable provider voice ID. Its endpoint outputs 4K and supports English/Chinese;
+other languages are rejected to avoid automatic translation. First registration
+requires 5–30 seconds of approved single-speaker audio; later shots reuse the ID.
+It generates a new performance, not the exact Sarvam recording/timing. Avatar
+cannot render silent/narration-only shots; scene Kling and Seedance can.
+
+Set `FAL_API_KEY` on the backend (`FAL_API-KEY` is accepted as a compatibility
+alias). Durable voice/video claims prevent blind resubmission after uncertain
+paid calls. No automatic model fallback is performed. Request/persistence/UI
+regressions are tested; real rendered voice fidelity and sync remain unverified
+for the new routes. This extends the existing core rendering workflow rather
+than introducing another orchestrator.

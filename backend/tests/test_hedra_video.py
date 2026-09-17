@@ -22,13 +22,13 @@ class HedraTests(unittest.TestCase):
         self.result = {"shots": [self.shot], "aspect_ratio": "16:9", "continuity": {"characters": [
             {"name": "Meera", "character_id": "vault", "image_url": "https://example.com/anime-variant.jpg"}]}}
 
-    def test_style_variant_primary_and_nonvault_still(self):
-        p = video.translate(self.result, self.shot)
-        self.assertEqual(p["request"]["input"]["start_image"]["url"], "https://example.com/anime-variant.jpg")
+    def test_vault_and_nonvault_use_only_shot_still(self):
+        p = hedra.preview(self.result, self.shot)
+        self.assertEqual(p["request"]["input"]["start_image"]["url"], self.shot["still_frame_url"])
         self.assertNotIn("duration_ms", p["request"]["input"])
         self.assertEqual(p["provider"], "hedra")
         del self.result["continuity"]["characters"][0]["character_id"]
-        p = video.translate(self.result, self.shot)
+        p = hedra.preview(self.result, self.shot)
         self.assertEqual(p["reference_source"], "module_o_still")
         self.assertEqual(p["request"]["input"]["start_image"]["url"], self.shot["still_frame_url"])
 
@@ -38,8 +38,16 @@ class HedraTests(unittest.TestCase):
         self.result["continuity"]["characters"].append({"name": "Other"})
         with self.assertRaises(ValueError): hedra.preview(self.result, self.shot)
         self.shot["speaker_label"] = "Meera"
-        self.result["continuity"]["characters"][0].pop("image_url")
+        self.shot.pop("still_frame_url")
         with self.assertRaises(ValueError): hedra.preview(self.result, self.shot)
+
+    def test_unavailable_preview_stops_before_payment(self):
+        for change in [{"still_frame_url": None}, {"still_frame_status": "failed"}, {"still_frame_status": "generating"}, {"still_frame_source_hash": "old"}]:
+            with self.subTest(change=change), patch.object(hedra, "api") as api, patch.object(hedra, "download") as download:
+                with self.assertRaisesRegex(ValueError, "accepted shot preview"):
+                    hedra.start(None, "test", 1, self.result, {**self.shot, **change})
+                api.assert_not_called()
+                download.assert_not_called()
 
     def test_input_fit_keeps_full_image(self):
         im = Image.new("RGB", (100, 200), "red");b = io.BytesIO();im.save(b, "PNG")
@@ -63,8 +71,8 @@ class HedraTests(unittest.TestCase):
         with Session(engine) as db, patch.object(hedra.settings,"hedra_api_key","test"), patch.object(hedra,"api",side_effect=api), patch.object(hedra,"ffmpeg",return_value="ffmpeg"), patch.object(hedra,"download",side_effect=lambda url,limit: audio.getvalue() if "audio" in url else im.getvalue()), patch.object(video,"provider") as seedance:
             job = jobs.create_job(db,"test",ai_model="Seedance 2.0")
             jobs.set_result(db,job.id,self.result);jobs.set_status(db,job.id,"done")
-            video.start(db,job.id,1)
-            with self.assertRaises(ValueError):video.start(db,job.id,1)
+            hedra.start(db,job.id,1,self.result,self.shot)
+            with self.assertRaises(ValueError):hedra.start(db,job.id,1,self.result,self.shot)
             seedance.assert_not_called()
             self.assertEqual(len(calls),3)
             self.assertNotIn("duration_ms",calls[-1][2]["body"]["input"])

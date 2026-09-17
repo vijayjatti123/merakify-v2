@@ -48,9 +48,16 @@ class ComplianceTests(unittest.TestCase):
             self.assertFalse(self.check());self.shot['video_task_id']='second';self.assertTrue(self.check());api.assert_called_once()
     def test_hedra_same_audio_request_and_no_seedance(self):
         request={'input':{'audio':{'url':'same-audio'},'start_image':{'url':'same-image'}}}
-        jobs.update_video(self.db,self.job.id,1,video_provider='hedra',video_retry_request=request)
+        jobs.update_video(self.db,self.job.id,1,video_provider='hedra',video_retry_request=request,video_reference_source='module_o_still')
         with patch.object(gate,'inspect',return_value=verdict('mismatch')),patch.object(hedra,'api',return_value={'job_id':'hedra-second'}) as api,patch.object(video,'provider') as seed:
             self.assertFalse(self.check());seed.assert_not_called();self.assertEqual(api.call_args.kwargs['body'],request)
+    def test_legacy_portrait_retry_blocked(self):
+        jobs.update_video(self.db,self.job.id,1,video_provider='hedra',video_reference_source='vault_style_resolved')
+        with patch.object(gate,'inspect',return_value=verdict('mismatch')), patch.object(hedra,'api') as api:
+            with self.assertRaisesRegex(hedra.MediaValidationError, 'portrait retry was blocked'):
+                self.check()
+            api.assert_not_called()
+
     def test_uncertain_retry_does_not_spend_again(self):
         with patch.object(gate,'inspect',return_value=verdict('mismatch')),patch.object(video,'provider',side_effect=TimeoutError()) as api:
             self.assertTrue(self.check());self.assertTrue(self.check());api.assert_called_once()

@@ -3,7 +3,7 @@
 Seeds are supplied research notes, not independently verified provider guarantees.
 Stable IDs make startup seeding idempotent without overwriting later curation.
 """
-from app.services.speech_mode import uses_hedra
+from app.services.speech_mode import is_onscreen_speech
 import json
 
 from sqlalchemy import and_, or_, select
@@ -74,10 +74,9 @@ def shot_knowledge(payload, emit):
     found = {}
     with SessionLocal() as db:
         for shot in payload["shots"]:
-            # Module R routes all dialogue videos to Hedra, independently of the
-            # job's selected silent-video model. Do not change compiler syntax.
-            content = "dialogue" if uses_hedra(shot) else payload["content_type"]
-            model = "hedra" if uses_hedra(shot) else model_tag(payload["ai_model"])
+            # Visible speech now defaults to audio-referenced Seedance scenes.
+            content = "dialogue" if is_onscreen_speech(shot) else payload["content_type"]
+            model = "seedance" if is_onscreen_speech(shot) else model_tag(payload["ai_model"])
             rows = lookup_techniques(db, content, model)
             found[shot["shot_number"]] = rows
             emit("shot_prompt_compiler", "Prompt technique lookup: " + json.dumps({

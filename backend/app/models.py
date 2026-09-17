@@ -38,6 +38,7 @@ class Job(Base):
     quality = Column(String, nullable=False, default="720p")
     language = Column(String, nullable=False, default="English")
     ai_model = Column(String, nullable=False, default="Seedance 2.5")
+    video_model = Column(String, nullable=True)
     script_text = Column(Text, nullable=True)
     resolutions_json = Column(Text, nullable=True)
     status = Column(String, default="queued")  # queued | running | done | error
@@ -175,3 +176,12 @@ class PromptTechnique(Base):
     guidance_text = Column(Text, nullable=False)
     source = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class KlingVoice(Base):
+    """Reusable provider identity, separate from the character's Sarvam voice ID."""
+    __tablename__ = "kling_voices"
+    key = Column(String(64), primary_key=True)
+    status = Column(String, nullable=False)
+    data_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

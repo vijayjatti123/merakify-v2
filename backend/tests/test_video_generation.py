@@ -13,6 +13,8 @@ from app.services import job_service as jobs, video_generation_service as video
 
 class VideoTests(unittest.TestCase):
     def setUp(self):
+        self.key_patch = patch.object(video.settings, "evolink_api_key", "test")
+        self.key_patch.start(); self.addCleanup(self.key_patch.stop)
         self.shot = dict(shot_number=1, duration_sec=4, compiled_prompt="A cup, the stream still entering.",
                          still_frame_url="https://example.com/still.jpg", has_dialogue=False, characters_in_shot=[])
         self.result = dict(ai_model="Seedance 2.0", quality="480p", shots=[self.shot], continuity={})
@@ -26,8 +28,8 @@ class VideoTests(unittest.TestCase):
         self.assertIn('job entity props:cup: @image1', out['request']['prompt'])
         self.assertIn('still entering', out['mode_risk_terms'])
         self.assertTrue(out['request']['generate_audio'])
-        self.shot.update(has_dialogue=True,speech_mode="onscreen", dialogue_audio_url="https://example.com/real.wav")
-        self.assertEqual(video.translate(self.result, self.shot)['provider'], 'hedra')
+        self.shot.update(has_dialogue=True,speech_mode="onscreen", dialogue_audio_duration_sec=4, dialogue_audio_url="https://example.com/real.wav")
+        self.assertEqual(video.translate(self.result, self.shot)['provider'], 'evolink')
 
     def test_reference_priority_cap_and_url_rewrite(self):
         chars = [dict(name=f"Actor{n}", character_id=str(n), image_url=f"https://example.com/{n}.jpg") for n in range(10)]

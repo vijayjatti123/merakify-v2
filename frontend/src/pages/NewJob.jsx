@@ -1,5 +1,6 @@
+import { VIDEO_MODELS, modelNote } from "../utils/videoModels";
 import { Sparkles, FileText, ChevronUp, ImagePlus, Loader2, Plus, X, Smartphone, Monitor, Clock3 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Alert, Button, Card, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import ActionProgress from "../components/ActionProgress";
 import { friendlyMessage } from "../utils/presentation";
@@ -21,18 +22,13 @@ const COLORS = {
   marigold: "var(--mui-palette-primary-main)",
 };
 
-const MODEL_TIERS = [
-  { label: "Decent", models: ["Wan 2.5", "Seedance 2.0"] },
-  { label: "Better", models: ["Kling 3.0", "Seedance 2.5"] },
-  { label: "Best", models: ["Veo 3.1", "Sora 2"] },
-];
 
 function SelectField({ label, note, value, onChange, children }) {
   return <TextField select label={label} value={value} onChange={onChange} helperText={note}
     slotProps={{ select: { native: true } }} sx={{ minWidth: 160, flex: "1 1 180px" }}>{children}</TextField>;
 }
 
-export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "" }) {
+export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "", savedJob = null }) {
   const [brief, setBrief] = useState("");
   const [characterSelections, setCharacterSelections] = useState({});
   const [scriptMode, setScriptMode] = useState(false);
@@ -48,7 +44,16 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const [quality, setQuality] = useState("720p");
   const [language, setLanguage] = useState("English");
   const [customLanguage, setCustomLanguage] = useState("");
-  const [aiModel, setAiModel] = useState("Seedance 2.0");
+  const [modelChoice, setModelChoice] = useState("seedance_evolink");
+  const chosenModel = VIDEO_MODELS.find(model => model.id === modelChoice);
+  const aiModel = chosenModel?.family || modelChoice;
+  const videoModel = chosenModel?.id || null;
+  useEffect(() => {
+    if (savedJob) {
+      setModelChoice(savedJob.video_model || savedJob.ai_model);
+      setQuality(savedJob.quality); setLanguage(savedJob.language); setAspectRatio(savedJob.aspect_ratio);
+    }
+  }, [savedJob]);
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [assets, setAssets] = useState([]);
   const [selectedAsset, setSelectedAsset] = useState(null);
@@ -61,7 +66,9 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
 
   const effectiveLanguage = language === "Other" ? customLanguage.trim() : language;
   const effectiveDuration = duration === "Custom" ? customDuration.trim() : duration;
-  const canSubmit = Boolean(brief.trim() && effectiveDuration && effectiveLanguage && !submitting);
+  const modelError = videoModel === "kling_voice_fal" && !["english", "chinese", "en", "zh", "mandarin"].includes(effectiveLanguage.toLowerCase())
+    ? "Kling Voice ID supports English/Chinese only. Choose Seedance for this language." : "";
+  const canSubmit = Boolean(brief.trim() && effectiveDuration && effectiveLanguage && !submitting && !modelError);
   // Guidance mirrors ClarifierPanel's existing gates; it does not control activation.
   const needsRefinementCharacters = brief.trim().length < 20;
   const needsRefinementWords = brief.trim().split(/\s+/).length < 4;
@@ -148,6 +155,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
         quality,
         language: effectiveLanguage,
         ai_model: aiModel,
+        video_model: videoModel,
       });
       recordMentionJob();
     } catch (submitError) {
@@ -168,6 +176,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
       quality,
       language: effectiveLanguage,
       ai_model: aiModel,
+      video_model: videoModel,
       script_text: brief.trim(),
       resolutions,
     });
@@ -199,6 +208,9 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
             <p className="text-sm intake-summary" style={{ color: COLORS.muted }}>
               {collapsed ? submittedBrief : "Tell your story. Set your style. We’ll bring the shots together."}
             </p>
+            {collapsed && savedJob && <Typography variant="caption" color="text.secondary" data-testid="saved-video-model">
+              Video model: {chosenModel?.label || savedJob.ai_model}
+            </Typography>}
           </div>
           {collapsed && <ChevronUp size={18} aria-hidden="true" style={{ color: COLORS.marigold }} />}
         </header>
@@ -260,12 +272,14 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               <SelectField label="Language" value={language} onChange={handleLanguageChange}>
                 <option>English</option><option>Hindi</option><option>Tamil</option><option>Telugu</option><option>Bengali</option><option>Other</option>
               </SelectField>
-              <SelectField label="AI model" value={aiModel} onChange={(event) => setAiModel(event.target.value)}>
-                {MODEL_TIERS.map((tier) => (
-                  <optgroup key={tier.label} label={tier.label}>
-                    {tier.models.map((model) => <option key={model}>{model}</option>)}
-                  </optgroup>
-                ))}
+              <SelectField label="AI model" value={modelChoice} onChange={(event) => setModelChoice(event.target.value)} note={modelError || (chosenModel ? modelNote(videoModel) : "Existing planning model; video generation support may be limited.")}>
+                <optgroup label="Video generation">
+                  {VIDEO_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+                </optgroup>
+                <optgroup label="Other planning models">
+                  {["Wan 2.5", "Seedance 2.5", "Veo 3.1", "Sora 2"].map(model => <option key={model} value={model}>{model}</option>)}
+                </optgroup>
+                {collapsed && ["Seedance 2.0", "Kling 3.0"].includes(modelChoice) && <option value={modelChoice}>{modelChoice}</option>}
               </SelectField>
               <Button type="button" onClick={toggleAssetPanel} aria-label="Add reference image" variant="outlined" color="secondary" className="reference-toggle">
                 {assetPanelOpen ? <X size={18} /> : <ImagePlus size={18} />} Reference image

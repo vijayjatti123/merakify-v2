@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 from app.config import settings
-from app.services.speech_mode import is_voiceover, uses_hedra
+from app.services.speech_mode import is_voiceover, is_onscreen_speech
 from app.services import job_service, storage_service, render_compliance_service
 from app.services.still_frame_service import match_entities, visual_description
 
@@ -43,10 +43,34 @@ def fresh_url(url):
     return url
 
 
-def translate(result, shot):
-    if uses_hedra(shot):
-        from app.services import hedra_video_service
-        return hedra_video_service.preview(result, shot)
+def translate(result, shot, *, audio_model=None):
+    if is_onscreen_speech(shot):
+        from app.services import audio_video_service
+        return audio_video_service.translate(result, shot, audio_model)
+    selected = result.get("video_model")
+    if selected == "kling_avatar_fal":
+        raise ValueError("This job uses Kling Avatar, which only supports visible speaking shots. Silent and narration-only shots need a scene-video model.")
+    if selected == "kling_voice_fal":
+        from app.services.audio_video_service import MODELS
+        from app.services.still_frame_service import shot_fingerprint
+        if not shot.get("compiled_prompt") or not shot.get("still_frame_url") or shot.get("still_frame_status") not in (None, "ready"):
+            raise ValueError("Create this shot's accepted preview before generating video")
+        if shot.get("still_frame_source_hash") and shot["still_frame_source_hash"] != shot_fingerprint(shot):
+            raise ValueError("This preview is out of date; create a new preview first")
+        seconds = float(shot.get("dialogue_audio_duration_sec") if is_voiceover(shot) else shot.get("duration_sec") or 0)
+        if not math.isfinite(seconds) or not 0 < seconds <= 15:
+            raise ValueError("Kling scene duration must fit within 15 seconds")
+        prompt = visual_description(shot["compiled_prompt"])
+        if is_voiceover(shot):
+            prompt = re.split(r"Performance reference —|\nDialogue:", prompt, maxsplit=1)[0].strip()
+        prompt += "\nNo visible speech. " + ("Silent visuals; narration is added separately." if is_voiceover(shot) else "Ambient sound only, no dialogue or music.")
+        if len(prompt) > 2500:
+            raise ValueError("Kling scene instructions exceed 2,500 characters")
+        return {"provider": "fal", "model": MODELS[selected][1], "mode": "image_to_video",
+                "request": {"start_image_url": fresh_url(shot["still_frame_url"]), "prompt": prompt,
+                            "duration": str(max(3, math.ceil(seconds))), "generate_audio": not is_voiceover(shot)},
+                "warnings": ["Kling outputs 4K for this job; the job quality setting does not change this endpoint's output tier."],
+                "mode_risk_terms": [], "constraints": CONSTRAINTS}
     if result.get("ai_model") != "Seedance 2.0":
         raise ValueError("Module R supports Seedance 2.0 Reference-to-Video only")
     if not shot.get("compiled_prompt") or not shot.get("still_frame_url"):
@@ -123,9 +147,23 @@ def translate(result, shot):
     risks = sorted(set(m.group().lower() for m in MODE_WORDS.finditer(prompt)))
     if risks:
         warnings.append("Mode-intent warning: " + ", ".join(risks) + "; submitting explicit reference-to-video model, with no input video. Intent classification is not guaranteed.")
-    return {"request": {"model": MODEL, "prompt": prompt, "image_urls": refs,
-                        "duration": duration, "quality": quality, "aspect_ratio": result.get("aspect_ratio", "16:9"),
-                        "generate_audio": not bool(shot.get("has_dialogue"))},
+    request = {"model": MODEL, "prompt": prompt, "image_urls": refs,
+               "duration": duration, "quality": quality, "aspect_ratio": result.get("aspect_ratio", "16:9"),
+               "generate_audio": not bool(shot.get("has_dialogue"))}
+    provider_name, model = "evolink", MODEL
+    if selected:
+        from app.services.audio_video_service import MODELS
+        provider_name, model = MODELS[selected]
+        supported = {"480p", "720p"} if "_fast_" in selected or "_mini_" in selected else ({"480p", "720p", "1080p"} if provider_name == "fal" else {"480p", "720p", "1080p", "4k"})
+        if quality not in supported:
+            raise ValueError("The job's selected video model does not support this resolution")
+        request["model"] = model
+        if provider_name == "fal":
+            request.pop("model")
+            request["resolution"] = request.pop("quality")
+            request["duration"] = str(duration)
+            request["prompt"] = re.sub(r"@image(\d+)", r"@Image\1", prompt)
+    return {"provider": provider_name, "model": model, "request": request,
             "warnings": warnings, "mode_risk_terms": risks, "constraints": constraints}
 
 
@@ -142,13 +180,16 @@ def provider(method, path, body=None):
         raise RuntimeError(f"EvoLink HTTP {error.code}: inspect provider task/account before retrying") from error
 
 
-def regenerate_translation(result, shot, hint=""):
-    translated = translate(result, shot)
-    if uses_hedra(shot):
+def regenerate_translation(result, shot, hint="", *, audio_model=None):
+    translated = translate(result, shot, audio_model=audio_model)
+    if is_onscreen_speech(shot):
         if hint:
-            translated["warnings"].append("Hedra regenerates the full performance; targeted video editing is unavailable.")
+            translated["request"]["prompt"] += "\nRequested correction: " + hint.strip()
+            translated["warnings"].append("Full audio-guided regeneration; existing character audio is reused.")
         return translated
     if hint.strip() and shot.get("video_key"):
+        if (result.get("video_model") or "").startswith("kling_"):
+            raise ValueError("Video Edit is not available for this job's Kling model. Use Regenerate for a fresh clip.")
         request = translated["request"]
         request["video_urls"] = [storage_service.asset_url(shot["video_key"], expires_in=86400)]
         # Keep the existing reference-array translation, but do not force the old
@@ -157,7 +198,10 @@ def regenerate_translation(result, shot, hint=""):
             + ". Change only the requested element. Preserve all other subjects, identity, objects, action timing, "
               "duration, composition and sound unless explicitly named in the change. Do not extend the clip. "
               "The @image references are identity/context references only, not replacement opening frames.")
-        request["duration"] = int(shot.get("video_requested_duration") or request["duration"])
+        seconds = int(shot.get("video_requested_duration") or request["duration"])
+        request["duration"] = str(seconds) if translated.get("provider") == "fal" else seconds
+        if translated.get("provider") == "fal":
+            request["prompt"] = request["prompt"].replace("@video1", "@Video1").replace("@image", "@Image")
         translated["warnings"] = ["Targeted video edit requested. Unrelated visual or audio changes remain possible; review the result."]
         translated["mode"] = "video_edit"
     else:
@@ -168,18 +212,28 @@ def regenerate_translation(result, shot, hint=""):
     return translated
 
 
-def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=None):
+def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=None, audio_model=None):
     result, shot = job_service.video_source(db, job_id, number)
     if regenerate and not result.get("generation_approved"):
         raise ValueError("Approve the revised plan/audio before video regeneration")
     if regenerate and expected_attempt is None:
         raise ValueError("Refresh the shot before regenerating")
-    if uses_hedra(shot):
-        from app.services import hedra_video_service
-        return hedra_video_service.start(db, job_id, number, result, shot,
-            replace_token=expected_attempt if regenerate else None, hint=hint)
-    translated = regenerate_translation(result, shot, hint) if regenerate else translate(result, shot)
+    if audio_model and not is_onscreen_speech(shot):
+        raise ValueError("Audio-reference models apply only to visible speaking shots")
+    translated = regenerate_translation(result, shot, hint, audio_model=audio_model) if regenerate else translate(result, shot, audio_model=audio_model)
+    provider_name = translated.get("provider", "evolink")
+    if provider_name == "fal" and not settings.fal_api_key:
+        raise ValueError("FAL_API_KEY is not configured")
+    if provider_name == "evolink" and not settings.evolink_api_key:
+        raise ValueError("EVOLINK_API_KEY is not configured")
+    voice_setup = None
+    if translated.get("audio_model") == "kling_voice_fal":
+        from app.services import kling_voice_service
+        voice_setup = kling_voice_service.preparation(db, job_id, result, shot)
     job_service.claim_video(db, job_id, number, {"video_status": "submitting", "video_error": None,
+                           "video_provider": provider_name, "video_model": translated.get("model", MODEL),
+                           "video_audio_model": translated.get("audio_model"),
+                           "video_audio_reference_url": shot.get("dialogue_audio_url") if is_onscreen_speech(shot) else None,
                            "video_source_hash": source_fingerprint(shot), "video_submitted_at": datetime.now(timezone.utc).isoformat(),
                            "video_warnings": translated["warnings"], "video_mode": translated.get("mode", "reference_to_video"),
                            "video_compliance_expected": render_compliance_service.snapshot(db, job_id, shot),
@@ -189,10 +243,22 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
     for warning in translated["warnings"]:
         job_service.append_event(db, job_id, "video_generation", f"Shot {number}: {warning}")
     try:
-        response = provider("POST", "/v1/videos/generations", translated["request"])
+        if voice_setup:
+            key, sample = voice_setup
+            kling_voice_service.ensure(db, key, sample)
+            job_service.update_video(db, job_id, number, video_status="processing", video_phase="preparing_voice",
+                                     video_task_id="voice:" + key, video_kling_voice_key=key,
+                                     video_requested_duration=translated["request"]["duration"], video_generate_audio=True)
+            job_service.append_event(db, job_id, "video_generation", f"Shot {number}: preparing reusable Kling voice before scene generation.")
+            return {"id": "voice:" + key, "status": "preparing_voice"}
+        if provider_name == "fal":
+            from app.services import audio_video_service
+            response = audio_video_service.submit(translated["model"], translated["request"])
+        else:
+            response = provider("POST", "/v1/videos/generations", translated["request"])
         task = response.get("id")
         if not isinstance(task, str) or not task:
-            raise ValueError("EvoLink returned no task ID; submission outcome unknown")
+            raise ValueError("Provider returned no task ID; submission outcome unknown")
     except Exception as error:
         db.rollback()
         job_service.update_video(db, job_id, number, video_status="submission_unknown", video_error=str(error))
@@ -201,9 +267,10 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
     # Once the task ID is saved, a trace failure must not demote it to an
     # unknown submission and prevent restart recovery.
     job_service.update_video(db, job_id, number, video_task_id=task, video_status="processing",
-                                  video_model=response.get("model"), video_usage=response.get("usage"),
-                                  video_requested_duration=translated["request"]["duration"],
-                                  video_generate_audio=translated["request"]["generate_audio"])
+                                  video_model=translated.get("model", MODEL), video_usage=response.get("usage"),
+                                  video_fal_status_url=response.get("status_url"), video_fal_response_url=response.get("response_url"),
+                                  video_requested_duration=translated["request"].get("duration"),
+                                  video_generate_audio=translated["request"].get("generate_audio", True))
     job_service.append_event(db, job_id, "video_generation", f"Shot {number}: task {task} submitted; polling for completion.")
     return response
 
@@ -219,12 +286,22 @@ def poll(db, job_id, shot):
         job_service.update_video(db, job_id, shot['shot_number'], expected_submitted_at=shot.get('video_submitted_at'), video_status="review_required", video_error="Video task/storage recovery exceeded 23 hours; inspect provider before its result expires.")
         job_service.append_event(db, job_id, "video_generation", "WARNING: Video recovery deadline reached; provider result may expire soon.")
         return
+    if shot.get("video_phase") == "preparing_voice":
+        from app.services import kling_voice_service
+        return kling_voice_service.advance(db, job_id, shot)
     number, task = shot['shot_number'], shot['video_task_id']
     if shot.get('video_provider') == 'hedra':
         from app.services import hedra_video_service
         return hedra_video_service.poll(db, job_id, shot)
-    response = provider("GET", "/v1/tasks/" + quote(task, safe=""))
-    if response.get("model") and response["model"] != MODEL:
+    if shot.get("video_provider") == "fal":
+        from app.services import audio_video_service
+        try:
+            response = audio_video_service.poll(shot)
+        except audio_video_service.FalResultError as error:
+            response = {"status": "failed", "error": str(error)}
+    else:
+        response = provider("GET", "/v1/tasks/" + quote(task, safe=""))
+    if response.get("model") and response["model"] != (shot.get("video_model") or MODEL):
         job_service.update_video(db, job_id, number, expected_task_id=task, video_status="review_required", video_error="Provider reported a different model/mode; review before proceeding")
         job_service.append_event(db, job_id, "video_generation", f"Shot {number}: provider model mismatch; stopped for review.")
         return
@@ -252,6 +329,15 @@ def poll(db, job_id, shot):
             if video.read(12)[4:8] != b"ftyp":
                 raise ValueError("Downloaded result is not an MP4 container")
             video.seek(0)
+            if shot.get("video_audio_model"):
+                from app.services import audio_video_service
+                try:
+                    audio_video_service.validate_audio_result(video)
+                except ValueError as error:
+                    job_service.update_video(db, job_id, number, expected_task_id=task,
+                        video_status="review_required", video_error=str(error))
+                    job_service.append_event(db, job_id, "video_generation", f"Shot {number}: {error}")
+                    return
             if not render_compliance_service.accept(db, job_id, shot, video):
                 return
             video.seek(0)

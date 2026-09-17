@@ -1,3 +1,4 @@
+from app.video_models import VideoModel, validate_selection
 from datetime import datetime
 from typing import Any, Literal, Optional, get_args
 
@@ -87,12 +88,14 @@ class JobCreate(BaseModel):
     ai_model: Literal["Wan 2.5", "Seedance 2.0", "Kling 3.0", "Seedance 2.5", "Veo 3.1", "Sora 2"] = (
         "Seedance 2.5"
     )
+    video_model: Optional[VideoModel] = None
     script_text: Optional[str] = None
     resolutions: Optional[ScriptResolutionMap] = None
     character_mentions: dict[str, str] = Field(default_factory=dict, max_length=20)
 
     @model_validator(mode="after")
     def validate_request(self):
+        validate_selection(self.video_model, self.ai_model, self.language, self.quality)
         if (self.script_text is None) != (self.resolutions is None):
             raise ValueError("script_text and resolutions must be provided together")
         if self.script_text is not None and not self.script_text.strip():
@@ -138,6 +141,7 @@ class JobOut(BaseModel):
     quality: str
     language: str
     ai_model: str
+    video_model: Optional[VideoModel] = None
     status: str
     error_message: Optional[str] = None
     result: Optional[Any] = None

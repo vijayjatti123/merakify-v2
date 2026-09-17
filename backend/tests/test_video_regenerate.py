@@ -8,6 +8,8 @@ from app.services import video_generation_service as video, job_service as jobs
 
 class RegenerateTests(unittest.TestCase):
     def setUp(self):
+        self.key_patch = patch.object(video.settings, "evolink_api_key", "test")
+        self.key_patch.start(); self.addCleanup(self.key_patch.stop)
         self.engine=create_engine('sqlite://');Base.metadata.create_all(self.engine);self.db=Session(self.engine)
         self.shot=dict(shot_number=1,duration_sec=4,compiled_prompt='A glass under soft light.',still_frame_url='https://example.com/still.jpg',has_dialogue=False,characters_in_shot=[])
         self.result=dict(ai_model='Seedance 2.0',quality='480p',generation_approved=True,shots=[self.shot,{**self.shot,'shot_number':2}],continuity={})
@@ -46,11 +48,11 @@ class RegenerateTests(unittest.TestCase):
         current=json.loads(self.db.query(VideoTask).one().data_json)
         self.assertEqual(current['video_status'],'submission_unknown');self.assertIsNone(current['video_url']);self.assertEqual(self.job.status,'done')
     def test_dialogue_dispatch_reuses_existing_audio(self):
-        self.result['shots'][0].update(has_dialogue=True,speech_mode="onscreen",dialogue_text='Hello',dialogue_audio_url='https://example.com/audio.wav')
+        self.result['shots'][0].update(has_dialogue=True,speech_mode="onscreen",dialogue_audio_duration_sec=4,dialogue_text='Hello',dialogue_audio_url='https://example.com/audio.wav')
         jobs.set_result(self.db,self.job.id,self.result)
         from app.services import hedra_video_service as hedra,voice_generation_service as voice
-        with patch.object(hedra,'start',return_value={'job_id':'new'}) as call,patch.object(voice,'generate_job_dialogue_audio') as tts:
+        with patch.object(video,'provider',return_value={'id':'new'}) as call,patch.object(voice,'generate_job_dialogue_audio') as tts:
             video.start(self.db,self.job.id,1,regenerate=True,expected_attempt='none')
-            self.assertEqual(call.call_args.args[4]['dialogue_audio_url'],'https://example.com/audio.wav');tts.assert_not_called()
+            self.assertEqual(call.call_args.args[2]['audio_urls'],['https://example.com/audio.wav']);tts.assert_not_called()
 
 if __name__=='__main__':unittest.main()

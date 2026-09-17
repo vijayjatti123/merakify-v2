@@ -53,12 +53,14 @@ def preview(result, shot):
     if len(characters) > 1 and not selected:
         raise ValueError("Dialogue speaker is ambiguous; identify the speaker before paid generation")
     character = selected[0] if selected else {}
-    vault = bool(character.get("character_id"))
-    # Continuity's image_url has already been resolved by Module H. Never reload
-    # the base vault image here: that would bypass the job's locked style variant.
-    image = character.get("image_url") if vault else shot.get("still_frame_url")
-    if not image:
-        raise ValueError("Dialogue video needs its locked vault image or an accepted Module O still")
+    # Vault identity is already established in the accepted shot composition.
+    # Never substitute a character portrait for that composition.
+    from app.services.still_frame_service import shot_fingerprint
+    image = shot.get("still_frame_url")
+    stale = (shot.get("still_frame_source_hash") and
+             shot["still_frame_source_hash"] != shot_fingerprint(shot))
+    if not image or stale or shot.get("still_frame_status") not in (None, "ready"):
+        raise ValueError("Create or retry this shot's preview before generating its video. Hedra requires the accepted shot preview.")
     ratio = result.get("aspect_ratio", "16:9")
     if ratio not in {"1:1", "4:3", "3:4", "16:9", "9:16", "9:21", "21:9"}:
         raise ValueError("Unsupported Hedra aspect ratio")
@@ -69,7 +71,7 @@ def preview(result, shot):
                 # actual shot direction verbatim, including expression guidance.
                 "prompt": PROMPT + "\n\n" + shot["compiled_prompt"],
                 "aspect_ratio": ratio, "resolution": "720p"}},
-            "reference_source": "vault_style_resolved" if vault else "module_o_still",
+            "reference_source": "module_o_still",
             "character_id": character.get("character_id"),
             "warnings": ["Hedra dialogue video uses approved audio; final duration is verified after local trimming.",
                          "Input is fitted to the requested aspect ratio with matte borders when needed; no face is cropped."],

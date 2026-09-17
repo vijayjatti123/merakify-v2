@@ -32,11 +32,11 @@ class VoiceoverTests(unittest.TestCase):
         _attach_voice_refs([self.shot], [{"name":"Worker", "voice_sample_ref":"priya"}], "shubh")
         self.assertEqual(self.shot["voice_refs"], {"Narrator":"shubh"})
 
-    def test_visible_dialogue_stays_hedra_and_silent_stays_seedance(self):
+    def test_visible_dialogue_uses_audio_reference_and_silent_stays_seedance(self):
         self.shot.update(characters_in_shot=["Meera"])
         with patch("app.services.hedra_video_service.preview", return_value={"provider":"hedra"}) as h:
-            self.assertEqual(video.translate(self.result, self.shot)["provider"], "hedra")
-            h.assert_called_once()
+            self.assertEqual(video.translate(self.result, self.shot)["provider"], "evolink")
+            h.assert_not_called()
         self.shot.update(has_dialogue=False)
         self.assertTrue(video.translate(self.result,self.shot)["request"]["generate_audio"])
 

@@ -52,7 +52,7 @@ export default function App() {
       {screen === "vault" ? <CharacterVault onBack={() => setScreen("director")} /> :
        screen === "history" ? <JobHistory onResume={openJob} onNew={() => openJob(null)} /> :
       <div className={`phase-one-shell ${jobId ? "phase-one-shell--active" : ""}`}>
-        <NewJob onSubmit={handleSubmit} collapsed={Boolean(jobId)} submittedBrief={job?.brief.split("\n\n")[0] || ""} />
+        <NewJob key={jobId || "new"} savedJob={job} onSubmit={handleSubmit} collapsed={Boolean(jobId)} submittedBrief={job?.brief.split("\n\n")[0] || ""} />
         {jobId && !job && <Box sx={{ p: 3 }}>
           {lookupError ? <Alert severity="error" action={<Button color="inherit" onClick={() => setLookupAttempt((n) => n + 1)}>Retry</Button>}>
             Could not open this job. It may be unavailable, or the connection may have failed. You can also choose another job from Job history.

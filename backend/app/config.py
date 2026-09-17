@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import AliasChoices, Field
 
 
 class Settings(BaseSettings):
@@ -8,6 +9,7 @@ class Settings(BaseSettings):
     sarvam_api_key: str = ""
     elevenlabs_api_key: str = ""
     evolink_api_key: str = ""
+    fal_api_key: str = Field(default="", validation_alias=AliasChoices("FAL_API_KEY", "FAL_API-KEY", "fal_api_key"))
     hedra_api_key: str = ""
     replicate_api_token: str = ""
     database_url: str = "sqlite:///./merakify.db"

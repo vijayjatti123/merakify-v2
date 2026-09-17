@@ -407,17 +407,18 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       {shot.video_url ? "Your existing video is still available below." : "Try this preview again. Video generation is a separate step."}
                       {approved && shot.compiled_prompt && !shot.video_url && <Button data-testid={`retry-preview-${shot.shot_number}`} disabled={previews.busy || previewSubmitting !== null} onClick={() => handlePreviewRetry(shot)}>Retry preview</Button>}
                     </Alert>}
+
                     {shot.video_url && <ShotVideo shot={shot} />}
                     <FaceEnhancement jobId={jobId} shot={shot} onRefresh={async () => setFinal(await getJob(jobId))} />
-                    {shot.video_status && <p className="text-sm my-2" role="status">Video: {{done: "Ready", error: "Needs attention", processing: "Generating", submitting: "Starting", submission_unknown: "Checking the request"}[shot.video_status] || "Checking progress"}{shot.has_dialogue && shot.video_status === "done" ? (shot.video_provider === "hedra" ? " · Spoken performance with audio" : " · Voice recording has not been added yet") : ""}</p>}
-                    {(videoSubmitting === shot.shot_number || regeneratingShot === shot.shot_number || ["submitting", "processing"].includes(shot.video_status)) && <ActionProgress label={`Generating video for shot ${shot.shot_number}…`} />}
+                    {shot.video_status && <p className="text-sm my-2" role="status">Video: {{done: "Ready", error: "Needs attention", processing: "Generating", submitting: "Starting", submission_unknown: "Checking the request"}[shot.video_status] || "Checking progress"}{shot.has_dialogue && shot.video_status === "done" ? ((shot.video_provider === "hedra" || shot.video_audio_model) ? " · Spoken performance with audio" : " · Voice recording has not been added yet") : ""}</p>}
+                    {(videoSubmitting === shot.shot_number || regeneratingShot === shot.shot_number || ["submitting", "processing"].includes(shot.video_status)) && <ActionProgress label={shot.video_phase === "preparing_voice" ? `Preparing the saved voice for shot ${shot.shot_number}…` : `Generating video for shot ${shot.shot_number}…`} />}
                     {savingShot === shot.shot_number && <ActionProgress label="Saving your changes and checking the shot…" />}
                     {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
                     {shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
                     {(shot.video_warnings || []).map((warning) => <p className="audio-warning" key={warning}>{friendlyMessage(warning, "Please review this video before approving it.")}</p>)}
-                    {approved && !errored && (shot.has_dialogue || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && (shot.still_frame_url || (shot.has_dialogue && result.continuity?.characters?.some((character) => character.character_id && character.image_url && shot.characters_in_shot?.includes(character.name)))) && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
+                    {approved && !errored && (shot.has_dialogue || result.video_model || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && shot.still_frame_url && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
                       <Button id={`generate-video-${shot.shot_number}`} type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
-                        {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate video · speaking · 720p" : `Generate video · ${Math.max(4, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
+                        {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate speaking video" : `Generate video · ${Math.max(4, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
                       </Button>
                     )}
                     <div className="shot-technical">
@@ -432,7 +433,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       </details>
                     )}
 
-                    {!shot.has_dialogue && shot.video_provider !== "hedra" && shot.video_url && (
+                    {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && shot.video_provider !== "hedra" && shot.video_url && (
                       <div className="my-3 text-xs">
                         <label className="block">What should change? (required for Edit Shot)
                           <textarea required aria-label={`Edit hint for shot ${shot.shot_number}`} maxLength={700} value={videoHints[shot.shot_number] || ""} onChange={(event) => setVideoHints((current) => ({ ...current, [shot.shot_number]: event.target.value }))} className="block w-full rounded-md p-2 mt-1" style={{ background: COLORS.field, color: COLORS.text }} placeholder="For example: make the lighting warmer" />
@@ -452,10 +453,10 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       ) : (
                         <>
                           <Button type="button" disabled={previews.busy || videoBusy || editBlocksApproval} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot text ${shot.shot_number}`}><Pencil size={13} /> Edit text</Button>
-                          {(shot.video_url || shot.video_status === "error") && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
+                          {(shot.video_url || shot.video_status === "error") && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate
                           </Button>}
-                          {!shot.has_dialogue && shot.video_provider !== "hedra" && shot.video_url && (
+                          {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && shot.video_provider !== "hedra" && shot.video_url && (
                             <Button type="button" onClick={() => handleRegenerate(shot.shot_number, true)} disabled={!(videoHints[shot.shot_number] || "").trim() || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action" style={{ background: "transparent", border: `1px solid ${COLORS.border}`, fontSize: "0.62rem", padding: "0.3rem 0.45rem" }} aria-label={`Edit shot video ${shot.shot_number}`}>
                               Edit Shot
                             </Button>

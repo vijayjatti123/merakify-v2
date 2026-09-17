@@ -145,12 +145,20 @@ def accept(db, job_id, shot, media):
     if not request:
         warning(db, job_id, number, task, data, "mismatch; retry snapshot unavailable: " + detail + "; accepting video.")
         return True
+    # Do not replay a legacy paid request containing an uploaded Vault portrait.
+    if data.get("video_provider") == "hedra" and data.get("video_reference_source") != "module_o_still":
+        from app.services.hedra_video_service import MediaValidationError
+        raise MediaValidationError("This older video used a character portrait. Generate it again from the accepted shot preview; automatic portrait retry was blocked.")
     claimed = job_service.video_check_state(db, job_id, number, task, claim_retry=True)
     if claimed is None:
         return False
     job_service.append_event(db, job_id, "render_compliance", f"Shot {number}: rejected ({detail}); submitting the single full-generation retry with unchanged prompt/references.")
     try:
-        if data.get("video_provider") == "hedra":
+        if data.get("video_provider") == "fal":
+            from app.services import audio_video_service
+            response = audio_video_service.submit(data["video_model"], request)
+            new_task = response.get("id")
+        elif data.get("video_provider") == "hedra":
             from app.services import hedra_video_service as provider
             response = provider.api("POST", "/models/" + provider.MODEL, body=request)
             new_task = response.get("job_id")
@@ -169,6 +177,7 @@ def accept(db, job_id, shot, media):
         return True
     job_service.update_video(db, job_id, number, expected_task_id=task,
         video_task_id=new_task, video_status="processing", video_mode="reference_to_video" if data.get("video_provider") != "hedra" else "hedra",
-        video_usage=response.get("usage"), video_error=None)
+        video_usage=response.get("usage"), video_error=None,
+        video_fal_status_url=response.get("status_url"), video_fal_response_url=response.get("response_url"))
     job_service.append_event(db, job_id, "render_compliance", f"Shot {number}: automatic retry task {new_task} saved; acceptance deferred until its check.")
     return False

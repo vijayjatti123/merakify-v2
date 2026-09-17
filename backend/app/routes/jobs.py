@@ -19,6 +19,7 @@ from app.agents.director import (
 from app.db import SessionLocal, get_db
 from app.schemas import JobCreate, JobOut, JobRetry, JobRevise, ShotRegenerateHints
 from app.services import job_service, voice_generation_service
+from app.services.audio_video_service import AudioVideoModel
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -64,7 +65,12 @@ def enhance_face(job_id: str, shot_number: int, payload: FaceEnhanceRequest, db:
         raise HTTPException(409, str(error)) from error
 
 
-class VideoRegenerateRequest(BaseModel):
+class VideoGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    audio_model: AudioVideoModel | None = None
+
+
+class VideoRegenerateRequest(VideoGenerateRequest):
     model_config = ConfigDict(extra="forbid")
     hint: str = Field(default="", max_length=1000)
     expected_attempt: str = Field(min_length=1, max_length=160)
@@ -77,10 +83,10 @@ def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequ
         _, shot = job_service.video_source(db, job_id, shot_number)
         if not shot.get("still_frame_url") and not shot.get("video_url"):
             token = job_service.claim_still_retry(db, job_id, shot_number, payload.expected_attempt)
-            background_tasks.add_task(_recover_missing_still, job_id, shot_number, token, payload.expected_attempt, payload.hint)
+            background_tasks.add_task(_recover_missing_still, job_id, shot_number, token, payload.expected_attempt, payload.hint, True, payload.audio_model)
             return {"shot_number": shot_number, "status": "generating_still"}
         return video.start(db, job_id, shot_number, regenerate=True, hint=payload.hint,
-                           expected_attempt=payload.expected_attempt)
+                           expected_attempt=payload.expected_attempt, audio_model=payload.audio_model)
     except LookupError as error:
         raise HTTPException(404, str(error)) from error
     except ValueError as error:
@@ -89,7 +95,7 @@ def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequ
         raise HTTPException(502, "Video regeneration failed or is uncertain; inspect shot status before retrying") from error
 
 
-def _recover_missing_still(job_id, number, token, expected_attempt, hint, generate_video=True):
+def _recover_missing_still(job_id, number, token, expected_attempt, hint, generate_video=True, audio_model=None):
     from app.services import still_frame_service, video_generation_service
     with SessionLocal() as db:
         result = None
@@ -104,7 +110,7 @@ def _recover_missing_still(job_id, number, token, expected_attempt, hint, genera
             if shot.get("still_frame_url") and generate_video:
                 # Reuse Module S/R, including existing dialogue audio. No replanning/TTS.
                 video_generation_service.start(db, job_id, number, regenerate=True,
-                    expected_attempt=expected_attempt, hint=hint)
+                    expected_attempt=expected_attempt, hint=hint, audio_model=audio_model)
         except Exception as error:
             db.rollback()
             if result is not None and not shot.get("still_frame_url"):
@@ -133,11 +139,11 @@ def retry_preview(job_id: str, shot_number: int, payload: VideoRegenerateRequest
 
 
 @router.get("/{job_id}/shots/{shot_number}/video-request")
-def preview_video_request(job_id: str, shot_number: int, db: Session = Depends(get_db)):
+def preview_video_request(job_id: str, shot_number: int, audio_model: AudioVideoModel | None = None, db: Session = Depends(get_db)):
     from app.services import video_generation_service as video
     try:
         result, shot = job_service.video_source(db, job_id, shot_number)
-        return video.translate(result, shot)
+        return video.translate(result, shot, audio_model=audio_model)
     except LookupError as error:
         raise HTTPException(404, str(error)) from error
     except ValueError as error:
@@ -145,10 +151,10 @@ def preview_video_request(job_id: str, shot_number: int, db: Session = Depends(g
 
 
 @router.post("/{job_id}/shots/{shot_number}/video", status_code=202)
-def generate_video(job_id: str, shot_number: int, db: Session = Depends(get_db)):
+def generate_video(job_id: str, shot_number: int, payload: VideoGenerateRequest | None = None, db: Session = Depends(get_db)):
     from app.services import video_generation_service as video
     try:
-        return video.start(db, job_id, shot_number)
+        return video.start(db, job_id, shot_number, audio_model=payload.audio_model if payload else None)
     except LookupError as error:
         raise HTTPException(404, str(error)) from error
     except ValueError as error:
@@ -198,6 +204,7 @@ def _job_out(job, result=None) -> JobOut:
         quality=job.quality,
         language=job.language,
         ai_model=job.ai_model,
+        video_model=job.video_model,
         status=job.status,
         error_message=job.error_message,
         result=job_service.job_result(job) if result is None else result,
@@ -217,6 +224,7 @@ def _create_and_start_job(
     quality: str = "720p",
     language: str = "English",
     ai_model: str = "Seedance 2.5",
+    video_model: str | None = None,
     script_text: str | None = None,
     resolutions: dict | None = None,
 ) -> JobOut:
@@ -229,6 +237,7 @@ def _create_and_start_job(
         quality=quality,
         language=language,
         ai_model=ai_model,
+        video_model=video_model,
         script_text=script_text,
         resolutions=resolutions,
     )
@@ -339,6 +348,7 @@ def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Sessio
         quality=payload.quality,
         language=payload.language.strip(),
         ai_model=payload.ai_model,
+        video_model=payload.video_model,
         script_text=script,
         resolutions=resolutions,
     )
@@ -590,6 +600,7 @@ def retry_job(
         quality=job.quality,
         language=job.language,
         ai_model=job.ai_model,
+        video_model=job.video_model,
     )
     return {"id": retried.id}
 

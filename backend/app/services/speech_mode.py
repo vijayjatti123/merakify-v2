@@ -8,5 +8,9 @@ def is_voiceover(shot):
     return mode == "voiceover" or (mode is None and not shot.get("characters_in_shot"))
 
 
-def uses_hedra(shot):
+def is_onscreen_speech(shot):
     return bool(shot.get("has_dialogue")) and not is_voiceover(shot)
+
+
+# Compatibility for older callers; this describes speech, not provider routing.
+uses_hedra = is_onscreen_speech

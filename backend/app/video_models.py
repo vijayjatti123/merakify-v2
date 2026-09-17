@@ -1,0 +1,16 @@
+"""Job-level rendering choices, independent of Compiler model-family names."""
+from typing import Literal
+VideoModel = Literal["seedance_evolink", "seedance_fal", "seedance_fast_evolink", "seedance_mini_evolink",
+                     "seedance_fast_fal", "seedance_mini_fal", "kling_voice_fal", "kling_avatar_fal"]
+
+
+def validate_selection(model, family, language, quality):
+    if not model:
+        return
+    expected = "Kling 3.0" if model.startswith("kling_") else "Seedance 2.0"
+    if family != expected:
+        raise ValueError("The selected video model must match its planning model family")
+    if model == "kling_voice_fal" and language.strip().lower() not in {"english", "chinese", "en", "zh", "mandarin"}:
+        raise ValueError("Kling voice-ID supports English/Chinese only. Choose Seedance for this language.")
+    if ("_fast_" in model or "_mini_" in model) and quality not in {"480p", "720p"}:
+        raise ValueError("Seedance Fast and Mini support 480p or 720p only")

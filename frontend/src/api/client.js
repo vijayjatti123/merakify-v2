@@ -19,7 +19,7 @@ export async function getJob(jobId) {
 }
 
 export async function generateShotVideo(jobId, shotNumber) {
-  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shotNumber}/video`, { method: "POST" });
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shotNumber}/video`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || "Video submission uncertain; refresh the shot status.");
