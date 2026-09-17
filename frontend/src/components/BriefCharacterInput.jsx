@@ -105,7 +105,7 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
       slotProps={{ htmlInput: { "data-testid": "brief-input", "aria-autocomplete": "list", onScroll: e => setScrollTop(e.currentTarget.scrollTop),
         "aria-controls": query !== null ? "character-options" : undefined,
         "aria-activedescendant": query !== null && filtered[index] ? `character-option-${index}` : undefined } }}
-      sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7, ...(highlighted ? { color: "transparent", WebkitTextFillColor: "transparent", caretColor: "text.primary" } : {}) } }} />
+      sx={theme => ({ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7, ...(highlighted ? { color: "transparent", WebkitTextFillColor: "transparent", caretColor: (theme.vars || theme).palette.text.primary } : {}) } })} />
     {highlighted && createPortal(<Box aria-hidden="true" data-testid="mention-highlights" sx={{
       position: "absolute", inset: 0, p: "inherit", pointerEvents: "none", overflow: "hidden",
       fontFamily: "inherit", fontSize: "1.1rem", lineHeight: 1.7, letterSpacing: "inherit", color: disabled ? "text.disabled" : "text.primary",
