@@ -61,6 +61,36 @@ class AudioVideoTests(unittest.TestCase):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 video.translate(self.result,{**self.shot,**update})
 
+    def test_seedance_keeps_native_transcript_after_visual_sections_are_stripped(self):
+        line = 'यह जोड़ कभी नहीं टूटेगा... अब चलते हैं आत्मा लेने।'
+        shot = {**self.shot, 'speaker_label': 'Yamaraj', 'dialogue_text': line,
+                'compiled_prompt': 'A workshop.\nDialogue: obsolete compiled wording'}
+        for model in [m for m in audio.MODELS if m.startswith('seedance_')]:
+            with self.subTest(model=model):
+                request = video.translate({**self.result, 'language': 'Hindi', 'video_model': model}, shot)['request']
+                self.assertIn(line, request['prompt'])
+                self.assertIn('"speaker": "Yamaraj"', request['prompt'])
+                self.assertIn('"language": "Hindi"', request['prompt'])
+                self.assertNotIn('obsolete compiled wording', request['prompt'])
+                self.assertEqual(request['audio_urls'], [shot['dialogue_audio_url']])
+                self.assertEqual(request['image_urls'][0], shot['still_frame_url'])
+
+    def test_seedance_missing_transcript_fails_before_provider_submission(self):
+        for text in (None, '', '  '):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, 'Approved dialogue text is missing'):
+                video.translate(self.result, {**self.shot, 'dialogue_text': text})
+
+    def test_mini_narration_and_saved_automatic_include_transcript(self):
+        for model in ('seedance_mini_evolink', 'seedance_mini_fal', 'automatic_omni_mini'):
+            with self.subTest(model=model):
+                shot = {**self.shot, 'speech_mode': 'voiceover', 'characters_in_shot': [], 'speaker_label': None}
+                result = {**self.result, 'ai_model': 'Seedance 2.0', 'language': 'English', 'video_model': model}
+                request = video.translate(result, shot)['request']
+                self.assertIn(self.shot['dialogue_text'], request['prompt'])
+                self.assertIn('off-screen narrator', request['prompt'])
+                self.assertIn('No visible person speaks', request['prompt'])
+                self.assertNotIn("Synchronize the visible speaker", request['prompt'])
+
     def test_fal_durable_submission_and_duplicate_guard(self):
         with patch.object(audio,'fal_request',return_value={'request_id':'one','status_url':'https://queue.fal.run/status',
                           'response_url':'https://queue.fal.run/result'}) as call, patch.object(hedra,'api') as old:
@@ -105,6 +135,7 @@ class AudioVideoTests(unittest.TestCase):
         with patch.object(audio,'submit',return_value=response):
             video.start(self.db,self.job.id,1,audio_model='seedance_fal')
         request=self.saved()['video_retry_request']
+        self.assertIn(self.shot['dialogue_text'], request['prompt'])
         mismatch={'verdict':{k:{'status':'mismatch' if k=='scale' else 'pass','observed':'wide','reason':'too wide'} for k in ('style','scale')}}
         with patch.object(gate,'inspect',return_value=mismatch), patch.object(audio,'submit',return_value={**response,'id':'two'}) as call, patch.object(hedra,'api') as old:
             self.assertFalse(gate.accept(self.db,self.job.id,self.saved(),io.BytesIO()))

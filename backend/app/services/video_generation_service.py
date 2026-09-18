@@ -164,6 +164,7 @@ def _translate(result, shot, *, audio_model=None):
             request["duration"] = str(duration)
             request["prompt"] = re.sub(r"@image(\d+)", r"@Image\1", prompt)
     if is_voiceover(shot) and selected in {"seedance_mini_evolink", "seedance_mini_fal"}:
+        from app.services.audio_video_service import approved_speech_text
         tag = "@Audio1" if provider_name == "fal" else "@audio1"
         request["audio_urls"] = [fresh_url(shot["dialogue_audio_url"])]
         request["generate_audio"] = True
@@ -171,6 +172,7 @@ def _translate(result, shot, *, audio_model=None):
             "Audio: silent output; existing Sarvam dialogue will be muxed later.",
             f"Audio: use {tag} as off-screen narration. No visible person speaks; do not animate lips. "
             "The approved narration will be preserved exactly during final assembly.")
+        request["prompt"] += approved_speech_text(result, shot, shot.get("speaker_label") or "off-screen narrator")
     return {"provider": provider_name, "model": model, "request": request,
             "reference_manifest": references["manifest"], "warnings": warnings, "mode_risk_terms": risks, "constraints": constraints}
 

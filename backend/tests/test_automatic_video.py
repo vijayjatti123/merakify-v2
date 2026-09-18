@@ -71,7 +71,7 @@ class AutomaticVideoTests(unittest.TestCase):
             call.assert_not_called()
 
     def test_explicit_mini_narration_uses_selected_voice_reference(self):
-        shot={**self.shot,'has_dialogue':True,'speech_mode':'voiceover','dialogue_audio_duration_sec':4.5,'dialogue_audio_url':'https://example.com/speech.wav'}
+        shot={**self.shot,'has_dialogue':True,'speech_mode':'voiceover','dialogue_text':'A quiet moment.', 'dialogue_audio_duration_sec':4.5,'dialogue_audio_url':'https://example.com/speech.wav'}
         for model in ('seedance_mini_evolink','seedance_mini_fal'):
             t=video.translate({**self.result,'video_model':model},shot)
             self.assertEqual(t['request']['audio_urls'],[shot['dialogue_audio_url']])

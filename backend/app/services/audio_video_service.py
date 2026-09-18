@@ -3,6 +3,7 @@
 No post-generation lip-sync API, portrait substitution, or silent provider fallback.
 """
 import math
+import json
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -30,6 +31,19 @@ MODELS = {
 
 class FalResultError(ValueError):
     pass
+
+
+def approved_speech_text(result, shot, speaker):
+    """Keep the approved transcript beside its audio, outside visual-only prose."""
+    text = shot.get("dialogue_text")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Approved dialogue text is missing. Restore it before generating this speaking video.")
+    language = result.get("language") or "the language of the approved audio"
+    # JSON quoting preserves native script, punctuation and embedded quotes.
+    return ("\nApproved speech (transcript, not on-screen text): "
+            + json.dumps({"speaker": speaker, "language": language, "dialogue": text}, ensure_ascii=False)
+            + "\nSpeak these exact words in the specified language using the supplied audio's voice, pronunciation and timing. "
+              "Do not translate, paraphrase, read these labels aloud, or display the transcript as captions.")
 
 
 def validate_audio_result(media):
@@ -115,6 +129,7 @@ def translate(result, shot, choice=None):
                   + references["instructions"] + "\n" + direction + f"\nUse {audio_tag} for the dialogue, voice, pronunciation, pauses and speaking timing. "
                   "Synchronize the visible speaker's mouth to it. Preserve the scene and perform the requested action. "
                   "Do not translate, paraphrase, add dialogue or substitute a different voice.")
+        prompt += approved_speech_text(result, shot, speaker)
         seconds = max(4, math.ceil(duration))
         video_references.check_prompt(prompt, manifest)
         request = {"prompt": prompt, "image_urls": references["images"], "audio_urls": [audio],
