@@ -13,7 +13,7 @@ from app.config import settings
 from app.services.still_frame_service import shot_fingerprint, visual_description
 
 from app.video_models import VideoModel as AudioVideoModel
-from app.video_models import OMNI_FLASH
+from app.services import video_references
 
 DEFAULT = "seedance_evolink"
 MODELS = {
@@ -75,12 +75,13 @@ def translate(result, shot, choice=None):
         raise ValueError("Identify the speaking character before video generation")
     image, audio = fresh_url(shot["still_frame_url"]), fresh_url(shot["dialogue_audio_url"])
     direction = visual_description(shot["compiled_prompt"])
-    # URL appendices are not alternative image inputs. Only the accepted preview
-    # establishes the scene; the approved recording establishes the performance.
+    # The preview establishes composition; separately labelled identities can
+    # establish characters who enter later. The recording binds the speaker.
     import re
     direction = re.sub(r"https?://\S+", "the accepted scene reference", direction)
     speaker = shot.get("speaker_label") or ", ".join(shot.get("characters_in_shot", [])) or "the speaker"
     warnings = ["Audio-guided generation is experimental. Review the words, voice and mouth timing; the model may alter the recording."]
+    manifest = []
     if choice == "kling_voice_fal":
         if result.get("language", "English").lower() not in {"english", "chinese", "en", "zh", "mandarin"}:
             raise ValueError("Kling voice-ID supports English/Chinese here. Choose Seedance for Indic dialogue; Kling would translate it to English.")
@@ -107,12 +108,16 @@ def translate(result, shot, choice=None):
         if quality not in supported:
             raise ValueError("Selected audio-reference model does not support this resolution")
         image_tag, audio_tag = ("@Image1", "@Audio1") if provider == "fal" else ("@image1", "@audio1")
+        references = video_references.build(result, shot, limit=9, tag_style=provider, refresh=fresh_url)
+        manifest = references["manifest"]
+        warnings.extend(references["warnings"])
         prompt = (f"{image_tag} is the approved scene and opening composition. {audio_tag} is {speaker}'s complete approved spoken performance.\n"
-                  + direction + f"\nUse {audio_tag} for the dialogue, voice, pronunciation, pauses and speaking timing. "
+                  + references["instructions"] + "\n" + direction + f"\nUse {audio_tag} for the dialogue, voice, pronunciation, pauses and speaking timing. "
                   "Synchronize the visible speaker's mouth to it. Preserve the scene and perform the requested action. "
                   "Do not translate, paraphrase, add dialogue or substitute a different voice.")
         seconds = max(4, math.ceil(duration))
-        request = {"prompt": prompt, "image_urls": [image], "audio_urls": [audio],
+        video_references.check_prompt(prompt, manifest)
+        request = {"prompt": prompt, "image_urls": references["images"], "audio_urls": [audio],
                    "aspect_ratio": result.get("aspect_ratio", "16:9"), "generate_audio": True}
         if provider == "fal":
             request.update(resolution=quality, duration=str(seconds))
@@ -122,7 +127,8 @@ def translate(result, shot, choice=None):
             warnings.append(f"Video duration is {seconds}s for {duration:g}s of reference speech; generated audio is retained without forced trimming or replacement.")
     return {"provider": provider, "model": model, "audio_model": choice, "request": request,
             "mode": "voice_identity" if choice == "kling_voice_fal" else "audio_reference", "warnings": warnings, "mode_risk_terms": [],
-            "constraints": "Accepted scene preview and approved character audio only."}
+            "reference_manifest": manifest,
+            "constraints": "Accepted scene composition, labelled identities and approved speaker audio."}
 
 
 def fal_request(method, url, body=None):
@@ -141,7 +147,7 @@ def fal_request(method, url, body=None):
 
 
 def submit(model, request):
-    if model not in {OMNI_FLASH, *(m for p, m in MODELS.values() if p == "fal")}:
+    if model not in {m for p, m in MODELS.values() if p == "fal"}:
         raise ValueError("Unsupported fal audio-reference endpoint")
     raw = fal_request("POST", "https://queue.fal.run/" + model, request)
     # Retain provider-returned URLs: subpath endpoint queue URLs need not match

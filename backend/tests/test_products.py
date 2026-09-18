@@ -124,7 +124,7 @@ class ProductTests(unittest.TestCase):
         shot={'compiled_prompt':'A tea tin on a table.', 'still_frame_url':'https://example.invalid/scene.png',
               'duration_sec':5,'has_dialogue':False,'characters_in_shot':[]}
         plain=video.translate({'aspect_ratio':'16:9','ai_model':'Seedance 2.0'},shot)
-        shot['approved_product_references']=[{'product_id':'test'}]
+        shot['approved_product_references']=[{'product_id':'test','name':'Fevicol','object_key':'products/test.png'}]
         branded=video.translate({'aspect_ratio':'16:9','ai_model':'Seedance 2.0'},shot)
         self.assertEqual(plain['request']['image_urls'],branded['request']['image_urls'])
         self.assertEqual(branded['request']['image_urls'][0],'https://example.invalid/scene.png')

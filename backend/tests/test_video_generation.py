@@ -15,7 +15,7 @@ class VideoTests(unittest.TestCase):
     def setUp(self):
         self.key_patch = patch.object(video.settings, "evolink_api_key", "test")
         self.key_patch.start(); self.addCleanup(self.key_patch.stop)
-        self.shot = dict(shot_number=1, duration_sec=4, compiled_prompt="A cup, the stream still entering.",
+        self.shot = dict(shot_number=1, duration_sec=4, description="A cup receiving a stream", compiled_prompt="A cup, the stream still entering.",
                          still_frame_url="https://example.com/still.jpg", has_dialogue=False, characters_in_shot=[])
         self.result = dict(ai_model="Seedance 2.0", quality="480p", shots=[self.shot], continuity={})
 
@@ -25,7 +25,8 @@ class VideoTests(unittest.TestCase):
             "props:kettle": {"url": "https://example.com/unneeded.jpg"}})
         out = video.translate(self.result, self.shot)
         self.assertEqual(len(out['request']['image_urls']), 1)
-        self.assertIn('job entity props:cup: @image1', out['request']['prompt'])
+        self.assertIn('Job entity props:cup', out['request']['prompt'])
+        self.assertEqual(out['reference_manifest'][0]['tag'], '@image1')
         self.assertIn('still entering', out['mode_risk_terms'])
         self.assertTrue(out['request']['generate_audio'])
         self.shot.update(has_dialogue=True,speech_mode="onscreen", dialogue_audio_duration_sec=4, dialogue_audio_url="https://example.com/real.wav")
@@ -36,12 +37,13 @@ class VideoTests(unittest.TestCase):
         self.result['continuity']['characters'] = chars
         self.shot['characters_in_shot'] = [c['name'] for c in chars]
         self.shot['compiled_prompt'] += ' Maintain visual consistency with these reference images — Actor0: https://example.com/0.jpg. No on-screen text, logos or readable signage; composite text in post.'
+        with self.assertRaisesRegex(ValueError, 'more than 9 required'):
+            video.translate(self.result, self.shot)
+        self.shot['characters_in_shot'] = [c['name'] for c in chars[:8]]
         out = video.translate(self.result, self.shot)
         self.assertEqual(len(out['request']['image_urls']), 9)
         self.assertNotIn('https://', out['request']['prompt'])
-        self.assertIn('Actor0: @image2', out['request']['prompt'])
-        self.assertTrue(any('Actor8' in w for w in out['warnings']))
-        self.assertTrue(any('Actor9' in w for w in out['warnings']))
+        self.assertIn('@image2: Actor0 identity only', out['request']['prompt'])
 
     def test_constraints_and_duration_gates(self):
         self.shot['compiled_prompt'] += ' No photorealism. No extra hands.'

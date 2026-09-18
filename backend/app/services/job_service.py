@@ -423,6 +423,16 @@ def video_source(db, job_id, number):
     shot = next((s for s in result.get("shots", []) if s.get("shot_number") == number), None)
     if shot is None:
         raise LookupError("Shot not found")
+    # Older jobs predate reference-sheet propagation. Resolve by saved ID only;
+    # never re-match display names or change their approved identity rendering.
+    from app.models import Character
+    from app.services import product_service
+    for character in result.get("continuity", {}).get("characters", []):
+        if character.get("character_id") and not character.get("style_variant_id") and job.visual_style == "Natural":
+            row = db.get(Character, character["character_id"])
+            if row and row.status == "approved" and row.reference_sheet_url:
+                character.setdefault("reference_sheet_url", row.reference_sheet_url)
+    shot["approved_product_references"] = product_service.job_references(db, job_id)
     return result, shot
 
 

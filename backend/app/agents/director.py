@@ -85,6 +85,8 @@ def _apply_continuity_overrides(
             renderings[vault_character.id] = character_style_service.resolve_character_rendering(
                 db, vault_character, visual_style, emit,
             )
+            if visual_style == "Natural" and getattr(vault_character, "reference_sheet_url", None):
+                renderings[vault_character.id]["reference_sheet_url"] = vault_character.reference_sheet_url
         return renderings[vault_character.id]
 
     explicit_characters = {

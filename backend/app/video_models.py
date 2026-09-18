@@ -1,7 +1,6 @@
 """Job-level rendering choices, independent of Compiler model-family names."""
 from typing import Literal
-AUTOMATIC = "automatic_omni_mini"
-OMNI_FLASH = "google/gemini-omni-flash/image-to-video"
+AUTOMATIC = "automatic_omni_mini"  # Legacy saved-job ID; now Mini-only, never Omni.
 VideoModel = Literal["seedance_evolink", "seedance_fal", "seedance_fast_evolink", "seedance_mini_evolink",
                      "seedance_fast_fal", "seedance_mini_fal", "kling_voice_fal", "kling_avatar_fal", "automatic_omni_mini"]
 

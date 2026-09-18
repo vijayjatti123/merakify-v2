@@ -36,11 +36,11 @@ class AudioVideoTests(unittest.TestCase):
         self.db.expire_all()
         return {"shot_number": 1, **json.loads(self.db.query(VideoTask).one().data_json)}
 
-    def test_all_modes_send_only_scene_and_approved_audio(self):
+    def test_scene_remains_first_with_seedance_identity_and_approved_audio(self):
         for model in audio.MODELS:
             with self.subTest(model=model):
                 t=video.translate(self.result,self.shot,audio_model=model); r=t['request']
-                self.assertNotIn('portrait',json.dumps(r))
+                if model.startswith('kling_'): self.assertNotIn('portrait',json.dumps(r))
                 if model=='kling_avatar_fal':
                     self.assertEqual(r['image_url'],self.shot['still_frame_url'])
                     self.assertEqual(r['audio_url'],self.shot['dialogue_audio_url'])
@@ -50,7 +50,7 @@ class AudioVideoTests(unittest.TestCase):
                     self.assertIn('Hello there.',r['prompt'])
                     self.assertNotIn('audio_urls',r)
                 else:
-                    self.assertEqual(r['image_urls'],[self.shot['still_frame_url']])
+                    self.assertEqual(r['image_urls'],[self.shot['still_frame_url'], 'https://example.com/portrait.jpg'])
                     self.assertEqual(r['audio_urls'],[self.shot['dialogue_audio_url']])
                     self.assertTrue(r['generate_audio'])
                 self.assertNotIn('video_url',r);self.assertNotIn('video_urls',r)

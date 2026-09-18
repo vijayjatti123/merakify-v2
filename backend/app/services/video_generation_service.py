@@ -12,9 +12,9 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 from app.config import settings
-from app.video_models import AUTOMATIC, OMNI_FLASH, validate_selection
+from app.video_models import AUTOMATIC, validate_selection
 from app.services.speech_mode import is_voiceover, is_onscreen_speech
-from app.services import job_service, storage_service, render_compliance_service
+from app.services import job_service, storage_service, render_compliance_service, video_references
 from app.services.still_frame_service import match_entities, visual_description
 
 MODEL = "seedance-2.0-reference-to-video"
@@ -51,6 +51,8 @@ def translate(result, shot, *, audio_model=None):
         prompt = prompt.replace("no readable text, logos or extra subjects", "no added captions, invented logos or extra subjects")
         prompt = prompt.replace("No on-screen text, logos or readable signage; composite text in post.", "No added captions or invented logos.")
         translated["request"]["prompt"] = prompt + "\nPreserve the product geometry, materials, colors and existing packaging lettering/logos visible in the accepted scene image. Do not insert any product absent from that scene."
+    if translated.get("reference_manifest"):
+        video_references.check_prompt(translated["request"]["prompt"], translated["reference_manifest"])
     return translated
 
 
@@ -106,26 +108,11 @@ def _translate(result, shot, *, audio_model=None):
     if is_voiceover(shot):
         # The spoken text belongs to post-production, never a visible performance.
         visual = re.split(r"Performance reference —|\nDialogue:", visual, maxsplit=1)[0].strip()
-    candidates = [("shot opening/state", shot["still_frame_url"])]
-    names = {n.strip().casefold() for n in shot.get("characters_in_shot", [])}
-    for char in result.get("continuity", {}).get("characters", []):
-        if char.get("character_id") and char["name"].strip().casefold() in names and char.get("image_url"):
-            candidates.append(("character " + char["name"], char["image_url"]))
-    needed = match_entities(result, shot, visual)
-    for name, ref in result.get("entity_references", {}).items():
-        if name in needed and ref.get("url"):
-            candidates.append(("job entity " + name, ref["url"]))
-    refs, lookup, roles = [], {}, []
-    for role, url in candidates:
-        key = identity(url)
-        if key in lookup:
-            roles.append(f"{role}: @image{lookup[key]}")
-            continue
-        if len(refs) == 9:
-            warnings.append(f"Reference limit: dropped {role}.")
-            continue
-        refs.append(fresh_url(url)); lookup[key] = len(refs)
-        roles.append(f"{role}: @image{len(refs)}")
+    provider_tag = "fal" if selected and selected.endswith("_fal") else "evolink"
+    references = video_references.build(result, shot, limit=9, tag_style=provider_tag, refresh=fresh_url)
+    refs = references["images"]
+    lookup = references["lookup"]
+    warnings.extend(references["warnings"])
     # visual_description removes Module M's fixed URL appendix; the explicit
     # role map above rewrites those references into provider tags. Reject any
     # unknown inline URL rather than leaving a dangling reference.
@@ -134,7 +121,7 @@ def _translate(result, shot, *, audio_model=None):
         index = lookup.get(identity(raw))
         if index is None:
             raise ValueError("Compiled prompt contains a reference not selected for this shot")
-        return f"@image{index}" + match.group()[len(raw):]
+        return index + match.group()[len(raw):]
     visual = URL.sub(tagged, visual)
     visual = re.sub(r"No on-screen text, logos or readable signage; composite text in post\.?", "", visual)
     # Negative-only sentences become one constraints line; physical state facts
@@ -156,7 +143,7 @@ def _translate(result, shot, *, audio_model=None):
             raise ValueError("Negative constraints cannot be safely condensed below 55 words; review required before paid generation")
     audio = ("Audio: silent output; existing Sarvam dialogue will be muxed later."
              if shot.get("has_dialogue") else "Audio: ambient sound only, no music, no dialogue.")
-    prompt = "Reference roles: " + "; ".join(dict.fromkeys(roles)) + ".\n" + " ".join(kept) + "\n" + constraints + "\n" + audio
+    prompt = references["instructions"] + "\n" + " ".join(kept) + "\n" + constraints + "\n" + audio
     risks = sorted(set(m.group().lower() for m in MODE_WORDS.finditer(prompt)))
     if risks:
         warnings.append("Mode-intent warning: " + ", ".join(risks) + "; submitting explicit reference-to-video model, with no input video. Intent classification is not guaranteed.")
@@ -176,8 +163,16 @@ def _translate(result, shot, *, audio_model=None):
             request["resolution"] = request.pop("quality")
             request["duration"] = str(duration)
             request["prompt"] = re.sub(r"@image(\d+)", r"@Image\1", prompt)
+    if is_voiceover(shot) and selected in {"seedance_mini_evolink", "seedance_mini_fal"}:
+        tag = "@Audio1" if provider_name == "fal" else "@audio1"
+        request["audio_urls"] = [fresh_url(shot["dialogue_audio_url"])]
+        request["generate_audio"] = True
+        request["prompt"] = request["prompt"].replace(
+            "Audio: silent output; existing Sarvam dialogue will be muxed later.",
+            f"Audio: use {tag} as off-screen narration. No visible person speaks; do not animate lips. "
+            "The approved narration will be preserved exactly during final assembly.")
     return {"provider": provider_name, "model": model, "request": request,
-            "warnings": warnings, "mode_risk_terms": risks, "constraints": constraints}
+            "reference_manifest": references["manifest"], "warnings": warnings, "mode_risk_terms": risks, "constraints": constraints}
 
 
 def automatic_translation(result, shot, *, audio_model=None):
@@ -192,30 +187,10 @@ def automatic_translation(result, shot, *, audio_model=None):
         raise ValueError("This preview is out of date; create a new preview first")
     if result.get("aspect_ratio", "16:9") not in {"16:9", "9:16"}:
         raise ValueError("Automatic supports landscape 16:9 or portrait 9:16")
-    if shot.get("has_dialogue"):
-        translated = _translate({**result, "video_model": "seedance_mini_evolink"}, shot)
-        if is_voiceover(shot):
-            request = translated["request"]
-            request["audio_urls"] = [fresh_url(shot["dialogue_audio_url"])]
-            request["generate_audio"] = True
-            request["prompt"] = request["prompt"].replace(
-                "Audio: silent output; existing Sarvam dialogue will be muxed later.",
-                "Audio: use @audio1 as off-screen narration. No visible person speaks; do not animate lips. "
-                "The approved narration will be preserved exactly during final assembly.")
-        translated["warnings"].append("Automatic: speech and narration use Seedance Mini via EvoLink.")
-        return translated
-    seconds = float(shot.get("duration_sec") or 0)
-    if not math.isfinite(seconds) or not 0 < seconds <= 10:
-        raise ValueError("Automatic's Omni Flash silent shots must fit within 10 seconds. Split the shot or choose Seedance; no silent truncation was applied.")
-    duration = max(4, math.ceil(seconds))
-    prompt = URL.sub("the accepted scene reference", visual_description(shot["compiled_prompt"]))
-    prompt = ("<FIRST_FRAME> Use the supplied image as the exact starting composition. Single continuous shot, no cuts.\n"
-              + prompt + "\nAmbient sound only. No speech, narration, music, added captions or invented logos. Preserve existing product packaging and lettering.")
-    return {"provider": "fal", "model": OMNI_FLASH, "mode": "image_to_video",
-            "request": {"prompt": prompt, "image_url": fresh_url(shot["still_frame_url"]),
-                        "duration": duration, "aspect_ratio": result.get("aspect_ratio", "16:9")},
-            "warnings": ["Automatic: silent shot uses Omni Flash via fal. Resolution is provider-controlled; 720p was verified in the audit."],
-            "mode_risk_terms": [], "constraints": "Accepted shot preview; ambient sound only."}
+    translated = _translate({**result, "video_model": "seedance_mini_evolink"}, shot)
+    translated["warnings"].append("This saved Automatic job now uses Seedance Mini for every shot.")
+    return translated
+
 
 
 def provider(method, path, body=None):
@@ -272,6 +247,8 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
     if audio_model and not is_onscreen_speech(shot):
         raise ValueError("Audio-reference models apply only to visible speaking shots")
     translated = regenerate_translation(result, shot, hint, audio_model=audio_model) if regenerate else translate(result, shot, audio_model=audio_model)
+    if translated.get("reference_manifest"):
+        video_references.check_prompt(translated["request"]["prompt"], translated["reference_manifest"])
     provider_name = translated.get("provider", "evolink")
     if provider_name == "fal" and not settings.fal_api_key:
         raise ValueError("FAL_API_KEY is not configured")
@@ -289,6 +266,7 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
                            "video_warnings": translated["warnings"], "video_mode": translated.get("mode", "reference_to_video"),
                            "video_compliance_expected": render_compliance_service.snapshot(db, job_id, shot),
                            "video_retry_request": (translate(result, shot)["request"] if translated.get("mode") == "video_edit" else translated["request"]),
+                           "video_reference_manifest": translated.get("reference_manifest", []),
                            "video_compliance_retries": 0},
                            replace_token=expected_attempt if regenerate else None)
     for warning in translated["warnings"]:

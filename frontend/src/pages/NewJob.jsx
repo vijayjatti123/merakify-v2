@@ -45,7 +45,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const [quality, setQuality] = useState("720p");
   const [language, setLanguage] = useState("English");
   const [customLanguage, setCustomLanguage] = useState("");
-  const [modelChoice, setModelChoice] = useState("seedance_evolink");
+  const [modelChoice, setModelChoice] = useState("seedance_mini_evolink");
   const chosenModel = VIDEO_MODELS.find(model => model.id === modelChoice);
   const aiModel = chosenModel?.family || modelChoice;
   const videoModel = chosenModel?.id || null;
@@ -75,7 +75,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const activeClarification = clarification?.brief === brief && clarification?.context === clarificationContext ? clarification : null;
   const clarificationPayload = activeClarification ? { clarifier_session_id: activeClarification.id, clarifier_revision: activeClarification.revision } : {};
   const modelError = videoModel === "automatic_omni_mini" && quality !== "720p"
-    ? "Automatic requires 720p. Select 720p to continue."
+    ? "This saved selection requires 720p. Select 720p to continue."
     : videoModel === "kling_voice_fal" && !["english", "chinese", "en", "zh", "mandarin"].includes(effectiveLanguage.toLowerCase())
     ? "Kling Voice ID supports English/Chinese only. Choose Seedance for this language." : "";
   const canSubmit = Boolean(brief.trim() && effectiveDuration && effectiveLanguage && !submitting && !modelError);
@@ -293,7 +293,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               </SelectField>
               <SelectField label="AI model" value={modelChoice} onChange={(event) => setModelChoice(event.target.value)} note={modelError || (chosenModel ? modelNote(videoModel) : "Existing planning model; video generation support may be limited.")}>
                 <optgroup label="Video generation">
-                  {VIDEO_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+                  {VIDEO_MODELS.filter(model => model.id !== "automatic_omni_mini" || modelChoice === model.id).map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
                 </optgroup>
                 <optgroup label="Other planning models">
                   {["Wan 2.5", "Seedance 2.5", "Veo 3.1", "Sora 2"].map(model => <option key={model} value={model}>{model}</option>)}
