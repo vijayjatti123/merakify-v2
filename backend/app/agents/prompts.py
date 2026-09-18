@@ -136,7 +136,13 @@ Max 4 characters, 3 locations, 4 props."""
 # one utterance across independently generated performances remains prohibited.
 MAX_SHOT_SECONDS = 9
 
-CINEMATOGRAPHY_AGENT = """You are the Ad Director within the existing Cinematography stage. Design a compelling, executable shot
+CINEMATOGRAPHY_AGENT = """You are the Ad Director within the existing Cinematography stage.
+Source-linked requirements contain exact quotes from the approved scenes; execute every one.
+Use source_context to retain details from the original brief/script and reviewed direction that
+scene condensation may omit. Repeated attempts need distinct visible executions, not merely a
+label saying repeated. Product names are reference identities, not verified benefit/packaging facts.
+Do not output a self-review; independent QA checks coverage after your creative plan.
+Design a compelling, executable shot
 sequence from the supplied scenes, locked references, selected video model and target runtime.
 Make creative choices directly; application code validates mechanical fields after your response.
 Do not narrate analysis or repeatedly self-audit. Return only the JSON direction and shot list.
@@ -234,15 +240,25 @@ If required_corrections are supplied, repair ONLY the identified violations; ret
 Do not include URLs, voice IDs or copied Vault/style metadata in the output; code attaches references.
 """
 
-CINEMATOGRAPHY_PATCH = """Repair only the identified visual/mechanical violations in this shot plan.
+CINEMATOGRAPHY_PATCH = """Repair only the identified visual/mechanical or story-execution violations in this shot plan.
 The full plan is read-only continuity context. Return only changed fields for each flagged shot,
 using exactly its allowed_fields. Do not echo the full plan or change dialogue, identity, scene
-numbers, actions, or unflagged shots. Preserve the 180-degree axis, screen positions, eyelines,
+numbers, or unflagged shots. Actions may change ONLY when description is explicitly authorized:
+restore the missing source beat and update its opening/performance/end coherently. Do not invent
+new product facts. Preserve the 180-degree axis, screen positions, eyelines,
 motivated lighting and adjacent scale/angle variety. A framing correction must suit the existing
 action. Keep each camera_direction internally valid: moving cameras have non-none speed and
 non-locked stabilization; hold has direction none and speed none.
 Return ONLY JSON: {"patches":[{"shot_number":6,"changes":{"camera_angle":"high-angle medium"}}]}.
 The example is illustrative, not a prescribed camera choice. Include every flagged shot once.
+If allowed_insert_after is supplied, also return insertions, exactly one per listed anchor:
+{"after_shot_number":4,"shot":{complete new shot fields except shot_number}}.
+Insert a SILENT action beat in the anchor's scene after that shot. Never add or copy dialogue.
+Use the usual Director shot fields including camera_direction, shot_direction, opening/end,
+opening_characters, characters_in_shot, speech_mode="none", has_dialogue=false, dialogue_text="".
+Code assigns ordinals. Return no existing shot copies; patches target only allowed_fields,
+and patches=[] is valid when there are no authorized existing-field changes. Respect duration
+bounds and both neighboring states. Do not erase the neighboring action or assume it changed.
 """
 
 CINEMATOGRAPHY_FIX = """You are the Cinematography Agent revising specific shots based on QA feedback.
@@ -311,6 +327,34 @@ Review the whole plan once, collecting ALL evidenced problems together:
    Short complete replies are valid. Voiceover needs no visible speaker. Onscreen speech must
    identify its speaker unambiguously. Never delete dialogue or impose an obsolete nine-second cap.
 
+When requirements are supplied, check EVERY source quote individually before deciding approval.
+Also return shot_checks for EVERY shot: {"shot_number":1,"consistent":true,"evidence":"short check"}.
+Explicitly compare description and performance against opening/end states: a prop ending on the
+floor in description but on a table in end state is a contradiction, even if the broad story works.
+For repeated action requirements, evidence must enumerate the actual separate action-result
+cycles (first attempt -> result; renewed attempt -> result). 'He repeatedly pulls, then it snaps
+back' depicts one result, not multiple failed cycles. A purpose label is never proof of repetition.
+If the plan leaves these cycles unspecified, covered=false; request explicit execution rather
+than assuming the renderer will fill it in. Collect these defects AND boundary defects together.
+Return requirement_coverage: [{"requirement_id":"supplied id","shot_numbers":[1],
+"covered":true,"evidence":"short specific depicted action"}]. Never merely cite a purpose label.
+Counts, order, repeated attempts, reveals and exact dialogue matter. Inspect source_context too:
+original brief/source script and user-reviewed direction must not be lost through scene condensation.
+Product names identify selected references, NOT verified benefits or packaging colors.
+For each uncovered requirement, include an issue with its requirement_id and the actual shot to repair.
+Collect ALL defects together. mechanical_findings are already code-checked; do not rediscover them.
+For local visual repairs add repair_kind="visual_fields" and repair_fields containing ONLY the
+necessary keys from description, shot_direction, state_at_shot_start, state_at_shot_end,
+opening_characters, camera_angle, camera_direction, lens, lighting, composition_note, duration_sec.
+Changing description also requires coherent opening/end/performance. Never authorize speech/cast
+or scene changes as visual_fields. For a necessary additional silent action shot use
+repair_kind="insert_after", repair_fields=[] and shot_number of its immediate preceding shot.
+The existing neighboring shots remain immutable; flag any genuinely required neighbor field
+changes separately as visual_fields. For deletion or speech restructuring use repair_kind="structural",
+repair_fields=[]; never squeeze infeasible actions into an existing shot.
+For defects not linked to a requirement use requirement_id="". Evidence should be concise, not
+a retelling of the whole story. Still inspect all boundaries independently after a repair.
+
 When approved_story has scenes, return scene_coverage for EACH scene with a heading, description
 or dialogue: its scene_number, the actual shot_numbers supporting it, covered boolean, and a short
 concrete evidence statement listing depicted actions (including each repeated attempt). If an
@@ -318,11 +362,15 @@ action is absent, covered=false and include a corresponding shot issue. Check st
 as well even when a coverage problem exists; do not stop at the first defect.
 Corrections must target actual contradictions/omissions, preserve other choices, and be as local
 as possible. Return concise JSON only, no rewritten plan or general advice:
-{"approved":boolean,"scene_coverage":[{"scene_number":1,"shot_numbers":[1,2],"covered":true,
+{"approved":boolean,"shot_checks":[{"shot_number":1,"consistent":true,"evidence":"Action and opening/end states agree"}],
+"requirement_coverage":[{"requirement_id":"supplied id","shot_numbers":[1],"covered":true,"evidence":"Depicted action"}],
+"scene_coverage":[{"scene_number":1,"shot_numbers":[1,2],"covered":true,
 "evidence":"Concrete actions actually depicted"}],
-"issues":[{"shot_number":1,"problem":"Specific evidenced defect","fix_instruction":"Local correction preserving speech"}]}
+"issues":[{"shot_number":1,"problem":"Specific evidenced defect","fix_instruction":"Local correction preserving speech",
+"requirement_id":"supplied id or empty string","repair_kind":"visual_fields|insert_after|structural","repair_fields":["description"]}]}
 Approval requires complete coverage and no real issues. If no approved_story is supplied,
-scene_coverage may be omitted; still verify semantic continuity and dialogue. Do not invent issues."""
+scene_coverage may be omitted; still verify semantic continuity and dialogue. Without requirements,
+omit requirement_coverage, shot_checks and issue scope metadata. Do not invent issues."""
 
 SHOT_ASSEMBLER = """You are the Shot Assembler. Given the final shot list, choose a transition between
 each consecutive shot and the total runtime.

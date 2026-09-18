@@ -67,6 +67,11 @@ decision here should be flagged rather than silently made.
 
 ## Provider and infrastructure rules
 
+- User-approved exception (2026-09-18): creative Cinematography planning and
+  its FIX/PATCH/TRIM calls use Gemini Flash via OPEN_ROUTER_API_KEY. Semantic
+  QA remains independent on Anthropic. This does not authorize gateway routing
+  for unrelated stages, automatic model substitution, or a second orchestrator.
+
 - Every AI provider call uses a direct API key from `backend/.env`. Never
   route a call through a third-party universal-key gateway or proxy,
   regardless of how convenient it looks for auth or storage. The old

@@ -1,6 +1,7 @@
 from app.services.planning_contract import creative_references, camera_options, render_camera_summaries, check_mechanics
-from app.services.planning_patch import patch_permissions, apply_patch_response
+from app.services.planning_patch import patch_permissions, apply_patch_response, protect_unflagged, apply_insertion_response
 from app.services import ad_direction
+from app.services import story_requirements
 from app.services.speech_mode import is_voiceover
 from app.services.camera_direction import check_plan as check_camera_plan
 import json
@@ -338,9 +339,11 @@ def validate_and_correct(
             emit(agent_key, note)
 
     current_shots = render_camera_summaries(shots)
+    story_outline = {k:v for k,v in (approved_story or {}).items() if k != 'production_context'}
     direction_context = ("\nad_direction: " + json.dumps(ad_direction_plan)
-                         + "\napproved_story: " + json.dumps(approved_story)) if ad_direction_plan else ""
+                         + "\napproved_story: " + json.dumps(story_outline)) if ad_direction_plan else ""
     if ad_direction_plan:
+        direction_context += "\nSource-linked requirements: " + json.dumps(story_requirements.review_context(approved_story))
         direction_context += "\nCode-owned duration constraints: " + json.dumps({
             'minimum_shot_seconds': minimum_shot_seconds, 'silent_max_seconds': 9,
             'voiceover_max_seconds': 15, 'target_total_seconds': target_duration_sec,
@@ -367,16 +370,26 @@ def validate_and_correct(
             reviewed_shots = [{k:s[k] for k in fields if k in s} for s in reviewed_shots]
             refs = creative_references(characters)
             return json.dumps({'shots': reviewed_shots, 'characters': refs,
-                'ad_direction': ad_direction_plan, 'approved_story': approved_story})
+                'ad_direction': ad_direction_plan, 'approved_story': story_outline,
+                **story_requirements.review_context(approved_story),
+                'mechanical_findings': code_review(reviewed_shots).get('issues', [])})
         else:
             refs = characters
         return f"Shots: {json.dumps(reviewed_shots)}\nCharacters: {json.dumps(refs)}" + direction_context
     # Contract errors join the existing bounded QA/FIX loop, not another call.
+    def code_review(reviewed_shots):
+        return ad_direction.check_plan(check_mechanics(check_camera_plan({'approved': True, 'issues': []}, reviewed_shots),
+            reviewed_shots, characters, minimum_shot_seconds), reviewed_shots)
+
     def mechanical_review(verdict, reviewed_shots):
         if ad_direction_plan:
+            verdict = story_requirements.check_review(verdict, reviewed_shots, approved_story)
             verdict = ad_direction.check_coverage(verdict, reviewed_shots, approved_story)
-        return ad_direction.check_plan(check_mechanics(check_camera_plan(verdict, reviewed_shots),
-            reviewed_shots, characters, minimum_shot_seconds), reviewed_shots)
+        findings = code_review(reviewed_shots).get('issues', [])
+        issues = list(verdict.get('issues', []))
+        issues.extend(i for i in findings if not any(
+            old.get('shot_number') == i['shot_number'] and old.get('code') == i.get('code') for old in issues))
+        return {**verdict, 'approved': bool(verdict.get('approved')) and not issues, 'issues': issues}
 
     # Continuity QA Agent, with one autonomous self-correction pass.
     notify("qa", "Checking the shot list for continuity and film-grammar violations...")
@@ -388,7 +401,18 @@ def validate_and_correct(
 
     qa = mechanical_review(qa, current_shots)
     protected = protected_dialogue(current_shots, source_script_text)
-    issues, verified, rejected, limitations = screen_issues(current_shots, qa.get("issues", []), protected, notify)
+    def screen_review_issues(verdict):
+        findings = verdict.get('issues', [])
+        # An insertion's shot_number identifies a boundary, not a request to
+        # edit its anchor's dialogue. Code permits only a new silent shot; all
+        # edits of existing shots still pass through unchanged Module K guards.
+        insertions = [i for i in findings if ad_direction_plan and i.get('repair_kind') == 'insert_after']
+        if any(i.get('repair_fields', []) for i in insertions):
+            raise ValueError('Insertion cannot authorize edits to its anchor. Retry planning.')
+        accepted, verified, rejected, limited = screen_issues(current_shots,
+            [i for i in findings if i not in insertions], protected, notify)
+        return [*accepted, *insertions], verified, rejected, limited
+    issues, verified, rejected, limitations = screen_review_issues(qa)
     qa = {**qa, "issues": issues}
     if rejected or limitations:
         qa["approved"] = not issues and not limitations
@@ -400,16 +424,32 @@ def validate_and_correct(
             notify("qa", f"Shot {issue['shot_number']}: {issue['problem']}")
 
         notify("cinematography", "Revising flagged shots per QA feedback...")
-        permissions = patch_permissions(current_shots, qa['issues'])
-        if permissions:
+        insertion_issues = [i for i in qa['issues'] if i.get('repair_kind') == 'insert_after'] if ad_direction_plan else []
+        field_issues = [i for i in qa['issues'] if i not in insertion_issues]
+        permissions = patch_permissions(current_shots, field_issues) if field_issues else {}
+        insert_anchors = sorted({i['shot_number'] for i in insertion_issues})
+        if insert_anchors and any(n not in {s['shot_number'] for s in current_shots} for n in insert_anchors):
+            raise ValueError('Story repair targeted an unknown insertion boundary. Retry planning.')
+        if permissions or (insert_anchors and not field_issues):
             notify('cinematography', 'Applying targeted field corrections; other shot content is preserved.')
             patch_response = call_agent(
                 prompts.CINEMATOGRAPHY_PATCH,
                 f"Read-only plan: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}"
-                + f"\nallowed_fields: {json.dumps(permissions)}\ncamera_options: {json.dumps(camera_options())}" + direction_context,
-                max_tokens=min(4096, 2048 + 256 * len(permissions)),
+                + f"\nallowed_fields: {json.dumps(permissions)}\ncamera_options: {json.dumps(camera_options())}"
+                + (f"\nallowed_insert_after: {json.dumps(insert_anchors)}" if insert_anchors else '') + direction_context,
+                max_tokens=min(8192, 2048 + 256 * len(permissions) + 2048 * len(insert_anchors)),
             )
-            cine = {'shots': apply_patch_response(current_shots, patch_response, permissions)}
+            if insert_anchors:
+                repaired, number_map = apply_insertion_response(current_shots, patch_response, permissions, insert_anchors)
+                # Preserve Module K's identity correspondence when code assigns
+                # display ordinals after insertion. Existing speech is unchanged.
+                current_shots = [{**s, 'shot_number': number_map[s['shot_number']]} for s in current_shots]
+                protected = {number_map[n]: {**s, 'shot_number': number_map[n]} for n,s in protected.items()}
+                verified = {number_map[n] for n in verified}
+                notify('cinematography', f'Inserted {len(insert_anchors)} silent story beat(s); existing shot content retained.')
+                cine = {'shots': repaired}
+            else:
+                cine = {'shots': apply_patch_response(current_shots, patch_response, permissions)}
         else:
             # Directed records carry opening/performance/end facts. Reuse the
             # existing batch-size allowance instead of the old flat 4096 cap.
@@ -422,6 +462,8 @@ def validate_and_correct(
                    "Only apply compatible visual corrections." if protected else ""),
                 max_tokens=repair_tokens,
             )
+            if ad_direction_plan:
+                protect_unflagged(current_shots, cine['shots'], qa['issues'])
         loss_warnings = warn_dialogue_loss(current_shots, cine["shots"], verified, notify)
         revised, violations = restore_protected(current_shots, cine["shots"], protected, notify)
         # A full-plan correction must not accidentally downgrade directed shots
@@ -443,7 +485,7 @@ def validate_and_correct(
             **qa_options(current_shots),
         )
         qa = mechanical_review(qa, current_shots)
-        remaining, _, rejected_again, blocked_again = screen_issues(current_shots, qa.get("issues", []), protected, notify)
+        remaining, _, rejected_again, blocked_again = screen_review_issues(qa)
         rejected.extend(rejected_again)
         limitations.extend(blocked_again)
         qa = {**qa, "issues": remaining}
@@ -733,6 +775,14 @@ def run_pipeline(db: Session, job_id: str) -> None:
                 f"Brief: {brief}\nFormat: {fmt['format']}\nStructure: {fmt['structure']}\nNumber of scenes: {fmt['num_scenes']}" + direction_note,
             )
         emit("script", f"Logline locked: \"{script['logline']}\"")
+        # Preserve authoritative context with the saved story for initial QA AND
+        # later edit/retry paths. No separate requirement-extraction model call.
+        from app.services.product_service import job_references
+        script['production_context'] = {
+            'original_brief': brief, 'source_script': source_script,
+            'reviewed_direction': planning_direction(direction),
+            'products': [{'name': p['name']} for p in job_references(db, job_id)],
+        }
 
         # 3. Visual Continuity Agent — builds the reference library BEFORE any
         # shot is planned, so every later step can be checked against it.
@@ -790,6 +840,9 @@ def run_pipeline(db: Session, job_id: str) -> None:
         from app.services.voice_timing import measured_budget
         cinematography_input += f"\nMeasured dialogue budget: {json.dumps(measured_budget(db, language))}"
         token_budget = cinematography_token_budget(script["scenes"], fmt["duration_target_sec"])
+        script['production_context']['visual_style'] = continuity['visual_style']
+        cinematography_input += "\nSource-linked requirements: " + json.dumps(story_requirements.review_context(script))
+        cinematography_input += "\nApproved story and format: " + json.dumps({'logline': script['logline'], 'format': fmt['format']})
 
         def record_cinematography_usage(metadata: dict) -> None:
             emit("cinematography_usage", json.dumps(metadata))
@@ -803,10 +856,6 @@ def run_pipeline(db: Session, job_id: str) -> None:
             truncation_retry_tokens=min(32768, token_budget * 2),
             on_response=record_cinematography_usage,
         )
-        from app.services.product_service import job_references
-        cinematography_input += "\nSelected approved products (names identify references, not verified benefits): " + json.dumps(
-            [{"name": p["name"]} for p in job_references(db, job_id)])
-        cinematography_input += "\nApproved story and format: " + json.dumps({"logline": script['logline'], "format": fmt['format']})
         directed_ad = ad_direction.validate_ad(cine.get('ad_direction'))
         for shot in cine['shots']:
             shot['direction_version'] = 1

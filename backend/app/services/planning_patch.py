@@ -2,6 +2,67 @@
 import copy
 import re
 
+VISUAL_REPAIR_FIELDS = frozenset(('description', 'shot_direction', 'state_at_shot_start',
+    'state_at_shot_end', 'opening_characters', 'camera_angle', 'camera_direction',
+    'lens', 'lighting', 'composition_note', 'duration_sec'))
+
+
+def protect_unflagged(shots, revised, issues):
+    """Legacy structural output may add shots, but cannot rewrite its neighbors."""
+    allowed = {i.get('shot_number') for i in issues}
+    by_number = {s['shot_number']: s for s in revised}
+    if len(by_number) != len(revised):
+        raise ValueError('Correction duplicated shot identifiers. Retry planning.')
+    for shot in shots:
+        if shot['shot_number'] not in allowed:
+            candidate = by_number.get(shot['shot_number'])
+            if candidate is None or any(shot.get(k) != v for k, v in candidate.items()):
+                raise ValueError('Correction changed an unflagged shot. Your plan is saved; retry planning.')
+            # Keep the authoritative snapshot, including metadata the model
+            # need not repeat. Omitted fields cannot erase existing data.
+            snapshot = copy.deepcopy(shot)
+            candidate.clear()
+            candidate.update(snapshot)
+    original_order = [s['shot_number'] for s in shots if s['shot_number'] not in allowed]
+    if [s['shot_number'] for s in revised if s['shot_number'] in original_order] != original_order:
+        raise ValueError('Correction reordered unflagged shots. Retry planning.')
+
+
+def apply_insertion_response(shots, response, permissions, anchors):
+    """Insert silent story beats, retaining existing content and mapping ordinals.
+
+    Speech creation/removal is deliberately excluded. The same independent QA
+    validates feasibility, boundaries and coverage after this operation.
+    """
+    from app.agents.output_contracts import contracts, validate
+    validate(response, contracts()['patch-insert-v1'])
+    updated = apply_patch_response(shots, {'patches': response['patches']}, permissions) if permissions else copy.deepcopy(shots)
+    if not permissions and response['patches']:
+        raise ValueError('Insertion response changed unauthorized existing shots.')
+    by_number = {s['shot_number']: s for s in shots}
+    insertions = {}
+    for operation in response['insertions']:
+        anchor, shot = operation['after_shot_number'], copy.deepcopy(operation['shot'])
+        if anchor not in anchors or anchor in insertions:
+            raise ValueError('Insertion targeted an unauthorized or duplicate boundary.')
+        if shot['has_dialogue'] or shot['dialogue_text'] or shot['speech_mode'] != 'none':
+            raise ValueError('A visual beat insertion cannot invent speech.')
+        if shot['scene_number'] != by_number[anchor]['scene_number']:
+            raise ValueError('Insertion changed the approved scene.')
+        shot['direction_version'] = 1
+        insertions[anchor] = shot
+    if set(insertions) != set(anchors):
+        raise ValueError('Correction omitted a required beat insertion.')
+    result, number_map = [], {}
+    for shot in updated:
+        old = shot['shot_number']
+        shot['shot_number'] = len(result) + 1
+        number_map[old] = shot['shot_number']
+        result.append(shot)
+        if old in insertions:
+            result.append({**insertions[old], 'shot_number': len(result) + 1})
+    return result, number_map
+
 
 def patch_permissions(shots, issues):
     by_number = {s['shot_number']: s for s in shots}
@@ -10,6 +71,17 @@ def patch_permissions(shots, issues):
         number = issue.get('shot_number')
         if number not in by_number:
             return None
+        # Explicit semantic scopes are restricted by code, never arbitrary keys
+        # supplied by the model. Speech/cast/scene identity cannot be patched.
+        if issue.get('repair_kind') == 'visual_fields':
+            fields = issue.get('repair_fields')
+            if not isinstance(fields, list) or not fields or any(f not in VISUAL_REPAIR_FIELDS for f in fields):
+                raise ValueError('QA proposed an invalid visual repair scope. Retry planning.')
+            fields = set(fields)
+            if 'description' in fields:
+                fields.update(('shot_direction', 'state_at_shot_start', 'state_at_shot_end', 'opening_characters'))
+            allowed.setdefault(number, set()).update(fields)
+            continue
         if issue.get('code') == 'invalid_camera_direction':
             allowed.setdefault(number, set()).add('camera_direction')
             continue

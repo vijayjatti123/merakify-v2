@@ -105,6 +105,9 @@ def check_coverage(qa, shots, story):
                 or not isinstance(row.get('evidence'), str) or not row['evidence'].strip()):
             raise ValueError('Story review returned invalid coverage evidence. Retry planning.')
         if not row['covered']:
+            if any(i.get('shot_number') in by_shot and
+                   by_shot[i['shot_number']].get('scene_number') == row['scene_number'] for i in issues):
+                continue  # Preserve QA's actual target/scope; do not invent a duplicate.
             number = next((s['shot_number'] for s in shots if s.get('scene_number') == row['scene_number']), shots[0]['shot_number'])
             issues.append({'shot_number': number, 'code':'story_coverage',
                 'problem': f"Scene {row['scene_number']} missing story execution: {row['evidence']}",

@@ -42,6 +42,15 @@ class OutputContractTests(unittest.TestCase):
         self.assertEqual(contracts.contract_for(prompts.SHOT_PROMPT_COMPILER, '{}'), (None, None))
         self.assertEqual(contracts.contract_for(prompts.CINEMATOGRAPHY_FIX, '{}'), (None, None))
 
+    def test_required_evidence_schema_even_without_optional_director_schema(self):
+        from app.config import settings
+        with patch.object(settings, 'planning_structured_outputs', False):
+            name, schema = contracts.contract_for(prompts.QA_AGENT,
+                '{"ad_direction":{"takeaway":"x"},"requirements":[{"id":"s1:heading:1"}]}')
+        self.assertEqual(name, 'qa-v2')
+        with self.assertRaises(ValueError):
+            contracts.validate({'approved': True, 'scene_coverage': [], 'issues': []}, schema)
+
     def test_patch_contract_forbids_dialogue_and_unknown_fields(self):
         schema = contracts.contracts()['patch-v1']
         valid = {'patches': [{'shot_number': 1, 'changes': {'camera_angle': 'low angle wide'}}]}
@@ -53,5 +62,5 @@ class OutputContractTests(unittest.TestCase):
         client = Mock(); client.messages.create.return_value = SimpleNamespace(
             stop_reason='refusal', content=[SimpleNamespace(type='text', text='No')])
         with patch.object(llm_client, '_client', client), self.assertRaisesRegex(ValueError, 'provider could not'):
-            llm_client.call_agent(prompts.CINEMATOGRAPHY_AGENT, '{}')
+            llm_client.call_agent(prompts.QA_AGENT, '{}')
         self.assertEqual(client.messages.create.call_count, 1)

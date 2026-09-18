@@ -1,5 +1,18 @@
 # Merakify Core — v2 skeleton
 
+### Creative planning model routing
+
+The existing Cinematography planning and FIX/PATCH/TRIM stages use
+`DIRECTOR_MODEL=google/gemini-3.8-flash` via server-side `OPEN_ROUTER_API_KEY`,
+an explicit user-approved exception to direct-provider routing. Independent
+semantic QA remains on Claude Sonnet 5 for every story; no unproven complexity
+classifier downgrades QA. Other stages, including the video-prompt Compiler,
+keep their existing models. The same QA/correction loop, validators and stage
+deadlines remain. Missing credentials or provider errors stop with Retry rather
+than silently changing models. Creative checkpoints include provider/model;
+unchanged Anthropic-stage checkpoints remain compatible. This addresses the
+core planning/QA milestone; it adds no separate Director or media generation.
+
 This is a from-scratch rebuild of the core loop only: **brief in → Director
 Agent pipeline runs autonomously → shot list out.** Nothing else from the old
 platform is here on purpose. See the "What's deliberately not here" section.
@@ -335,6 +348,25 @@ missing/invalid evidence is not checkpointed, so Retry can make a real new reque
 character is not assumed to have vanished. Mechanical camera defects use typed camera-only
 patches, with the supported camera vocabulary provided, then the same semantic recheck.
 This extends the existing planning/QA milestone; no extra orchestrator or model tier is added.
+
+### Source-linked QA and bounded repairs (local follow-up)
+
+The existing story record retains original brief/script, reviewed direction, selected product
+names and locked style as `production_context`. Code quotes its scene headings, action sentences
+and dialogue into stable requirement IDs without another model call. Director and QA receive
+the same context. Names alone do not establish product benefits or packaging appearance.
+QA returns mandatory requirement/shot evidence through a provider JSON schema; code validates
+coverage references before checkpointing. Mechanical findings are supplied before semantic
+review; full semantic review still runs after corrections.
+
+Typed `visual_fields` findings authorize only specific visual fields on flagged shots. Action
+changes include coherent opening/end/performance corrections. Dialogue/cast/scene changes
+cannot masquerade as visual patches. A typed `insert_after` defect uses a silent-beat insertion
+response, with code assigning ordinals and preserving existing speech/content. Full independent
+QA checks both new boundaries. Other structural cases retain the bounded full-plan correction
+path, with an additional guard preventing changes/reordering of unflagged shots. This is not
+a general delete/dialogue rewrite protocol. Module K's user-dialogue protection is unchanged.
+This addresses the existing autonomous planning/QA milestone; it adds no pipeline stage.
 
 ### Storyboard progress workspace
 
