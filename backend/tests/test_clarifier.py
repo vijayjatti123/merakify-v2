@@ -76,7 +76,10 @@ class ClarifierTests(unittest.TestCase):
         self.assertNotIn(row.status, ("ready", "refined", "degraded"))
 
     def test_bounded_questions_and_no_repeated_topics(self):
-        with patch.object(service, "call_agent", return_value=assessment(list(service.QUESTIONS), .99)):
+        def respond(system, *args, **kwargs):
+            result = assessment(list(service.QUESTIONS), .99)
+            return {"updates": result["coverage"], "confidence": .99} if kwargs.get("fast") else result
+        with patch.object(service, "call_agent", side_effect=respond):
             row = service.start(self.db, "Lamp", {})
             for _ in range(service.MAX_QUESTIONS):
                 row = service.act(self.db, row, "answer", "Please decide")
@@ -127,6 +130,39 @@ class ClarifierTests(unittest.TestCase):
         payload = JobCreate(brief='Lamp ad', language='English',clarifier_session_id=row.session_id,clarifier_revision=row.revision)
         with self.assertRaisesRegex(ValueError,'settings changed'):
             service.accepted_direction(self.db,payload)
+
+    def test_followup_updates_multiple_topics_and_preserves_other_facts(self):
+        with patch.object(service, "call_agent", return_value=assessment(["product", "audience", "outcome"])):
+            row = service.start(self.db, "Lamp", {})
+        delta = {"updates": {k: {"status":"provided", "evidence":"Students; adjustable brightness"}
+            for k in ("product", "audience")}, "confidence": .99}
+        with patch.object(service, "call_agent", return_value=delta) as provider:
+            row = service.act(self.db, row, "answer", "Students; adjustable brightness")
+        self.assertTrue(provider.call_args.kwargs["fast"])
+        self.assertEqual(provider.call_args.kwargs["request_timeout"], 25)
+        self.assertEqual(row.turns[-1]["topic"], "outcome")
+        self.assertEqual(row.gathered["_assessment"]["coverage"]["tone"]["evidence"], "Lamp")
+        self.assertLess(row.confidence, .8)
+
+    def test_followup_reopens_conflict_and_rejects_invented_evidence(self):
+        with patch.object(service, "call_agent", return_value=assessment(["product"])):
+            row = service.start(self.db, "Lamp", {})
+        delta = {"updates": {"product":{"status":"provided", "evidence":"Invented guarantee"},
+            "tone":{"status":"missing", "question":"Should the ad be calm or energetic?"}}, "confidence":.95}
+        with patch.object(service, "call_agent", return_value=delta):
+            row = service.act(self.db, row, "answer", "Not sure; calm but also energetic")
+        self.assertIn("product", row.gathered["_assessment"]["unverified"])
+        self.assertIn("tone", row.gathered["_assessment"]["unresolved"])
+        self.assertEqual(row.turns[-1]["topic"], "tone")
+        self.assertLess(row.confidence, .8)
+
+    def test_invalid_update_is_visibly_degraded(self):
+        with patch.object(service, "call_agent", return_value=assessment(["product", "audience"])):
+            row = service.start(self.db, "Lamp", {})
+        with patch.object(service, "call_agent", return_value={"updates":{}, "confidence":.99}):
+            row = service.act(self.db, row, "answer", "Adjustable brightness")
+        self.assertEqual(row.status, "degraded")
+        self.assertEqual(row.turns[-1]["source"], "fallback")
 
     def test_atomic_stale_writer_cannot_overwrite(self):
         row = storage.create_clarifier_session(self.db, "Lamp", {})

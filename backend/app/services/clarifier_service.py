@@ -1,10 +1,12 @@
 """Text-only intake. No Director, media providers, background work or job creation."""
 import json
+import copy
+import time
 import math
 import re
 
 from app.agents.llm_client import call_agent
-from app.agents.prompts import CLARIFIER, CLARIFIER_REFINE
+from app.agents.prompts import CLARIFIER, CLARIFIER_REFINE, CLARIFIER_UPDATE
 from app.services import job_service as storage
 from app.services.prompt_technique_service import lookup_techniques
 
@@ -74,16 +76,38 @@ def advance(state):
     try:
         if state["status"] == "degraded":
             raise ValueError("Already using fallback")
-        # Reasoning task, not classification: retain central Sonnet routing.
+        previous = state["gathered"].get("_assessment", {})
+        incremental = bool(turns and turns[-1].get("answer") is not None
+            and set(previous.get("coverage", {})) == set(QUESTIONS))
         state["gathered"]["_reasoning_attempts"] = []
+        started = time.monotonic()
         def record_usage(metadata):
+            metadata = {**metadata, "elapsed_seconds": round(time.monotonic() - started, 3),
+                "assessment_mode": "update" if incremental else "initial"}
             state["gathered"]["_reasoning_usage"] = metadata
             state["gathered"]["_reasoning_attempts"].append(metadata)
-        # Real eight-topic assessment consumed 2,573 thinking tokens before
-        # finishing JSON. Reserve room for coverage; one retry shares this budget.
-        result = call_agent(CLARIFIER, json.dumps({**_model_context(state), "available_topics": available,
-            "topics": list(QUESTIONS)}, ensure_ascii=False, default=str), max_tokens=4096, request_timeout=50,
-            truncation_retry_tokens=6144, on_response=record_usage)
+        if incremental:
+            # Preserve the source for contradiction checks, but send answers and
+            # assessment only once; request deltas rather than full regeneration.
+            payload = {"raw_brief": state["raw_brief"], "known_fields": state["known_fields"],
+                "context": state["gathered"].get("_context", {}), "previous_assessment": previous,
+                "answers": [{k: t.get(k) for k in ("topic", "question", "answer")} for t in turns],
+                "latest_topic": turns[-1]["topic"], "topics": list(QUESTIONS)}
+            delta = call_agent(CLARIFIER_UPDATE, json.dumps(payload, ensure_ascii=False, default=str),
+                fast=True, max_tokens=2048, request_timeout=25, truncation_retry_tokens=3072,
+                on_response=record_usage)
+            updates = delta.get("updates")
+            if (not isinstance(updates, dict) or set(updates) - set(QUESTIONS)
+                    or turns[-1]["topic"] not in updates):
+                raise ValueError("Invalid assessment update")
+            coverage = copy.deepcopy(previous["coverage"])
+            coverage.update(updates)
+            result = {"coverage": coverage, "confidence": delta["confidence"],
+                "understanding": delta.get("understanding") or previous["understanding"]}
+        else:
+            result = call_agent(CLARIFIER, json.dumps({**_model_context(state), "available_topics": available,
+                "topics": list(QUESTIONS)}, ensure_ascii=False, default=str), max_tokens=4096, request_timeout=50,
+                truncation_retry_tokens=6144, on_response=record_usage)
         confidence = result["confidence"]
         if isinstance(confidence, bool) or not isinstance(confidence, (int, float)) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
             raise ValueError("Invalid confidence")
@@ -128,7 +152,7 @@ def advance(state):
             raise ValueError("Invalid targeted question")
     except Exception as error:
         safe_reasons = {"Already using fallback", "Invalid confidence", "Incomplete brief assessment", "Invalid coverage",
-            "Ungrounded coverage claim", "Ad essentials cannot be skipped", "Missing script understanding", "Invalid targeted question"}
+            "Invalid assessment update", "Ungrounded coverage claim", "Ad essentials cannot be skipped", "Missing script understanding", "Invalid targeted question"}
         state["gathered"]["_reasoning_failure"] = {"type": type(error).__name__,
             "reason": str(error) if str(error) in safe_reasons else "Provider reasoning failed; see usage/stop metadata when available."}
         state["status"] = "degraded"
