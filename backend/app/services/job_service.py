@@ -569,23 +569,60 @@ def claim_video(db, job_id, number, fields, *, replace_token=None):
 
 
 def update_video(db, job_id, number, **fields):
-    row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).with_for_update().populate_existing().one()
-    data = json.loads(row.data_json)
     expected_task = fields.pop("expected_task_id", None)
     expected_started = fields.pop("expected_submitted_at", None)
-    if ((expected_task is not None and data.get("video_task_id") != expected_task)
-            or (expected_started is not None and data.get("video_submitted_at") != expected_started)):
+    for _ in range(3):
+        row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).with_for_update().populate_existing().one()
+        old_json = row.data_json
+        data = json.loads(old_json)
+        if ((expected_task is not None and data.get("video_task_id") != expected_task)
+                or (expected_started is not None and data.get("video_submitted_at") != expected_started)):
+            db.rollback()
+            return False
+        data.update(fields)
+        changed = db.query(VideoTask).filter(VideoTask.id == row.id, VideoTask.data_json == old_json).update(
+            {VideoTask.data_json: json.dumps(data), VideoTask.status: data["video_status"]}, synchronize_session=False)
+        if changed == 1:
+            db.commit()
+            return True
         db.rollback()
-        return False  # A late poll must never overwrite a newer paid attempt.
-    data.update(fields)
-    row.data_json = json.dumps(data)
-    row.status = data["video_status"]
-    db.commit()
+    raise ValueError("Video task changed concurrently; retry the saved task update")
+
 
 
 def pending_videos(db):
     return [(row.job_id, {**json.loads(row.data_json), "shot_number": int(row.shot_number)})
             for row in db.query(VideoTask).filter(VideoTask.status.in_(["processing", "submitting"])).all()]
+
+
+def video_worker_lease(db, job_id, number, task, token, *, renew=False, release=False):
+    """Short CAS lease on existing task JSON; no DB connection held during media work."""
+    from datetime import timezone, timedelta
+    row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).populate_existing().one_or_none()
+    if row is None:
+        return None
+    old = row.data_json
+    data = json.loads(old)
+    lease = data.get("video_worker_lease", {})
+    now = datetime.now(timezone.utc)
+    if renew or release:
+        if lease.get("token") != token:
+            return None
+    elif (row.status not in {"processing", "submitting"}
+          or data.get("video_task_id") != task
+          or (lease.get("until") and datetime.fromisoformat(lease["until"]) > now)):
+        return None
+    if release:
+        data.pop("video_worker_lease", None)
+    else:
+        data["video_worker_lease"] = {"token": token, "until": (now + timedelta(seconds=120)).isoformat()}
+    changed = db.query(VideoTask).filter(VideoTask.id == row.id, VideoTask.data_json == old).update(
+        {VideoTask.data_json: json.dumps(data)}, synchronize_session=False)
+    if changed != 1:
+        db.rollback()
+        return None
+    db.commit()
+    return {**data, "shot_number": number}
 
 
 def video_check_state(db, job_id, number, task, *, check=None, claim_retry=False):

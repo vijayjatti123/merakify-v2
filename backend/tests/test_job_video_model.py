@@ -52,7 +52,7 @@ class JobVideoModelTests(unittest.TestCase):
     def test_speech_inherits_job_over_previous_shot_choice_and_rejects_override(self):
         shot={**self.shot,"has_dialogue":True,"speech_mode":"onscreen","characters_in_shot":["Meera"],
               "dialogue_audio_url":"https://example.com/audio.wav","dialogue_audio_duration_sec":5,
-              "video_audio_model":"seedance_evolink"}
+              "video_audio_model":"seedance_evolink", "dialogue_text":"Hello there."}
         result={"ai_model":"Seedance 2.0","video_model":"seedance_fast_fal","quality":"720p"}
         self.assertEqual(video.translate(result,shot)["model"],"bytedance/seedance-2.0/fast/reference-to-video")
         with self.assertRaisesRegex(ValueError,"inherit"):

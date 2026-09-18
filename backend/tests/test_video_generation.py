@@ -29,7 +29,7 @@ class VideoTests(unittest.TestCase):
         self.assertEqual(out['reference_manifest'][0]['tag'], '@image1')
         self.assertIn('still entering', out['mode_risk_terms'])
         self.assertTrue(out['request']['generate_audio'])
-        self.shot.update(has_dialogue=True,speech_mode="onscreen", dialogue_audio_duration_sec=4, dialogue_audio_url="https://example.com/real.wav")
+        self.shot.update(has_dialogue=True,speech_mode="onscreen", dialogue_text="Here is the cup.", dialogue_audio_duration_sec=4, dialogue_audio_url="https://example.com/real.wav")
         self.assertEqual(video.translate(self.result, self.shot)['provider'], 'evolink')
 
     def test_reference_priority_cap_and_url_rewrite(self):

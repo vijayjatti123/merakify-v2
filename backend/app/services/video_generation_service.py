@@ -5,6 +5,7 @@ import math
 import logging
 import re
 import tempfile
+import time
 import httpx
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit, unquote, quote
@@ -306,7 +307,7 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
     return response
 
 
-def poll(db, job_id, shot):
+def poll(db, job_id, shot, *, defer_completed=False):
     age = (datetime.now(timezone.utc) - datetime.fromisoformat(shot["video_submitted_at"])).total_seconds()
     if shot["video_status"] == "submitting":
         if age > 180:
@@ -340,67 +341,67 @@ def poll(db, job_id, shot):
         job_service.update_video(db, job_id, number, expected_task_id=task, video_status="failed", video_error=json.dumps(response.get("error")))
         job_service.append_event(db, job_id, "video_generation", f"Shot {number}: provider task failed; no paid regeneration attempted.")
     elif response.get("status") == "completed":
-        urls = response.get("results") or []
-        if not urls:
-            raise ValueError("Completed video task has no downloadable result")
-        if urlsplit(urls[0]).scheme != "https":
-            raise ValueError("Provider download must use HTTPS")
-        with tempfile.TemporaryFile() as video:
-            digest, size = hashlib.sha256(), 0
-            # The provider CDN rejects urllib with Cloudflare 1010; the app's
-            # existing HTTPX client is accepted without credentials or a proxy.
-            with httpx.stream("GET", urls[0], timeout=120, follow_redirects=True) as download:
-                download.raise_for_status()
-                for chunk in download.iter_bytes(1024 * 1024):
-                    size += len(chunk)
-                    if size > 512 * 1024 * 1024:
-                        raise ValueError("Video exceeds 512MB download bound")
-                    digest.update(chunk); video.write(chunk)
-            video.seek(0)
-            if video.read(12)[4:8] != b"ftyp":
-                raise ValueError("Downloaded result is not an MP4 container")
-            video.seek(0)
-            if shot.get("video_audio_model"):
-                from app.services import audio_video_service
-                try:
-                    audio_video_service.validate_audio_result(video)
-                except ValueError as error:
-                    job_service.update_video(db, job_id, number, expected_task_id=task,
-                        video_status="review_required", video_error=str(error))
-                    job_service.append_event(db, job_id, "video_generation", f"Shot {number}: {error}")
-                    return
-            if not render_compliance_service.accept(db, job_id, shot, video):
+        if defer_completed:
+            return response
+        finish_completed(db, job_id, shot, response)
+
+
+def finish_completed(db, job_id, shot, response):
+    number, task = shot['shot_number'], shot['video_task_id']
+    started = time.monotonic()
+    timings = {}
+    urls = response.get("results") or []
+    if not urls:
+        raise ValueError("Completed video task has no downloadable result")
+    if urlsplit(urls[0]).scheme != "https":
+        raise ValueError("Provider download must use HTTPS")
+    with tempfile.TemporaryFile() as video:
+        phase = time.monotonic()
+        digest, size = hashlib.sha256(), 0
+        # The provider CDN rejects urllib with Cloudflare 1010; the app's
+        # existing HTTPX client is accepted without credentials or a proxy.
+        with httpx.stream("GET", urls[0], timeout=120, follow_redirects=True) as download:
+            download.raise_for_status()
+            for chunk in download.iter_bytes(1024 * 1024):
+                size += len(chunk)
+                if size > 512 * 1024 * 1024:
+                    raise ValueError("Video exceeds 512MB download bound")
+                digest.update(chunk); video.write(chunk)
+        timings["download_sec"] = time.monotonic() - phase
+        phase = time.monotonic()
+        video.seek(0)
+        if video.read(12)[4:8] != b"ftyp":
+            raise ValueError("Downloaded result is not an MP4 container")
+        video.seek(0)
+        if shot.get("video_audio_model"):
+            from app.services import audio_video_service
+            try:
+                audio_video_service.validate_audio_result(video)
+            except ValueError as error:
+                job_service.update_video(db, job_id, number, expected_task_id=task,
+                    video_status="review_required", video_error=str(error))
+                job_service.append_event(db, job_id, "video_generation", f"Shot {number}: {error}")
                 return
-            video.seek(0)
-            key = f"jobs/{job_id}/videos/{number}-{task}.mp4"
-            stored = storage_service.upload_file(key, video, content_type="video/mp4")
-        job_service.update_video(db, job_id, number, expected_task_id=task, video_status="done", video_url=stored['url'],
-                                      video_key=key, video_sha256=digest.hexdigest(), video_bytes=size,
-                                      video_usage=response.get("usage"), video_error=None,
-                                      video_stored_at=datetime.now(timezone.utc).isoformat())
-        job_service.append_event(db, job_id, "video_generation", f"Shot {number}: video persisted to S3 ({size} bytes, SHA256 {digest.hexdigest()}); provider expiry no longer controls retention.")
+        timings["media_validation_sec"] = time.monotonic() - phase
+        phase = time.monotonic()
+        accepted = render_compliance_service.accept(db, job_id, shot, video)
+        timings["compliance_sec"] = time.monotonic() - phase
+        if not accepted:
+            job_service.append_event(db, job_id, "video_timing", f"Shot {number}: completion deferred by compliance; " + json.dumps(timings))
+            return
+        phase = time.monotonic()
+        video.seek(0)
+        key = f"jobs/{job_id}/videos/{number}-{task}.mp4"
+        stored = storage_service.upload_file(key, video, content_type="video/mp4")
+    timings["upload_sec"] = time.monotonic() - phase
+    timings["completion_processing_sec"] = time.monotonic() - started
+    job_service.update_video(db, job_id, number, expected_task_id=task, video_processing_timings=timings, video_status="done", video_url=stored['url'],
+                                  video_key=key, video_sha256=digest.hexdigest(), video_bytes=size,
+                                  video_usage=response.get("usage"), video_error=None,
+                                  video_stored_at=datetime.now(timezone.utc).isoformat())
+    job_service.append_event(db, job_id, "video_generation", f"Shot {number}: video persisted to S3 ({size} bytes, SHA256 {digest.hexdigest()}); provider expiry no longer controls retention.")
 
 
 def polling_loop(stop):
-    """Persisted tasks survive restarts; only the CAS-guarded compliance gate may retry."""
-    from app.db import SessionLocal
-    while not stop.wait(10):
-        with SessionLocal() as db:
-            try:
-                pending = job_service.pending_videos(db)
-            except Exception:
-                logging.getLogger(__name__).error("Video task scan failed; will retry on next tick")
-                continue
-            for job_id, shot in pending:
-                try:
-                    poll(db, job_id, shot)
-                except Exception as error:
-                    db.rollback()
-                    message = f"Video polling/storage temporarily failed: {type(error).__name__}; saved task will be polled again."
-                    if shot.get("video_error") != message:
-                        try:
-                            job_service.update_video(db, job_id, shot['shot_number'], expected_submitted_at=shot.get('video_submitted_at'), video_error=message)
-                            job_service.append_event(db, job_id, "video_generation", f"Shot {shot['shot_number']}: {message}")
-                        except Exception:
-                            db.rollback()
-                            logging.getLogger(__name__).error("Video recovery warning could not be persisted; next tick will retry")
+    from app.services.video_task_worker import run
+    run(stop)
