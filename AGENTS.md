@@ -39,17 +39,14 @@ core surface.
   the minimum screens needed for the core loop; don't add a dashboard of
   tools as separate pages.
 
-## The one pattern that must be preserved
+## User-reviewed Director plans (explicit product decision)
 
-The Continuity QA Agent inspects the Cinematography Agent's output and can
-send it back for revision with no human approving that step
-(`director.py`, the `if not qa.get("approved")` block). This self-correction
-loop is what makes the system agentic rather than a single generative call
-with a UI around it — it is core to the product's pitch, not incidental.
-Any new pipeline step that could produce an error (a generated asset that
-doesn't match its reference, a rendered shot that violates continuity)
-should get the same treatment: a checking step that can autonomously trigger
-a retry, not just a step that reports a problem for a human to fix.
+The Director writes one detailed plan. Code checks execution constraints; the
+user reviews story coverage, complete dialogue and direction before approving
+media generation. Semantic text QA must not block that review or silently rewrite
+the approved story. Keep the existing single orchestrator. Image and rendered-video
+compliance checks and their bounded retries remain required. Technical validation
+is not a claim that narrative continuity has been independently verified.
 
 ## Indic dialogue audio: no lip-sync step, by decision — don't silently reintroduce one
 

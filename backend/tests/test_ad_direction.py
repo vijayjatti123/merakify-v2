@@ -81,28 +81,6 @@ class AdDirectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'direction needs review'):
             shot_prompt_compiler.compiler_input(result, emit=lambda *a: None)
 
-    def test_edited_action_repaired_in_existing_loop_and_dialogue_preserved(self):
-        result = directed()
-        shot = result['shots'][0]
-        shot['description'] = 'The hand puts the cup down'
-        calls = []
-        def provider(system, content, **kwargs):
-            calls.append(system)
-            if system == prompts.CINEMATOGRAPHY_PATCH:
-                self.assertIn('ad_direction', content)
-                return {'patches': [{'shot_number': 1, 'changes': dict(
-                    shot_direction={**shot['shot_direction'], 'performance': 'The hand gently lowers the cup'},
-                    opening_characters=[],
-                    state_at_shot_start='Blue cup in hand above table.',
-                    state_at_shot_end='Blue cup rests on table.')} ]}
-            return {'approved': True, 'issues': []}
-        with patch.object(director, 'call_agent', side_effect=provider):
-            output = director.validate_and_correct(result['shots'], [], 5,
-                ad_direction_plan=result['ad_direction'], approved_story=result['script'])
-        self.assertEqual(calls, [prompts.QA_AGENT, prompts.CINEMATOGRAPHY_PATCH, prompts.QA_AGENT])
-        self.assertEqual(output['shots'][0]['dialogue_text'], 'Look here.')
-        self.assertEqual(output['shots'][0]['description'], 'The hand puts the cup down')
-        self.assertFalse(ad_direction.problems(output['shots'][0]))
 
     def test_missing_direction_is_not_silently_accepted(self):
         result = directed()
@@ -114,16 +92,6 @@ class AdDirectionTests(unittest.TestCase):
             apply_patch_response(result['shots'], {'patches': [{'shot_number': 1,
                 'changes': {'dialogue_text': 'Different'}}]}, permissions)
 
-    def test_directed_plan_semantic_rejection_remains_blocking(self):
-        result = directed()
-        issue = dict(shot_number=1, problem='Impossible action', fix_instruction='Repair action')
-        def provider(system, content, **kwargs):
-            if system == prompts.CINEMATOGRAPHY_FIX:
-                return {'shots': copy.deepcopy(result['shots'])}
-            return {'approved': False, 'issues': [issue]}
-        with patch.object(director, 'call_agent', side_effect=provider):
-            with self.assertRaisesRegex(ValueError, 'unresolved checks'):
-                director.validate_and_correct(result['shots'], [], 5)
 
     def test_legacy_adapter_remains_available(self):
         result = source()
@@ -156,17 +124,6 @@ class AdDirectionTests(unittest.TestCase):
         self.assertEqual(updated[0]['description'], shot['description'])
         self.assertEqual(updated[0]['shot_direction'], shot['shot_direction'])
 
-    def test_added_shot_cannot_downgrade_to_legacy_contract(self):
-        result = directed()
-        issue = dict(shot_number=1,problem='Missing story beat',fix_instruction='Restore the required action')
-        def provider(system, content, **kwargs):
-            if system == prompts.CINEMATOGRAPHY_FIX:
-                return {'shots':[copy.deepcopy(result['shots'][0]), {**copy.deepcopy(source()['shots'][0]),
-                    'shot_number':2,'duration_sec':5,'speech_mode':'none'}]}
-            return {'approved':True,'issues':[]} if '"shot_number": 2' in content else {'approved':False,'issues':[issue]}
-        with patch.object(director,'call_agent',side_effect=provider):
-            with self.assertRaisesRegex(ValueError,'unresolved checks'):
-                director.validate_and_correct(result['shots'],[],5,ad_direction_plan=result['ad_direction'])
 
     def test_later_arrival_not_in_opening_image_or_entity_references(self):
         from app.services.still_frame_service import match_entities
@@ -187,41 +144,7 @@ class AdDirectionTests(unittest.TestCase):
         self.assertIn('Spirit',payload['shots'][0]['characters_in_shot'])
         self.assertEqual(payload['shots'][0]['opening_characters'],['Carpenter'])
 
-    def test_semantic_qa_retains_direction_but_omits_media_payload(self):
-        result=directed()
-        result['shots'][0].update(still_frame_url='PRIVATE_IMAGE', compiled_prompt='OLD_GENERATED_PROSE',
-                                 dialogue_audio_url='PRIVATE_AUDIO')
-        with patch.object(director,'call_agent',return_value={'approved':True,'issues':[]}) as call:
-            director.validate_and_correct(result['shots'],[],5,
-                ad_direction_plan=result['ad_direction'],approved_story=result['script'])
-        content=call.call_args.args[1]
-        self.assertIn('An unhurried hand lifts the cup',content)
-        self.assertIn('approved_story',content)
-        for excluded in ('PRIVATE_IMAGE','PRIVATE_AUDIO','OLD_GENERATED_PROSE'):
-            self.assertNotIn(excluded,content)
-        self.assertGreater(call.call_args.kwargs['max_tokens'],3072)
-        self.assertEqual(call.call_count,1)
-        from app.agents.execution import stage_budget
-        self.assertEqual(stage_budget('qa_agent'),90)
 
-    def test_complex_review_gets_recovery_allowance_without_a_truncation_rerun(self):
-        result = directed()
-        shots = [copy.deepcopy(result['shots'][0]) for _ in range(8)]
-        for number, shot in enumerate(shots, 1):
-            shot.update(shot_number=number, camera_angle=f'Viewpoint {number}')
-        with patch.object(director, 'call_agent', return_value={'approved':True,'issues':[]}) as call:
-            director.validate_and_correct(shots, [], 40,
-                ad_direction_plan=result['ad_direction'], approved_story=result['script'])
-        self.assertEqual(call.call_count, 1)
-        self.assertEqual(call.call_args.kwargs['max_tokens'], 8192)
-        self.assertNotIn('truncation_retry_tokens', call.call_args.kwargs)
-        # A legacy plan must not inherit the new directed-plan budget.
-        legacy = copy.deepcopy(result['shots'])
-        for shot in legacy:
-            shot.pop('direction_version')
-        with patch.object(director, 'call_agent', return_value={'approved':True,'issues':[]}) as call:
-            director.validate_and_correct(legacy, [], 5)
-        self.assertEqual(call.call_args.kwargs, {'max_tokens':3072})
 
 
 if __name__ == '__main__':

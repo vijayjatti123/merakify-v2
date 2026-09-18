@@ -188,6 +188,10 @@ Each speaking shot contains a complete self-contained
 utterance; multiple complete utterances may use separate shots in ONE scene. Never split a line,
 shorten it to fit, invent scene changes to hide a split, or invent extra speech for silent beats.
 Use speech_mode onscreen for visible speech, voiceover for narration over B-roll, none for silence.
+Set speaker_name to the exact visible speaker's reference name for onscreen speech; use an empty
+string for silence or narration. Never leave speaker attribution ambiguous in multi-character shots.
+Set transition_after to cut, crossfade or match cut; default to a motivated hard cut.
+The user reviews this detailed plan directly. Include every approved beat before returning it.
 characters_in_shot lists only visible characters by exact reference name; do not create a visible
 narrator. Never transliterate user-supplied script dialogue without the user's instruction.
 
@@ -230,7 +234,7 @@ Return {"ad_direction":{"takeaway":"supplied viewer outcome","visual_approach":"
 "camera_direction":{"movement":"hold","direction":"none","speed":"none","stabilization":"locked"},
 "lens":"motivated lens/focus","lighting":"shot-specific light","composition_note":"spatial staging",
 "duration_sec":5,"description":"the complete visual beat","characters_in_shot":["Exact name"],
-"has_dialogue":false,"speech_mode":"none","dialogue_text":"",
+"has_dialogue":false,"speech_mode":"none","speaker_name":"","transition_after":"cut","dialogue_text":"",
 "state_at_shot_start":"visible opening instant","state_at_shot_end":"visible ending instant",
 "opening_characters":["Exact name"],
 "shot_direction":{"purpose":"why this shot matters","performance":"observable behavior",

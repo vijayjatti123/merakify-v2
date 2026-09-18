@@ -299,6 +299,12 @@ def _attach_voice_refs(
             if character is not None:
                 voice_refs[normalized_name] = character.get("voice_sample_ref")
 
+        if is_voiceover(shot):
+            shot["speaker_label"] = "Narrator"
+        elif shot.get("speaker_name"):
+            shot["speaker_label"] = shot["speaker_name"]
+        if shot.get("speaker_name") in voice_refs and not is_voiceover(shot):
+            voice_refs = {shot["speaker_name"]: voice_refs[shot["speaker_name"]]}
         shot["voice_refs"] = {"Narrator": narrator_voice_ref} if is_voiceover(shot) else voice_refs
         shot["speech_mode"] = "voiceover" if is_voiceover(shot) else "onscreen" if shot.get("has_dialogue") else "none"
         shot["experimental_audio_sync"] = bool(shot.get("has_dialogue")) and not is_voiceover(shot)
@@ -328,206 +334,30 @@ def validate_and_correct(
     ad_direction_plan: dict | None = None,
     approved_story: dict | None = None,
 ) -> dict:
-    """Run the pipeline's single QA and duration self-correction sequence.
+    """Technical review only. Storytelling is explicitly approved by the user.
 
-    Both an initial pipeline run and a user revision pass through this function
-    so the retry limits and acceptance thresholds cannot drift between paths.
+    Keep this shared entry point for initial plans, edits and regeneration.
+    No semantic QA or whole-plan rewrite runs behind the user's review screen.
     """
-
-    def notify(agent_key: str, note: str) -> None:
-        if emit:
-            emit(agent_key, note)
-
+    from app.services.director_review import review, timeline
     current_shots = render_camera_summaries(shots)
-    story_outline = {k:v for k,v in (approved_story or {}).items() if k != 'production_context'}
-    direction_context = ("\nad_direction: " + json.dumps(ad_direction_plan)
-                         + "\napproved_story: " + json.dumps(story_outline)) if ad_direction_plan else ""
-    if ad_direction_plan:
-        direction_context += "\nSource-linked requirements: " + json.dumps(story_requirements.review_context(approved_story))
-        direction_context += "\nCode-owned duration constraints: " + json.dumps({
-            'minimum_shot_seconds': minimum_shot_seconds, 'silent_max_seconds': 9,
-            'voiceover_max_seconds': 15, 'target_total_seconds': target_duration_sec,
-            'rule': 'Never delete speech or approved story beats to force the target; no new shot below the model minimum.'})
-    # The eight-shot audit spent 5084/5120 tokens thinking, then retried with
-    # only 37 seconds left. Give complex plans the existing recovery allowance
-    # up front, under the unchanged 90-second deadline. Recalculate on revision
-    # because a story repair may add shots. Legacy QA keeps its existing budget.
-    def qa_options(reviewed_shots):
-        tokens = min(8192, 4096 + 512 * len(reviewed_shots)) if ad_direction_plan else 3072
-        options = {'max_tokens': tokens}
-        if ad_direction_plan and tokens < 8192:
-            options['truncation_retry_tokens'] = 8192
-        return options
-    def review_content(reviewed_shots):
-        if ad_direction_plan:
-            # QA needs the whole story and decisions, not signed URLs, previous
-            # generated prompts, images, playback metadata or reference hashes.
-            fields = ('shot_number', 'scene_number', 'description', 'dialogue_text', 'has_dialogue',
-                      'speech_mode', 'characters_in_shot', 'opening_characters', 'shot_direction',
-                      'direction_version', 'camera_angle', 'camera_direction', 'camera_movement',
-                      'lighting', 'composition_note', 'duration_sec',
-                      'dialogue_audio_duration_sec', 'state_at_shot_start', 'state_at_shot_end')
-            reviewed_shots = [{k:s[k] for k in fields if k in s} for s in reviewed_shots]
-            refs = creative_references(characters)
-            return json.dumps({'shots': reviewed_shots, 'characters': refs,
-                'ad_direction': ad_direction_plan, 'approved_story': story_outline,
-                **story_requirements.review_context(approved_story),
-                'mechanical_findings': code_review(reviewed_shots).get('issues', [])})
-        else:
-            refs = characters
-        return f"Shots: {json.dumps(reviewed_shots)}\nCharacters: {json.dumps(refs)}" + direction_context
-    # Contract errors join the existing bounded QA/FIX loop, not another call.
-    def code_review(reviewed_shots):
-        return ad_direction.check_plan(check_mechanics(check_camera_plan({'approved': True, 'issues': []}, reviewed_shots),
-            reviewed_shots, characters, minimum_shot_seconds), reviewed_shots)
-
-    def mechanical_review(verdict, reviewed_shots):
-        if ad_direction_plan:
-            verdict = story_requirements.check_review(verdict, reviewed_shots, approved_story)
-            verdict = ad_direction.check_coverage(verdict, reviewed_shots, approved_story)
-        findings = code_review(reviewed_shots).get('issues', [])
-        issues = list(verdict.get('issues', []))
-        issues.extend(i for i in findings if not any(
-            old.get('shot_number') == i['shot_number'] and old.get('code') == i.get('code') for old in issues))
-        return {**verdict, 'approved': bool(verdict.get('approved')) and not issues, 'issues': issues}
-
-    # Continuity QA Agent, with one autonomous self-correction pass.
-    notify("qa", "Checking the shot list for continuity and film-grammar violations...")
-    qa = call_agent(
-        prompts.QA_AGENT,
-        review_content(current_shots),
-        **qa_options(current_shots),
-    )
-
-    qa = mechanical_review(qa, current_shots)
-    protected = protected_dialogue(current_shots, source_script_text)
-    def screen_review_issues(verdict):
-        findings = verdict.get('issues', [])
-        # An insertion's shot_number identifies a boundary, not a request to
-        # edit its anchor's dialogue. Code permits only a new silent shot; all
-        # edits of existing shots still pass through unchanged Module K guards.
-        insertions = [i for i in findings if ad_direction_plan and i.get('repair_kind') == 'insert_after']
-        if any(i.get('repair_fields', []) for i in insertions):
-            raise ValueError('Insertion cannot authorize edits to its anchor. Retry planning.')
-        accepted, verified, rejected, limited = screen_issues(current_shots,
-            [i for i in findings if i not in insertions], protected, notify)
-        return [*accepted, *insertions], verified, rejected, limited
-    issues, verified, rejected, limitations = screen_review_issues(qa)
-    qa = {**qa, "issues": issues}
-    if rejected or limitations:
-        qa["approved"] = not issues and not limitations
-    loss_warnings = []
-
-    if not qa.get("approved") and qa.get("issues"):
-        notify("qa", f"Found {len(qa['issues'])} issue(s) — sending back to Cinematography, no human needed.")
-        for issue in qa["issues"]:
-            notify("qa", f"Shot {issue['shot_number']}: {issue['problem']}")
-
-        notify("cinematography", "Revising flagged shots per QA feedback...")
-        insertion_issues = [i for i in qa['issues'] if i.get('repair_kind') == 'insert_after'] if ad_direction_plan else []
-        field_issues = [i for i in qa['issues'] if i not in insertion_issues]
-        permissions = patch_permissions(current_shots, field_issues) if field_issues else {}
-        insert_anchors = sorted({i['shot_number'] for i in insertion_issues})
-        if insert_anchors and any(n not in {s['shot_number'] for s in current_shots} for n in insert_anchors):
-            raise ValueError('Story repair targeted an unknown insertion boundary. Retry planning.')
-        if permissions or (insert_anchors and not field_issues):
-            notify('cinematography', 'Applying targeted field corrections; other shot content is preserved.')
-            patch_response = call_agent(
-                prompts.CINEMATOGRAPHY_PATCH,
-                f"Read-only plan: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}"
-                + f"\nallowed_fields: {json.dumps(permissions)}\ncamera_options: {json.dumps(camera_options())}"
-                + (f"\nallowed_insert_after: {json.dumps(insert_anchors)}" if insert_anchors else '') + direction_context,
-                max_tokens=min(8192, 2048 + 256 * len(permissions) + 2048 * len(insert_anchors)),
-            )
-            if insert_anchors:
-                repaired, number_map = apply_insertion_response(current_shots, patch_response, permissions, insert_anchors)
-                # Preserve Module K's identity correspondence when code assigns
-                # display ordinals after insertion. Existing speech is unchanged.
-                current_shots = [{**s, 'shot_number': number_map[s['shot_number']]} for s in current_shots]
-                protected = {number_map[n]: {**s, 'shot_number': number_map[n]} for n,s in protected.items()}
-                verified = {number_map[n] for n in verified}
-                notify('cinematography', f'Inserted {len(insert_anchors)} silent story beat(s); existing shot content retained.')
-                cine = {'shots': repaired}
-            else:
-                cine = {'shots': apply_patch_response(current_shots, patch_response, permissions)}
-        else:
-            # Directed records carry opening/performance/end facts. Reuse the
-            # existing batch-size allowance instead of the old flat 4096 cap.
-            repair_tokens = cinematography_token_budget([{}] * ((len(current_shots) + 1) // 2), target_duration_sec) if ad_direction_plan else 4096
-            cine = call_agent(
-                prompts.CINEMATOGRAPHY_FIX,
-                f"Current shots: {json.dumps(current_shots)}\nRequired fixes: {json.dumps(qa['issues'])}\ncamera_options: {json.dumps(camera_options())}" + direction_context
-                + (f"\nProtected user-scripted dialogue shot numbers: {json.dumps(list(protected))}. "
-                   "Keep these shots present and preserve their dialogue_text, has_dialogue and scene_number exactly. "
-                   "Only apply compatible visual corrections." if protected else ""),
-                max_tokens=repair_tokens,
-            )
-            if ad_direction_plan:
-                protect_unflagged(current_shots, cine['shots'], qa['issues'])
-        loss_warnings = warn_dialogue_loss(current_shots, cine["shots"], verified, notify)
-        revised, violations = restore_protected(current_shots, cine["shots"], protected, notify)
-        # A full-plan correction must not accidentally downgrade directed shots
-        # to legacy plans. Missing direction is caught on the semantic recheck.
-        directed_revision = any(s.get('direction_version') == 1 for s in current_shots)
-        for shot in revised:
-            if directed_revision:
-                shot['direction_version'] = 1
-                if all(k in shot for k in ad_direction.DIRECTION_FIELDS):
-                    shot['direction_source'] = ad_direction.source_key(shot)
-        limitations.extend(violations)
-        current_shots = render_camera_summaries(_attach_voice_refs(revised, characters, narrator_voice_ref, emit=emit))
-        notify("cinematography", "Revision complete.")
-
-        notify("qa", "Re-checking the revised shot list...")
-        qa = call_agent(
-            prompts.QA_AGENT,
-            review_content(current_shots),
-            **qa_options(current_shots),
-        )
-        qa = mechanical_review(qa, current_shots)
-        remaining, _, rejected_again, blocked_again = screen_review_issues(qa)
-        rejected.extend(rejected_again)
-        limitations.extend(blocked_again)
-        qa = {**qa, "issues": remaining}
-        if rejected_again or blocked_again:
-            qa["approved"] = not remaining and not limitations
-        if limitations:
-            qa["approved"] = False
-        notify("qa", "Approved — continuity holds." if qa.get("approved") else
-               "Direction still needs correction; media generation remains stopped." if any(s.get('direction_version') == 1 for s in current_shots)
-               else "Residual notes remain; proceeding with best version.")
-    else:
-        notify("qa", "User-scripted dialogue protected; unresolved QA limitation remains." if limitations
-               else "No actionable QA issues remain after deterministic validation." if rejected
-               else "Approved on first pass — no continuity issues found.")
-
-    if rejected:
-        qa["rejected_claims"] = rejected
-    if limitations:
-        qa["approved"] = False
-        qa["issues"] = [*qa["issues"], *limitations]
-        qa["dialogue_protection_limitations"] = limitations
-    if loss_warnings:
-        qa["dialogue_loss_warnings"] = loss_warnings
-    if any(s.get('direction_version') == 1 for s in current_shots):
-        if not qa.get('approved'):
-            raise ValueError("The directed shot plan still has unresolved checks. Your story is saved; retry planning.")
+    verdict = review(current_shots, characters, minimum_shot_seconds)
+    for shot in current_shots:
+        shot["review_mode"] = "user"
+    if verdict["approved"]:
         ad_direction.accept_shots(current_shots)
-
-    # Dialogue timing is provisional until approval triggers real decoded audio.
-    # Module K's QA/FIX logic above is unchanged; only assembly is deferred.
-    if defer_audio_assembly and any(shot.get("has_dialogue") for shot in current_shots):
-        notify("assembly", "Assembly and duration self-check deferred until dialogue audio is decoded and corrected after approval.")
-        return {"shots": current_shots, "qa": qa, "assembly": {
-            "total_duration_sec": sum(float(s.get("duration_sec", 0)) for s in current_shots),
-            "transitions": [], "provisional": True,
-        }}
-    assembled = assemble_shots(current_shots, characters, target_duration_sec, narrator_voice_ref=narrator_voice_ref, emit=emit)
-    return {**assembled, "qa": qa}
+    if emit:
+        emit("qa", "Technical checks passed. Review the story and approve the plan." if verdict["approved"]
+             else "Your plan is saved. Correct the listed technical details before approval.")
+    return {"shots": current_shots, "qa": verdict,
+            "assembly": timeline(current_shots, provisional=any(s.get("has_dialogue") for s in current_shots))}
 
 
 def assemble_shots(shots, characters, target_duration_sec, *, narrator_voice_ref=None, emit=None):
     """Existing assembly/duration sequence; dialogue jobs call this only after audio."""
+    if shots and all(s.get("review_mode") == "user" for s in shots):
+        from app.services.director_review import timeline
+        return {"shots": shots, "assembly": timeline(shots)}
     current_shots = shots
     def notify(key, note):
         if emit:
@@ -694,7 +524,7 @@ def finalize_audio_assembly(db, job_id):
     try:
         if any(s.get("has_dialogue") and s.get("status") != "done" for s in result["shots"]):
             raise ValueError("Dialogue audio incomplete; final assembly cannot lock timing")
-        emit("assembly", "Decoded audio corrections complete; running final Shot Assembler and duration self-check now.")
+        emit("assembly", "Speech timing is ready; updating the shot timeline.")
         continuity = result.get("continuity", {})
         old_assembly = result.get("assembly", {})
         duration = sum(float(s.get("duration_sec", 0)) for s in result["shots"])
@@ -893,7 +723,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             'shots': [{k: s[k] for k in ('shot_number', 'scene_number', 'description',
                 'dialogue_text', 'duration_sec') if k in s} for s in cine['shots']],
         }})
-        emit('planning_draft', 'Your draft storyboard is ready. Checking story coverage and continuity.')
+        emit('planning_draft', 'Your Director plan is ready. Checking technical compatibility before your review.')
         validated = validate_and_correct(
             cine["shots"],
             continuity["characters"],

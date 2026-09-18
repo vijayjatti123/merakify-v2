@@ -35,7 +35,7 @@ def contracts():
     visual.update(camera_direction=cam, duration_sec=NUMBER, opening_characters=array(TEXT), shot_direction=direction)
     shot = obj(dict(shot_number=INTEGER, scene_number=INTEGER, **visual,
                     characters_in_shot=array(TEXT), has_dialogue=BOOLEAN,
-                    speech_mode={'type': 'string', 'enum': ['none', 'onscreen', 'voiceover']}, dialogue_text=TEXT))
+                    speech_mode={'type': 'string', 'enum': ['none', 'onscreen', 'voiceover']}, speaker_name=TEXT, transition_after={'type':'string','enum':['cut','crossfade','match cut']}, dialogue_text=TEXT))
     coverage = obj(dict(scene_number=INTEGER, shot_numbers=array(INTEGER), covered=BOOLEAN, evidence=TEXT))
     issue = obj(dict(shot_number=INTEGER, problem=TEXT, fix_instruction=TEXT))
     scoped_issue = obj(dict(shot_number=INTEGER, problem=TEXT, fix_instruction=TEXT,

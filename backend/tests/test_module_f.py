@@ -25,6 +25,7 @@ def shot_fixture():
             duration_sec=5, description="Ravi left and Maya right exchange a cup.",
             characters_in_shot=["Ravi", "Maya"], has_dialogue=number == 2,
             dialogue_text="Try this tea." if number == 2 else "",
+            speaker_name="Ravi" if number == 2 else "",
             voice_refs={"Ravi": "rahul"} if number == 2 else {},
             status="done", dialogue_audio_url="https://example.invalid/old.wav" if number == 2 else None,
             dialogue_audio_provider="fixture" if number == 2 else None,
@@ -56,9 +57,14 @@ class ModuleFTests(unittest.TestCase):
             job_service.set_result(db, job.id, self.original)
             job_service.set_status(db, job.id, "done")
         self.client = TestClient(app)
+        self.original = self.client.get(f"/api/jobs/{self.job_id}").json()["result"]
+        # These endpoint tests exercise audio recovery, not image/video providers.
+        self.media_patch = patch("app.agents.director._prepare_media_parallel")
+        self.media_patch.start()
         self.url = f"/api/jobs/{self.job_id}/shots/2/regenerate"
 
     def tearDown(self):
+        self.media_patch.stop()
         self.client.close()
         app.dependency_overrides.clear()
         self.session_patch.stop()
@@ -84,40 +90,27 @@ class ModuleFTests(unittest.TestCase):
         self.assertEqual(final["shots"][1]["status"], "done")
         self.assertEqual(final["shots"][1]["dialogue_audio_url"], "https://example.invalid/new.wav")
 
-    def test_hint_qa_autocorrection_then_real_voice_service(self):
-        # Initial fixture crosses the axis; the EXISTING director QA loop repairs it.
-        unsafe = copy.deepcopy(self.original["shots"])
-        unsafe[1]["camera_movement"] = "360-degree orbit across dialogue axis"
-        unsafe[1]["dialogue_text"] = "Unauthorized rewrite"
-        unsafe[0]["lighting"] = "Unauthorized neighbor rewrite"
-        fixed = copy.deepcopy(self.original["shots"])
-        fixed[1]["camera_movement"] = "short arc south of axis"
-        responses = [
-            {"approved": False, "issues": [{"shot_number": 2, "problem": "Orbit crosses dialogue axis", "fix_instruction": "Limit arc to south side"}]},
-            {"shots": fixed}, {"approved": True, "issues": []},
-            self.original["assembly"],
-        ]
+    def test_hint_preserves_speech_and_siblings_without_semantic_rewrite(self):
+        candidate = copy.deepcopy(self.original["shots"])
+        candidate[1]["camera_movement"] = "slow push in"
+        candidate[1]["dialogue_text"] = "Unauthorized rewrite"
+        candidate[0]["lighting"] = "Unauthorized neighbor rewrite"
         audio_patch, storage_patch = self.audio_patches()
-        with patch("app.routes.jobs.call_agent", return_value={"shots": unsafe}) as cine, patch("app.agents.director.call_agent", side_effect=responses) as qa, audio_patch as audio, storage_patch:
-            response = self.client.post(self.url, json={"movement": "orbit"})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertIs(cine.call_args.args[0], prompts.CINEMATOGRAPHY_FIX)
-        self.assertIn('Optional style hints: {"movement": "orbit"}', cine.call_args.args[1])
-        self.assertIs(qa.call_args_list[1].args[0], prompts.CINEMATOGRAPHY_FIX)
-        self.assertIn("Required fixes:", qa.call_args_list[1].args[1])
-        final = self.client.get(f"/api/jobs/{self.job_id}").json()["result"]
-        self.assertEqual(final["shots"][1]["camera_movement"], "short arc south of axis")
-        self.assertEqual(final["shots"][1]["dialogue_text"], "Try this tea.")
-        self.assertEqual(final["shots"][0], self.original["shots"][0])
-        self.assertEqual(final["shots"][2], self.original["shots"][2])
+        with patch("app.routes.jobs.call_agent", return_value={"shots":candidate}) as cine, patch("app.agents.director.call_agent", return_value=self.original["assembly"]) as calls, audio_patch as audio, storage_patch:
+            response = self.client.post(self.url, json={"movement":"dollyin"})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertIs(cine.call_args.args[0],prompts.CINEMATOGRAPHY_FIX)
+        self.assertNotIn(prompts.QA_AGENT,[c.args[0] for c in calls.call_args_list])
+        final=self.client.get(f"/api/jobs/{self.job_id}").json()["result"]
+        self.assertEqual(final["shots"][1]["dialogue_text"],"Try this tea.")
+        for index in (0,2):self.assertEqual(final["shots"][index],self.original["shots"][index])
         audio.assert_awaited_once()
-        self.assertEqual(audio.call_args.kwargs["text"], "Try this tea.")
-        self.assertEqual(final["shots"][1]["status"], "done")
+        self.assertEqual(audio.call_args.kwargs["text"],"Try this tea.")
 
     def test_invalid_hint_and_locked_revise_fields_return_422(self):
         for payload in ({"movement": "anything"}, {"camera_angle": "lowangle"}):
             self.assertEqual(self.client.post(self.url, json=payload).status_code, 422)
-        for field in ("camera_angle", "camera_movement", "lighting", "composition_note"):
+        for field in ("camera_movement", "video_url", "compiled_prompt"):
             response = self.client.post(f"/api/jobs/{self.job_id}/revise", json={"shots": [{"shot_number": 2, "description": "Test", "dialogue_text": "Test", field: "forbidden"}]})
             self.assertEqual(response.status_code, 422)
             self.assertEqual(response.json()["detail"][0]["type"], "extra_forbidden")

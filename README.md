@@ -377,3 +377,31 @@ gate continues to reject running or failed drafts. Final persistence replaces th
 Polling exposes it while the existing event stream reports progress. Paused review keeps
 the draft readable and offers the existing Retry action. No extra AI calls are introduced.
 This extends the core planning/review UI milestone; it does not reduce provider runtime.
+
+
+### User-reviewed Director workflow (supersedes blocking text QA)
+
+By explicit product decision, new plans now go from the existing Director to a
+human review screen. Code validates executable fields, supported camera combinations,
+cast/speaker attribution and durations. It does not claim semantic continuity approval.
+The user can edit shot action, complete speech, timing, opening/end states, framing,
+lighting, camera motion, cast, speaker, product/prop direction and transitions before
+**Approve plan & create previews**. Unsaved edits or technical errors block that action.
+The full edit is saved; valid fields are not silently rewritten to appease a reviewer.
+
+New plans carry `review_mode=user`. Their timeline is projected in code; later measured
+audio updates timing without silently trimming the approved story. The existing compiler
+serializes the reviewed fields, fixed style/camera/reference instructions and verbatim
+speech without another generative rewrite or semantic transition review. Historical
+compiler/transition handling remains for saved jobs without that marker. Provider-specific
+request adapters and their existing pre-submission checks remain; no text is blindly
+truncated to meet a limit. Unknown provider limits are not asserted as verified.
+
+Image/video compliance and bounded retries remain. Music is a direction note, not a claim
+that a generated score exists. Editing an already-approved plan is blocked to avoid silently
+invalidating paid media; use the existing media regeneration/replacement controls. This
+changes the core planning/review milestone, not a separate Director implementation.
+
+Audit: `test_user_director_review.py`, updated camera/direction/dialogue contract tests,
+and isolated browser/API replay of the saved Fevicol plan. No paid end-to-end video audit
+or production deployment is implied by those local tests.

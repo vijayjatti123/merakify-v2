@@ -35,40 +35,17 @@ class PlanningPatchTests(unittest.TestCase):
         for problem in ('Split utterance across shots', 'Boundary state mismatch', '180-degree axis crossing', 'Something unclear'):
             self.assertIsNone(patch_permissions(self.shots, [{'shot_number': 2, 'problem': problem}]))
 
-    def test_actual_director_patch_and_full_semantic_recheck(self):
-        calls = []
-        def provider(system, content, **kwargs):
-            calls.append(system)
-            if system == prompts.CINEMATOGRAPHY_PATCH:
-                return {'patches': [{'shot_number': 2, 'changes': {'camera_angle': 'high-angle medium'}}]}
-            return {'approved': len(calls) > 1, 'issues': [] if len(calls) > 1 else [self.issue]}
+    def test_user_review_preserves_story_without_requesting_a_patch(self):
         for source in (None, 'Meera: Complete line 1. Meera: Complete line 2.'):
-            calls.clear()
-            with patch.object(director, 'call_agent', side_effect=provider):
-                result = director.validate_and_correct(copy.deepcopy(self.shots), [{'name': 'Meera'}], 10,
-                                                      source_script_text=source)
-            self.assertEqual(calls, [prompts.QA_AGENT, prompts.CINEMATOGRAPHY_PATCH, prompts.QA_AGENT])
-            self.assertTrue(result['qa']['approved'])
-            self.assertNotIn('dialogue_loss_warnings', result['qa'])
+            with patch.object(director, 'call_agent', side_effect=AssertionError('No semantic QA or patch')) as call:
+                result = director.validate_and_correct(copy.deepcopy(self.shots), [{'name':'Meera'}], 10, source_script_text=source)
+            call.assert_not_called()
             self.assertEqual([s['dialogue_text'] for s in result['shots']], [s['dialogue_text'] for s in self.shots])
+            self.assertEqual([s['camera_angle'] for s in result['shots']], [s['camera_angle'] for s in self.shots])
 
-    def test_no_correction_when_qa_passes(self):
-        with patch.object(director, 'call_agent', return_value={'approved': True, 'issues': []}) as call:
-            director.validate_and_correct(copy.deepcopy(self.shots), [{'name': 'Meera'}], 10)
-        self.assertEqual(call.call_count, 1)
-
-    def test_mechanical_camera_error_uses_actual_patch_path_and_rechecks_qa(self):
+    def test_invalid_camera_returns_technical_issue_for_user_correction(self):
         shots = copy.deepcopy(self.shots)
         shots[1]['camera_direction'] = dict(movement='zoom', direction='in', speed='slow', stabilization='locked')
-        calls = []
-        def provider(system, content, **kwargs):
-            calls.append(system)
-            if system == prompts.CINEMATOGRAPHY_PATCH:
-                return {'patches': [{'shot_number': 2, 'changes': {'camera_direction':
-                    dict(movement='zoom', direction='in', speed='slow', stabilization='smooth')}}]}
-            return {'approved': True, 'issues': []}
-        with patch.object(director, 'call_agent', side_effect=provider):
-            result = director.validate_and_correct(shots, [{'name':'Meera'}], 10)
-        self.assertEqual(calls, [prompts.QA_AGENT, prompts.CINEMATOGRAPHY_PATCH, prompts.QA_AGENT])
-        self.assertTrue(result['qa']['approved'])
-        self.assertEqual([s['dialogue_text'] for s in result['shots']], [s['dialogue_text'] for s in self.shots])
+        result = director.validate_and_correct(shots, [{'name':'Meera'}], 10)
+        self.assertFalse(result['qa']['approved'])
+        self.assertTrue(any(i['code']=='invalid_camera_direction' for i in result['qa']['issues']))

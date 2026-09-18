@@ -17,73 +17,36 @@ def issue(number=1,problem='Scene 2 has two shots with dialogue',instruction='Re
 
 
 class DialogueIntegrityTests(unittest.TestCase):
-    def run_guard(self,before,issues,after=None,source=None):
-        events=[]
-        seen=[]
-        def call(system,user,**kwargs):
-            seen.append((system,user))
-            if system==prompts.QA_AGENT:
-                return {'approved':False,'issues':issues} if sum(s==prompts.QA_AGENT for s,_ in seen)==1 else {'approved':True,'issues':[]}
-            if system==prompts.CINEMATOGRAPHY_FIX: return {'shots':copy.deepcopy(after)}
-            if system==prompts.SHOT_ASSEMBLER: return {'total_duration_sec':10,'transitions':[]}
-            raise AssertionError('Unexpected call')
-        # Exercise the retained full-plan fallback with adversarial model replies.
-        # Field-patch isolation has separate integration tests in test_planning_patch.
-        with patch('app.agents.director.call_agent',side_effect=call), patch('app.agents.director.patch_permissions',return_value=None):
-            result=validate_and_correct(copy.deepcopy(before),[],10,source_script_text=source,emit=lambda key,note:events.append(note))
-        return result,events,seen
+    def test_false_count_discarded_without_touching_script(self):
+        protected = protected_dialogue(shots(), 'Nila: Time to go.')
+        accepted, _, rejected, _ = screen_issues(shots(), [issue()], protected, lambda *_: None)
+        self.assertFalse(accepted)
+        self.assertTrue(rejected)
 
-    def test_false_count_discarded_without_fix_both_paths(self):
-        for source in [None,'Nila: Time to go.']:
-            result,events,seen=self.run_guard(shots(),[issue()],source=source)
-            self.assertEqual(result['shots'][0]['dialogue_text'],'Time to go.')
-            self.assertTrue(result['qa']['approved'])
-            self.assertNotIn(prompts.CINEMATOGRAPHY_FIX,[s for s,_ in seen])
-            self.assertTrue(any('actual has_dialogue:true count is 1' in e for e in events))
+    def test_protected_script_line_removal_stays_blocked(self):
+        protected = protected_dialogue(shots(True), 'Nila: Time to go. Nila: Come along.')
+        accepted, _, _, limitations = screen_issues(shots(True), [issue()], protected, lambda *_: None)
+        self.assertFalse(accepted)
+        self.assertTrue(limitations)
 
-    def test_genuine_violation_forwarded_unchanged(self):
-        after=shots(True);after[0].update(has_dialogue=False,dialogue_text='')
-        result,events,seen=self.run_guard(shots(True),[issue()],after)
-        self.assertEqual(sum(s['has_dialogue'] for s in result['shots']),1)
-        self.assertTrue(result['qa']['approved'])
-        self.assertFalse(any('dialogue-loss event' in e for e in events))
-        self.assertIn('Remove dialogue from shot 1, make silent cutaway',next(u for s,u in seen if s==prompts.CINEMATOGRAPHY_FIX))
+    def test_adversarial_repair_cannot_alter_or_remove_protected_shot(self):
+        from app.agents.dialogue_integrity import restore_protected
+        before = shots()
+        for after in [before[1:], [{**before[0], 'dialogue_text':'Leave now.'}, before[1]]]:
+            restored, violations = restore_protected(before, after, protected_dialogue(before, 'Nila: Time to go.'), lambda *_: None)
+            self.assertEqual(restored[0]['dialogue_text'], 'Time to go.')
+            self.assertTrue(violations)
 
-    def test_script_line_removal_blocked_and_limitation_retained(self):
-        result,events,seen=self.run_guard(shots(True),[issue()],source='Nila: “Time   to go!”\nNila: Come along.')
-        self.assertEqual(result['shots'][0]['dialogue_text'],'Time to go.')
-        self.assertFalse(result['qa']['approved'])
-        self.assertNotIn(prompts.CINEMATOGRAPHY_FIX,[s for s,_ in seen])
-        self.assertTrue(any('user-scripted line' in e for e in events))
+    def test_unexpected_dialogue_loss_remains_detectable(self):
+        from app.agents.dialogue_integrity import warn_dialogue_loss
+        after = shots(); after[0].update(has_dialogue=False, dialogue_text='')
+        self.assertTrue(warn_dialogue_loss(shots(), after, set(), lambda *_: None))
 
-    def test_unrelated_fix_cannot_alter_or_remove_protected_shot(self):
-        for after in [shots()[1:], [{**shots()[0],'dialogue_text':'Leave now.'},shots()[1]]]:
-            result,events,seen=self.run_guard(shots(),[issue(problem='Wrong camera angle',instruction='Change shot angle to medium')],after,source='Nila: Time to go.')
-            self.assertEqual(result['shots'][0]['dialogue_text'],'Time to go.')
-            self.assertFalse(result['qa']['approved'])
-            self.assertIn(prompts.CINEMATOGRAPHY_FIX,[s for s,_ in seen])
-            self.assertTrue(any('restored the original shot' in e for e in events))
-
-    def test_unexpected_no_script_loss_warns_without_restoring(self):
-        after=shots();after[0].update(has_dialogue=False,dialogue_text='')
-        result,events,_=self.run_guard(shots(),[issue(problem='Wrong camera angle',instruction='Change shot angle to medium')],after)
-        self.assertEqual(result['shots'][0]['dialogue_text'],'')
-        self.assertTrue(result['qa']['dialogue_loss_warnings'])
-        self.assertTrue(any('count 1 -> 0' in e for e in events))
-
-    def test_verified_reason_does_not_excuse_deleting_other_line(self):
-        after=shots(True)
-        for shot in after:shot.update(has_dialogue=False,dialogue_text='')
-        result,events,_=self.run_guard(shots(True),[issue()],after)
-        self.assertTrue(result['qa']['dialogue_loss_warnings'])
-
-    def test_only_false_issue_removed_from_mixed_batch(self):
-        angle=issue(number=2,problem='Wrong camera angle',instruction='Use a close-up')
-        result,_,seen=self.run_guard(shots(),[issue(),angle],shots())
-        request=next(u for s,u in seen if s==prompts.CINEMATOGRAPHY_FIX)
-        self.assertNotIn('Scene 2 has two shots with dialogue',request)
-        self.assertIn('Wrong camera angle',request)
-        self.assertEqual(len(result['qa']['rejected_claims']),1)
+    def test_user_review_does_not_call_model_or_delete_dialogue(self):
+        with patch('app.agents.director.call_agent', side_effect=AssertionError('No model review')):
+            result = validate_and_correct(shots(True), [], 10, source_script_text='Time to go. Come along.')
+        self.assertEqual([s['dialogue_text'] for s in result['shots']], ['Time to go.', 'Come along.'])
+        self.assertFalse(result['qa']['semantic_review_performed'])
 
     def test_count_wording_and_wrong_numeric_claim(self):
         for text in ['Scene 2 has multiple dialogue shots','Two dialogue shots in scene 2','Dialogue split across shots in scene 2','Scene 2 has dialogue shots: 2','Second shot in scene 2 has dialogue']:

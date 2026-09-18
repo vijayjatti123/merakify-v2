@@ -89,23 +89,17 @@ class CameraDirectionTests(unittest.TestCase):
         self.assertNotEqual(camera.normalize_legacy('slow zoom in'), camera.normalize_legacy('slow push in'))
         self.assertIn('without travelling', camera.render(camera.normalize_legacy('slow zoom in')))
 
-    def test_invalid_camera_enters_existing_qa_fix_loop(self):
-        from app.agents import director, prompts
+    def test_invalid_camera_is_editable_and_blocks_approval_without_rewrite(self):
+        from app.agents import director
         job = source(); shot = job['shots'][0]
         shot.update(camera_movement='static push in', has_dialogue=True, dialogue_text='Keep this complete line.', duration_sec=5)
-        fixed = {**shot, 'camera_movement': 'slow push in', 'camera_direction':
-                 dict(movement='dolly', direction='in', speed='slow', stabilization='smooth')}
-        call = Mock(side_effect=[{'approved': True, 'issues': []},
-                                {'patches': [{'shot_number': shot['shot_number'], 'changes': {'camera_direction': fixed['camera_direction']}}]},
-                                {'approved': True, 'issues': []}])
-        with patch.object(director, 'call_agent', call):
+        with patch.object(director, 'call_agent', side_effect=AssertionError('No semantic QA')) as call:
             result = director.validate_and_correct([shot], [], 5, source_script_text='Keep this complete line.')
-        self.assertEqual(call.call_count, 3)
-        self.assertEqual(call.call_args_list[1].args[0], prompts.CINEMATOGRAPHY_PATCH)
-        self.assertTrue(result['qa']['approved'])
+        call.assert_not_called()
+        self.assertFalse(result['qa']['approved'])
+        self.assertTrue(any(i['code'] == 'invalid_camera_direction' for i in result['qa']['issues']))
         self.assertEqual(result['shots'][0]['dialogue_text'], shot['dialogue_text'])
-        self.assertEqual(result['shots'][0]['description'], shot['description'])
-        self.assertEqual(result['shots'][0]['camera_direction'], fixed['camera_direction'])
+        self.assertEqual(result['shots'][0]['camera_movement'], 'static push in')
 
     @patch('app.services.prompt_technique_service.shot_knowledge', return_value={})
     def test_corrective_retry_only_rewrites_failed_shot(self, knowledge):

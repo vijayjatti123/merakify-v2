@@ -444,6 +444,9 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
     if not result:
         raise HTTPException(status_code=409, detail="completed job has no stored result")
 
+    if result.get("generation_approved"):
+        raise HTTPException(status_code=409, detail="This plan is already approved. Use the shot regeneration controls to change existing media.")
+
     edits_by_number = {edit.shot_number: edit for edit in payload.shots}
     if len(edits_by_number) != len(payload.shots):
         raise HTTPException(status_code=400, detail="shot_number values must be unique")
@@ -458,8 +461,12 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
         merged = dict(shot)
         edit = edits_by_number.get(shot["shot_number"])
         if edit:
-            merged["dialogue_text"] = edit.dialogue_text
-            merged["description"] = edit.description
+            merged.update(edit.model_dump(exclude_unset=True, exclude_none=True))
+            # All direction fields are shown together for explicit human review.
+            # Invalidate the previous approval stamp, never silently rewrite them.
+            merged.pop("direction_source", None)
+            if edit.speech_mode is not None:
+                merged["has_dialogue"] = edit.speech_mode != "none"
         merged_shots.append(merged)
 
     continuity = result["continuity"]
@@ -507,7 +514,14 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
 
     if result.get("generation_approved"):
         return _job_out(job, result)
+    from app.services.director_review import review
+    technical = review(result.get("shots", []), result.get("continuity", {}).get("characters", []),
+                       result.get("planning_constraints", {}).get("minimum_shot_seconds"))
+    if not technical["approved"]:
+        raise HTTPException(status_code=422, detail="Correct the plan details before approval: " + "; ".join(
+            f"Shot {i['shot_number']}: {i['problem']}" for i in technical["issues"]))
     updated_result = dict(result)
+    updated_result["qa"] = technical
     updated_result["generation_approved"] = True
     updated_result["preview_preparation_pending"] = True
     updated_result["audio_assembly_pending"] = any(shot.get("has_dialogue") for shot in result.get("shots", []))

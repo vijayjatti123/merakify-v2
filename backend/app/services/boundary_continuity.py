@@ -50,6 +50,9 @@ def validate_review(response, payload):
 
 
 def reviewed_boundaries(result, brief=""):
+    if result.get("shots") and all(s.get("review_mode") == "user" for s in result["shots"]):
+        return {t["between"]: {"relation": t.get("temporal_relation", "action_progression"),
+                "approved": True, "approval_source": "user"} for t in result.get("assembly", {}).get("transitions", [])}
     payload = review_input(result, brief)
     saved = result.get("boundary_continuity_review") or {}
     if saved.get("fingerprint") != fingerprint(payload):
@@ -63,6 +66,9 @@ def reviewed_boundaries(result, brief=""):
 
 def prepare_boundaries(result, *, brief="", emit, call_agent):
     """One small review, one bounded corrective retry; cache only unchanged inputs."""
+    if result.get("shots") and all(s.get("review_mode") == "user" for s in result["shots"]):
+        emit("boundary_continuity", "Using the user-reviewed opening/end states and shot order; no semantic AI approval is claimed.")
+        return
     payload = review_input(result, brief)
     if not payload["boundaries"]:
         return

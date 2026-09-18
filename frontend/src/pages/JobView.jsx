@@ -1,3 +1,4 @@
+import DirectorPlanEditor, { editablePlan } from "../components/DirectorPlanEditor";
 import { AlertTriangle, Check, Clapperboard, Clock3, Loader2, Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Alert, AlertTitle, Button, Card, Stepper, Step, StepLabel, Box, Stack, Typography, Chip, Dialog, DialogTitle, DialogContent } from "@mui/material";
@@ -159,8 +160,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const draft = result?.planning_draft;
   const editingSource = shots.find(shot => shot.shot_number === editingShot);
   const hasUnsavedEdit = Boolean(editingSource && (
-    editValues.description !== (editingSource.description || "") ||
-    editValues.dialogue_text !== (editingSource.dialogue_text || "")
+    JSON.stringify(editValues) !== JSON.stringify(editablePlan(editingSource))
   ));
   const editBlocksApproval = hasUnsavedEdit || savingShot !== null;
   const approved = Boolean(result?.generation_approved);
@@ -215,7 +215,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
 
   function beginEdit(shot) {
     setEditingShot(shot.shot_number);
-    setEditValues({ description: shot.description || "", dialogue_text: shot.dialogue_text || "" });
+    setEditValues(editablePlan(shot));
     setError("");
   }
 
@@ -301,8 +301,8 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
             </div>
             <div>
               <p className="eyebrow">{done ? "Ready for review" : "Your video"}</p>
-              <h2>{errored ? "Planning paused" : done ? "Your written plan is ready" : draft ? "Checking your storyboard" : "Directing your story"}</h2>
-              <p>{done ? (previews.ready === previews.total ? "Your preview images are ready too. Review the plan, then continue to video clips." : "Review the shots below, then click 'Create shot previews' to see them as images. This prepares any speech too; it does not generate video clips.") : errored ? "Your work is saved. Retry planning to continue." : draft ? "Checking every story moment, spoken line and scene connection." : progressNote || "Preparing the creative direction…"}</p>
+              <h2>{errored ? "Planning paused" : done ? (result?.qa?.approved === false ? "Review the highlighted plan details" : "Your written plan is ready") : draft ? "Checking your storyboard" : "Directing your story"}</h2>
+              <p>{done ? (previews.ready === previews.total ? "Your preview images are ready too. Review the plan, then continue to video clips." : "Review and edit the shots below, then click 'Approve plan & create previews' to see them as images. This prepares any speech too; it does not generate video clips.") : errored ? "Your work is saved. Retry planning to continue." : draft ? "Preparing your editable Director plan." : progressNote || "Preparing the creative direction…"}</p>
               {!done && !errored && <ActionProgress label={draft ? "Checking your plan…" : `${progressNote}…`} />}
               {errored && !approved && <Button variant="contained" disabled={retrying} onClick={handleTimeoutRetry}>Retry planning</Button>}
             </div>
@@ -365,10 +365,14 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
             <AdDirectionPlan direction={result.ad_direction} />
             <div className="qa-banner" data-approved={result.qa.approved}>
               <Check size={14} />
-              <span>{result.qa.approved ? "Consistency checked" : "Some details need your review"} · {result.assembly.total_duration_sec}s{result.assembly.provisional ? " · Timing will update after audio" : ""}</span>
+              <span>{result.qa.review_mode === "user" ? (result.qa.approved ? (approved ? "Plan approved by you" : "Technical checks passed · Review your story") : "Technical details need correction") : (result.qa.approved ? "Consistency checked" : "Some details need your review")} · {Math.round(result.assembly.total_duration_sec * 10) / 10}s{result.assembly.provisional ? " · Timing will update after audio" : ""}</span>
             </div>
 
-            <div className="shot-card-list">
+            {result.qa.review_mode === "user" && <Box sx={{ px: 2, mb: 2 }}>
+              <Typography variant="body2">Check that every story moment and complete spoken line is included. You approve the creative direction; technical checks do not judge the story.</Typography>
+              {result.qa.issues?.map((issue, index) => <Alert severity="warning" key={index} sx={{ mt: 1 }}>Shot {issue.shot_number}: {issue.problem}</Alert>)}
+            </Box>}
+            <div className="shot-card-list" style={!approved ? { gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))" } : undefined}>
               {result.continuity?.characters?.some((character) => character.style_variant_id || character.style_variant_warning) && (
                 <section className="shot-card shrink-0" aria-label="Character references for this style">
                   <p className="text-sm">Character references for this style</p>
@@ -386,17 +390,14 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                 const isEditing = editingShot === shot.shot_number;
                 const [visualStatus, outputLabel] = shotOutputStatus(shot, shotStatuses[shot.shot_number] || shot.status);
                 return (
-                  <Card component="article" className="shot-card" key={shot.shot_number} data-shot-number={shot.shot_number}>
+                  <Card component="article" className="shot-card" sx={isEditing ? { gridColumn: "1 / -1" } : undefined} key={shot.shot_number} data-shot-number={shot.shot_number}>
                     <div className="shot-card-title">
-                      <span>Shot {shot.shot_number} · {shot.has_dialogue ? "dialogue" : "silent"}</span>
-                      <span className={`shot-status shot-status--${visualStatus}`}>{outputLabel}</span>
+                      <span>{Math.round(shots.slice(0, shots.indexOf(shot)).reduce((sum, item) => sum + Math.max(0, Number(item.duration_sec) || 0), 0) * 10) / 10}s · Scene {shot.scene_number} · Shot {shot.shot_number} · {shot.has_dialogue ? "dialogue" : "silent"}</span>
+                      <span className={`shot-status shot-status--${visualStatus}`}>{!approved ? (result.qa.issues?.some(issue => issue.shot_number === shot.shot_number) ? "Needs correction" : "Ready to review") : outputLabel}</span>
                     </div>
 
                     {isEditing ? (
-                      <div className="shot-edit-fields">
-                        <label>Description<textarea value={editValues.description} onChange={(event) => setEditValues((current) => ({ ...current, description: event.target.value }))} /></label>
-                        <label>Dialogue<textarea value={editValues.dialogue_text} onChange={(event) => setEditValues((current) => ({ ...current, dialogue_text: event.target.value }))} /></label>
-                      </div>
+                      <DirectorPlanEditor cast={(result.continuity?.characters || []).map(character => character.name)} speaking={shot.has_dialogue && shot.speech_mode !== "voiceover"} value={editValues} onChange={setEditValues} shotNumber={shot.shot_number} />
                     ) : (
                       <>
                         <p className="shot-description">{shot.description}</p>
@@ -404,7 +405,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       </>
                     )}
 
-                    {!isEditing && <ShotDirectionPlan shot={shot} />}
+                    {!isEditing && <ShotDirectionPlan shot={shot} expanded={!approved} />}
                     {shot.experimental_audio_sync && <p className="audio-warning">Speech timing is experimental</p>}
                     {visualStatus === "error" && shot.error_message && <Alert severity="error">{friendlyMessage(shot.error_message, "This shot could not be completed. Please try again.")}</Alert>}
                     <div className="shot-characters">
@@ -463,13 +464,13 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       {isEditing ? (
                         <>
                           <Button type="button" onClick={() => saveEdit(shot.shot_number)} disabled={savingShot === shot.shot_number} className="card-action card-action--primary">
-                            {savingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Save & recheck
+                            {savingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Save plan changes
                           </Button>
                           <Button type="button" onClick={() => setEditingShot(null)} className="card-action">Cancel</Button>
                         </>
                       ) : (
                         <>
-                          <Button type="button" disabled={previews.busy || videoBusy || editBlocksApproval} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot text ${shot.shot_number}`}><Pencil size={13} /> Edit text</Button>
+                          <Button type="button" disabled={approved || previews.busy || videoBusy || editBlocksApproval} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot plan ${shot.shot_number}`}><Pencil size={13} /> Edit shot plan</Button>
                           {(shot.video_url || shot.video_status === "error") && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate video
                           </Button>}
@@ -501,9 +502,9 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
         <Box role="status">{editingShot !== null ? <>
           <Typography fontWeight={600}>Editing shot {editingShot}</Typography>
           <Typography id="shot-edit-approval-hint" variant="body2">{savingShot !== null ? "Saving and checking your edit…" : hasUnsavedEdit ? "Save your edit first" : "No unsaved changes"}</Typography>
-        </> : canResumePreviews ? (result?.video_prompt_error ? "Video instructions paused · your previews are saved" : "Preview preparation paused · your plan is saved") : !approved ? (previews.ready ? `${previews.ready} of ${shots.length} previews ready` : "No previews yet · your written plan is ready") : previews.busy ? `${previews.ready} of ${shots.length} previews ready · working…` : `${shots.filter(videoReady).length} of ${shots.length} videos ready`}</Box>
+        </> : canResumePreviews ? (result?.video_prompt_error ? "Video instructions paused · your previews are saved" : "Preview preparation paused · your plan is saved") : !approved ? (result?.qa?.approved === false ? "Correct the highlighted plan details before approval" : previews.ready ? `${previews.ready} of ${shots.length} previews ready` : "No previews yet · your written plan is ready") : previews.busy ? `${previews.ready} of ${shots.length} previews ready · working…` : `${shots.filter(videoReady).length} of ${shots.length} videos ready`}</Box>
         {canResumePreviews ? <Button variant="contained" disabled={retrying} onClick={handleTimeoutRetry}>{result?.video_prompt_error ? "Retry video instructions" : "Retry preview preparation"}</Button>
-          : !approved ? <Button variant="contained" data-testid="create-previews" aria-describedby={editingShot !== null ? "shot-edit-approval-hint" : undefined} disabled={approving || editBlocksApproval} onClick={handleApprove}>{approving ? "Starting…" : previews.ready === shots.length ? "Generate video clips" : "Create shot previews"}</Button>
+          : !approved ? <Button variant="contained" data-testid="create-previews" aria-describedby={editingShot !== null ? "shot-edit-approval-hint" : undefined} disabled={approving || editBlocksApproval || !result.qa.approved} onClick={handleApprove}>{approving ? "Starting…" : previews.ready === shots.length ? "Generate video clips" : "Approve plan & create previews"}</Button>
           : previews.busy ? <span>Keep this page open or come back later.</span>
           : allVideosReady ? <Button variant="contained" disabled={assembling || result.final_video?.status === "running"} onClick={handleAssemble}>{result.final_video?.url ? "Update final video" : "Create final video"}</Button>
           : previews.failed ? <span>Retry failed previews on their shot cards.</span>

@@ -114,6 +114,21 @@ class ShotEdit(BaseModel):
     shot_number: int
     dialogue_text: str
     description: str
+    scene_number: int | None = Field(default=None, ge=1)
+    duration_sec: float | None = None
+    camera_angle: str | None = None
+    camera_direction: dict | None = None
+    lens: str | None = None
+    lighting: str | None = None
+    composition_note: str | None = None
+    state_at_shot_start: str | None = None
+    state_at_shot_end: str | None = None
+    shot_direction: dict | None = None
+    opening_characters: list[str] | None = None
+    transition_after: str | None = None
+    speaker_name: str | None = None
+    speech_mode: Literal["none", "onscreen", "voiceover"] | None = None
+    characters_in_shot: list[str] | None = None
 
 
 class JobRevise(BaseModel):

@@ -424,6 +424,8 @@ def compiler_input(result, *, brief="", emit, camera_contract=False):
         if is_voiceover(shot):
             speaker = None
             item["speech_mode"] = "voiceover"
+        if shot.get("speaker_name") and not is_voiceover(shot):
+            speaker = next((ref for ref in refs if ref["name"] == shot["speaker_name"]), speaker)
         item["speaker_label"] = "Narrator" if is_voiceover(shot) else speaker["name"] if speaker else "Dialogue performer" if refs else "Narrator"
         item["speaker_reference"] = copy.deepcopy(speaker)
         identity_refs = refs + ([speaker] if speaker and not refs else [])
@@ -732,6 +734,23 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=No
     prepare_boundaries(result, brief=brief, emit=emit, call_agent=call_agent)
     started = time.monotonic()
     payload = compiler_input(result, brief=brief, emit=emit, camera_contract=True)
+    if result.get("shots") and all(s.get("review_mode") == "user" for s in result["shots"]):
+        # The user already reviewed detailed direction. Serialize it, do not ask
+        # another model to reinterpret or repeatedly self-audit the same story.
+        outputs = []
+        for source in payload["shots"]:
+            direction = source.get("shot_direction") or {}
+            sections = [("Locked style", "; ".join(f"{k}: {v}" for k, v in payload.get("style_bible", {}).items() if k != "rendering" and isinstance(v, str) and v)),
+                ("Action", source.get("description")), ("Framing", source.get("camera_angle")),
+                ("Lens", source.get("lens")), ("Lighting", source.get("lighting")),
+                ("Composition", source.get("composition_note")), ("Opening", source.get("state_at_shot_start")),
+                ("Performance", direction.get("performance")), ("Product and props", direction.get("product_props")),
+                ("Ending", source.get("state_at_shot_end"))]
+            visual = " ".join(f"{label}: {text.strip().rstrip('.')}." for label, text in sections if isinstance(text, str) and text.strip())
+            outputs.append({"shot_number": source["shot_number"], "compiled_prompt": visual})
+        rendered = insert_dialogue({"shots": outputs}, payload)["shots"]
+        emit("shot_prompt_compiler", "Serialized the approved Director plan with fixed style, camera, references and verbatim dialogue; no creative model rewrite.")
+        return [{**shot, "compiled_prompt": output["compiled_prompt"]} for shot, output in zip(result["shots"], rendered)]
     groups = list(shot_batches(payload))
     deadline = started + _compiler_time_budget(groups)
     from app.services.prompt_technique_service import shot_knowledge, knowledge_addendum
