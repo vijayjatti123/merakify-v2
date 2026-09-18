@@ -1,12 +1,16 @@
 """Job-level rendering choices, independent of Compiler model-family names."""
 from typing import Literal
+AUTOMATIC = "automatic_omni_mini"
+OMNI_FLASH = "google/gemini-omni-flash/image-to-video"
 VideoModel = Literal["seedance_evolink", "seedance_fal", "seedance_fast_evolink", "seedance_mini_evolink",
-                     "seedance_fast_fal", "seedance_mini_fal", "kling_voice_fal", "kling_avatar_fal"]
+                     "seedance_fast_fal", "seedance_mini_fal", "kling_voice_fal", "kling_avatar_fal", "automatic_omni_mini"]
 
 
 def validate_selection(model, family, language, quality):
     if not model:
         return
+    if model == AUTOMATIC and quality != "720p":
+        raise ValueError("Automatic uses the verified 720p output tier; select 720p")
     expected = "Kling 3.0" if model.startswith("kling_") else "Seedance 2.0"
     if family != expected:
         raise ValueError("The selected video model must match its planning model family")

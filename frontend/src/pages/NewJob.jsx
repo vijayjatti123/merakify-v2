@@ -74,7 +74,9 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const clarificationContext = JSON.stringify([knownFields, scriptMode, products.map(p => p.id)]);
   const activeClarification = clarification?.brief === brief && clarification?.context === clarificationContext ? clarification : null;
   const clarificationPayload = activeClarification ? { clarifier_session_id: activeClarification.id, clarifier_revision: activeClarification.revision } : {};
-  const modelError = videoModel === "kling_voice_fal" && !["english", "chinese", "en", "zh", "mandarin"].includes(effectiveLanguage.toLowerCase())
+  const modelError = videoModel === "automatic_omni_mini" && quality !== "720p"
+    ? "Automatic requires 720p. Select 720p to continue."
+    : videoModel === "kling_voice_fal" && !["english", "chinese", "en", "zh", "mandarin"].includes(effectiveLanguage.toLowerCase())
     ? "Kling Voice ID supports English/Chinese only. Choose Seedance for this language." : "";
   const canSubmit = Boolean(brief.trim() && effectiveDuration && effectiveLanguage && !submitting && !modelError);
   // Guidance mirrors ClarifierPanel's existing gates; it does not control activation.

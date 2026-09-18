@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 from app.config import settings
+from app.video_models import AUTOMATIC, OMNI_FLASH, validate_selection
 from app.services.speech_mode import is_voiceover, is_onscreen_speech
 from app.services import job_service, storage_service, render_compliance_service
 from app.services.still_frame_service import match_entities, visual_description
@@ -54,6 +55,8 @@ def translate(result, shot, *, audio_model=None):
 
 
 def _translate(result, shot, *, audio_model=None):
+    if result.get("video_model") == AUTOMATIC:
+        return automatic_translation(result, shot, audio_model=audio_model)
     if is_onscreen_speech(shot):
         from app.services import audio_video_service
         return audio_video_service.translate(result, shot, audio_model)
@@ -177,6 +180,44 @@ def _translate(result, shot, *, audio_model=None):
             "warnings": warnings, "mode_risk_terms": risks, "constraints": constraints}
 
 
+def automatic_translation(result, shot, *, audio_model=None):
+    """Explicit job policy; use the existing durable submit/poll/QA pipeline."""
+    from app.services.still_frame_service import shot_fingerprint
+    validate_selection(AUTOMATIC, result.get("ai_model"), result.get("language", "English"), result.get("quality", "720p"))
+    if audio_model and audio_model != AUTOMATIC:
+        raise ValueError("Shots inherit this job's Automatic routing; per-shot model overrides are not supported")
+    if not shot.get("compiled_prompt") or not shot.get("still_frame_url") or shot.get("still_frame_status") not in (None, "ready"):
+        raise ValueError("Create this shot's accepted preview before generating video")
+    if shot.get("still_frame_source_hash") and shot["still_frame_source_hash"] != shot_fingerprint(shot):
+        raise ValueError("This preview is out of date; create a new preview first")
+    if result.get("aspect_ratio", "16:9") not in {"16:9", "9:16"}:
+        raise ValueError("Automatic supports landscape 16:9 or portrait 9:16")
+    if shot.get("has_dialogue"):
+        translated = _translate({**result, "video_model": "seedance_mini_evolink"}, shot)
+        if is_voiceover(shot):
+            request = translated["request"]
+            request["audio_urls"] = [fresh_url(shot["dialogue_audio_url"])]
+            request["generate_audio"] = True
+            request["prompt"] = request["prompt"].replace(
+                "Audio: silent output; existing Sarvam dialogue will be muxed later.",
+                "Audio: use @audio1 as off-screen narration. No visible person speaks; do not animate lips. "
+                "The approved narration will be preserved exactly during final assembly.")
+        translated["warnings"].append("Automatic: speech and narration use Seedance Mini via EvoLink.")
+        return translated
+    seconds = float(shot.get("duration_sec") or 0)
+    if not math.isfinite(seconds) or not 0 < seconds <= 10:
+        raise ValueError("Automatic's Omni Flash silent shots must fit within 10 seconds. Split the shot or choose Seedance; no silent truncation was applied.")
+    duration = max(4, math.ceil(seconds))
+    prompt = URL.sub("the accepted scene reference", visual_description(shot["compiled_prompt"]))
+    prompt = ("<FIRST_FRAME> Use the supplied image as the exact starting composition. Single continuous shot, no cuts.\n"
+              + prompt + "\nAmbient sound only. No speech, narration, music, added captions or invented logos. Preserve existing product packaging and lettering.")
+    return {"provider": "fal", "model": OMNI_FLASH, "mode": "image_to_video",
+            "request": {"prompt": prompt, "image_url": fresh_url(shot["still_frame_url"]),
+                        "duration": duration, "aspect_ratio": result.get("aspect_ratio", "16:9")},
+            "warnings": ["Automatic: silent shot uses Omni Flash via fal. Resolution is provider-controlled; 720p was verified in the audit."],
+            "mode_risk_terms": [], "constraints": "Accepted shot preview; ambient sound only."}
+
+
 def provider(method, path, body=None):
     if not settings.evolink_api_key:
         raise ValueError("EVOLINK_API_KEY is not configured")
@@ -192,10 +233,10 @@ def provider(method, path, body=None):
 
 def regenerate_translation(result, shot, hint="", *, audio_model=None):
     translated = translate(result, shot, audio_model=audio_model)
-    if is_onscreen_speech(shot):
+    if is_onscreen_speech(shot) or result.get("video_model") == AUTOMATIC:
         if hint:
             translated["request"]["prompt"] += "\nRequested correction: " + hint.strip()
-            translated["warnings"].append("Full audio-guided regeneration; existing character audio is reused.")
+            translated["warnings"].append("Full regeneration from the accepted preview; existing approved speech is reused where present.")
         return translated
     if hint.strip() and shot.get("video_key"):
         if (result.get("video_model") or "").startswith("kling_"):

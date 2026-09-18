@@ -13,6 +13,7 @@ from app.config import settings
 from app.services.still_frame_service import shot_fingerprint, visual_description
 
 from app.video_models import VideoModel as AudioVideoModel
+from app.video_models import OMNI_FLASH
 
 DEFAULT = "seedance_evolink"
 MODELS = {
@@ -140,7 +141,7 @@ def fal_request(method, url, body=None):
 
 
 def submit(model, request):
-    if model not in {m for p, m in MODELS.values() if p == "fal"}:
+    if model not in {OMNI_FLASH, *(m for p, m in MODELS.values() if p == "fal")}:
         raise ValueError("Unsupported fal audio-reference endpoint")
     raw = fal_request("POST", "https://queue.fal.run/" + model, request)
     # Retain provider-returned URLs: subpath endpoint queue URLs need not match
