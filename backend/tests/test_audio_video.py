@@ -32,6 +32,16 @@ class AudioVideoTests(unittest.TestCase):
             p=patch.object(video.settings,key,'test'); p.start(); self.addCleanup(p.stop)
         self.addCleanup(self.engine.dispose); self.addCleanup(self.db.close)
 
+    def test_performance_time_survives_short_speech(self):
+        self.shot.update(duration_sec=12, dialogue_audio_duration_sec=2.56)
+        translated = audio.translate(self.result, self.shot, 'seedance_mini_evolink')
+        self.assertEqual(translated['request']['duration'], 12)
+        self.shot.update(duration_sec=0.85, dialogue_audio_duration_sec=0.85)
+        self.assertEqual(audio.translate(self.result, self.shot, 'seedance_mini_evolink')['request']['duration'], 4)
+        self.shot['duration_sec'] = 16
+        with self.assertRaises(ValueError):
+            audio.translate(self.result, self.shot, 'seedance_mini_evolink')
+
     def saved(self):
         self.db.expire_all()
         return {"shot_number": 1, **json.loads(self.db.query(VideoTask).one().data_json)}

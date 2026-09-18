@@ -87,6 +87,10 @@ def translate(result, shot, choice=None):
         raise ValueError("Audio-reference shots currently require measured speech of 15 seconds or less; split longer dialogue into complete lines")
     if not shot.get("speaker_label") and len(shot.get("characters_in_shot", [])) > 1:
         raise ValueError("Identify the speaking character before video generation")
+    from app.services.dialogue_duration import performance_duration
+    performance = performance_duration(shot.get("duration_sec") or 0, duration)
+    if performance > 15:
+        raise ValueError("Planned performance and speech must fit within 15 seconds; revise the shot without cutting dialogue")
     image, audio = fresh_url(shot["still_frame_url"]), fresh_url(shot["dialogue_audio_url"])
     direction = visual_description(shot["compiled_prompt"])
     # The preview establishes composition; separately labelled identities can
@@ -106,7 +110,7 @@ def translate(result, shot, choice=None):
         prompt = direction + f'\n@Element1 is {speaker}. Preserve the approved scene. @Element1 says exactly: "{shot["dialogue_text"]}". No additional dialogue.'
         if len(prompt) > 2500:
             raise ValueError("Kling's scene and dialogue prompt exceeds 2,500 characters; shorten the shot instructions first")
-        request = {"start_image_url": image, "prompt": prompt, "duration": str(max(3, math.ceil(duration))),
+        request = {"start_image_url": image, "prompt": prompt, "duration": str(math.ceil(performance)),
                    "generate_audio": True, "elements": [{"frontal_image_url": image, "reference_image_urls": [image]}]}
         warnings = ["Kling generates new speech using a reusable voice ID, not the exact Sarvam recording or timing. English/Chinese only; review the words and voice.",
                     "This Kling endpoint outputs 4K. The job's resolution setting does not change its output tier or price. First use also creates a voice ID from 5–30 seconds of approved speech."]
@@ -130,7 +134,8 @@ def translate(result, shot, choice=None):
                   "Synchronize the visible speaker's mouth to it. Preserve the scene and perform the requested action. "
                   "Do not translate, paraphrase, add dialogue or substitute a different voice.")
         prompt += approved_speech_text(result, shot, speaker)
-        seconds = max(4, math.ceil(duration))
+        prompt += f"\nComplete the approved action over {math.ceil(performance)} seconds. Keep speech at its natural reference pace; use the remaining time for the approved action and reaction, without extra words or repeating the line."
+        seconds = math.ceil(performance)
         video_references.check_prompt(prompt, manifest)
         request = {"prompt": prompt, "image_urls": references["images"], "audio_urls": [audio],
                    "aspect_ratio": result.get("aspect_ratio", "16:9"), "generate_audio": True}

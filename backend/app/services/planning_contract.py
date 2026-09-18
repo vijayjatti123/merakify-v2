@@ -26,6 +26,7 @@ def render_camera_summaries(shots):
 
 
 def check_mechanics(qa, shots, characters, minimum_shot_seconds=None):
+    minimum_shot_seconds = max(4, minimum_shot_seconds or 4)
     names = {c["name"] for c in characters}
     issues = []
     for shot in shots:
@@ -35,8 +36,8 @@ def check_mechanics(qa, shots, characters, minimum_shot_seconds=None):
             problems.append("duration_sec must be a finite positive number")
         elif minimum_shot_seconds is not None and duration < minimum_shot_seconds:
             problems.append(f"plan at least {minimum_shot_seconds:g} seconds of complete action per generated shot; combine compatible silent beats rather than buying tiny clips")
-        elif not shot.get("has_dialogue") and duration > 9:
-            problems.append("silent shots retain the 9-second planning cap")
+        elif not shot.get("has_dialogue") and duration > 15:
+            problems.append("silent shots support at most 15 seconds")
         elif shot.get("speech_mode") == "voiceover" and duration > 15:
             problems.append("voiceover visuals retain the 15-second planning cap; never split or delete dialogue")
         duration_only = bool(problems)

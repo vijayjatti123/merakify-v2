@@ -150,6 +150,7 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
         dialogue_done = [call for call in done_calls if call.args[2] in {1, 2}]
         self.assertTrue(all(call.kwargs["dialogue_audio_url"].startswith("https://audio.test/") for call in dialogue_done))
         self.assertTrue(all(call.kwargs["dialogue_audio_provider"] == "sarvam" for call in dialogue_done))
+        self.assertTrue(all(call.kwargs["duration_sec"] >= 5 for call in dialogue_done))
 
     async def test_one_provider_failure_does_not_cancel_successful_sibling(self) -> None:
         shots = [

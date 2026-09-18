@@ -6,6 +6,15 @@ import unicodedata
 
 # Untuned defaults, not measurements or replacements for Module J's voice profiles.
 SYLLABLES_PER_SECOND = 4.5
+
+
+def performance_duration(planned, speech=0):
+    """Preserve action time and real speech independently; never shrink a shot."""
+    values = (float(planned), float(speech))
+    if any(not math.isfinite(v) or v < 0 for v in values):
+        raise ValueError("Shot and speech durations must be finite and non-negative")
+    return max(4.0, *values)
+
 COMMA_PAUSE_SEC = 0.25
 SENTENCE_PAUSE_SEC = 0.5
 MISMATCH_THRESHOLD = 0.25

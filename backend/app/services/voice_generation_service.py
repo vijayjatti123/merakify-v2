@@ -283,12 +283,11 @@ async def _generate_dialogue_shot(
                 generated, measured, pace = corrected, corrected_duration, corrected_pace
             except Exception as error:
                 job_service.append_event(db, job_id, "voice_generation", f"Shot {shot_number}: bounded pace retry failed ({type(error).__name__}); retaining the first decoded audio.")
-        final_duration = measured if abs(measured-target)/target > .10 else target
+        from app.services.dialogue_duration import performance_duration
+        final_duration = performance_duration(target, measured)
         if final_duration != target:
-            job_service.append_event(db, job_id, "voice_generation", f"Shot {shot_number}: duration_sec corrected {target:.3f}s -> decoded audio {measured:.3f}s; no further pace retries. Assembly/duration check follows audio correction.")
-        # Hedra dialogue video follows this decoded audio duration. Nine seconds
-        # remains a silent-shot planning constraint, not an audio review threshold.
-        # Provider duration validation and exact trim verification stay in Module R.
+            job_service.append_event(db, job_id, "voice_generation", f"Shot {shot_number}: shot duration {target:.3f}s -> {final_duration:.3f}s; decoded speech remains {measured:.3f}s. Assembly/duration check follows.")
+        # Speech length is metadata, not the complete action/performance duration.
         object_key = f"jobs/{job_id}/shots/{shot_number}/dialogue-{uuid.uuid4()}{generated.extension}"
         uploaded = await asyncio.to_thread(
             storage_service.upload_bytes,

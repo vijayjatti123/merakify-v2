@@ -665,9 +665,11 @@ def run_pipeline(db: Session, job_id: str) -> None:
         cinematography_input += f"\nSelected video model: {job.video_model or job.ai_model}. Use plain natural-language camera instructions; no invented provider control tokens."
         if job.video_model == "kling_avatar_fal":
             cinematography_input += "\nExperimental speaking-avatar model: prefer a held viewpoint and restrained performance; complex scene-camera motion is unverified."
-        minimum_shot_seconds = 4 if job.ai_model == "Seedance 2.0" else 3 if job.video_model == "kling_voice_fal" else None
+        minimum_shot_seconds = 4
         if minimum_shot_seconds:
             cinematography_input += f"\nMinimum generated shot duration: {minimum_shot_seconds} seconds. Group compatible sequential actions into complete beats; do not buy many tiny shots. Never merge distinct complete speaking turns or omit story events."
+        if fmt["duration_target_sec"] <= 12:
+            cinematography_input += "\nPrefer ONE continuous shot at this short duration if every required story beat, complete dialogue and achievable action fits. Multiple shots are allowed only for necessary location/time changes, incompatible staging or separate speakers. Never omit beats to force one shot. Each shot remains at least 4 seconds; total must fit the target. Explain necessary cuts in edit_intent."
         cinematography_input += f"\nTarget total duration: {fmt['duration_target_sec']} seconds"
         from app.services.voice_timing import measured_budget
         cinematography_input += f"\nMeasured dialogue budget: {json.dumps(measured_budget(db, language))}"

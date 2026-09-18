@@ -63,6 +63,7 @@ def _translate(result, shot, *, audio_model=None):
     if is_onscreen_speech(shot):
         from app.services import audio_video_service
         return audio_video_service.translate(result, shot, audio_model)
+    from app.services.dialogue_duration import performance_duration
     selected = result.get("video_model")
     if selected == "kling_avatar_fal":
         raise ValueError("This job uses Kling Avatar, which only supports visible speaking shots. Silent and narration-only shots need a scene-video model.")
@@ -73,7 +74,7 @@ def _translate(result, shot, *, audio_model=None):
             raise ValueError("Create this shot's accepted preview before generating video")
         if shot.get("still_frame_source_hash") and shot["still_frame_source_hash"] != shot_fingerprint(shot):
             raise ValueError("This preview is out of date; create a new preview first")
-        seconds = float(shot.get("dialogue_audio_duration_sec") if is_voiceover(shot) else shot.get("duration_sec") or 0)
+        seconds = performance_duration(shot.get("duration_sec") or 0, shot.get("dialogue_audio_duration_sec") or 0)
         if not math.isfinite(seconds) or not 0 < seconds <= 15:
             raise ValueError("Kling scene duration must fit within 15 seconds")
         prompt = visual_description(shot["compiled_prompt"])
@@ -84,7 +85,7 @@ def _translate(result, shot, *, audio_model=None):
             raise ValueError("Kling scene instructions exceed 2,500 characters")
         return {"provider": "fal", "model": MODELS[selected][1], "mode": "image_to_video",
                 "request": {"start_image_url": fresh_url(shot["still_frame_url"]), "prompt": prompt,
-                            "duration": str(max(3, math.ceil(seconds))), "generate_audio": not is_voiceover(shot)},
+                            "duration": str(math.ceil(seconds)), "generate_audio": not is_voiceover(shot)},
                 "warnings": ["Kling outputs 4K for this job; the job quality setting does not change this endpoint's output tier."],
                 "mode_risk_terms": [], "constraints": CONSTRAINTS}
     if result.get("ai_model") != "Seedance 2.0":
@@ -98,7 +99,7 @@ def _translate(result, shot, *, audio_model=None):
         raise ValueError("Unsupported Seedance quality")
     if is_voiceover(shot) and shot.get("dialogue_audio_duration_sec") is None:
         raise ValueError("Finish narration audio measurement before video generation")
-    planned = float(shot.get("dialogue_audio_duration_sec") if is_voiceover(shot) else shot["duration_sec"])
+    planned = performance_duration(shot["duration_sec"], shot.get("dialogue_audio_duration_sec") or 0)
     if not math.isfinite(planned) or planned <= 0 or planned > 15:
         raise ValueError("Seedance duration must fit within 15 seconds")
     duration = max(4, math.ceil(planned))

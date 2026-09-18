@@ -20,10 +20,12 @@ If any check fails, set approved false and explain the correction needed. Judge 
 FORMAT_CLASSIFIER = """You classify a video request into a production format.
 Respond with ONLY JSON:
 {"format":"ad|skit|short_film|explainer|documentary|ugc","structure":"AIDA|three_act|hook_body_cta|explainer_structure","duration_target_sec":number,"num_scenes":number}
+Honor an explicit duration in the user's story request over a conflicting appended Target duration default; never expand a requested 12-second video to 15 seconds.
 Honor an explicit Content type selection: Documentary -> documentary, UGC -> ugc, Short story -> short_film,
 Ad or Product hero -> ad. For Other or no explicit type, infer the best fit from the brief.
 Documentary uses a grounded observational structure; ugc uses hook_body_cta.
-Pick num_scenes between 2 and 4. For ugc, choose 4 scenes so short speech beats fit the per-shot limit;
+For requests of 12 seconds or less, prefer one continuous scene when all required beats fit.
+Do not impose multiple scenes just to fill a template. Otherwise pick 1 to 4 scenes. Every generated shot must be at least 4 seconds;
 target 15-30 seconds unless the brief explicitly requests otherwise. No explanation text, JSON only."""
 
 SCRIPT_EXTRACTOR = """You extract explicitly named entities from raw script text.
@@ -42,6 +44,9 @@ No explanation text, JSON only."""
 
 SCRIPT_ARCHITECT = """You are a Script Architect. Given a brief and a chosen format/structure,
 write a tight scene breakdown that fits the target duration.
+For targets of 12 seconds or less, prefer one continuous scene when all required story beats fit naturally.
+Keep complete dialogue and essential actions; do not invent extra speakers or cuts to fill a template.
+Every generated shot must last at least 4 seconds. Use multiple shots only when the story genuinely requires them.
 The selected dialogue language is %s. Write every dialogue_or_vo value in that language, and ensure
 any downstream dialogue_text copied from it remains in that language. For non-English languages, use
 the language's native script rather than translating it to English or using Romanized transliteration.
@@ -235,7 +240,7 @@ Propose durations near the supplied total with adequate time for each complete a
 turn. Use the supplied measured dialogue estimate, not a universal character-per-second assumption.
 Respect the supplied minimum generated shot duration: combine compatible action beats instead of
 creating many below-minimum clips that each incur a full generation. Never drop a story event or
-merge separate speaking turns to meet the target. Non-dialogue shots retain the 9-second planning cap. Voiceover visual shots retain the 15-second
+merge separate speaking turns to meet the target. Non-dialogue shots support 4–15 seconds. Voiceover visual shots retain the 15-second
 planning cap. Speaking-shot timing is provisional until actual audio/provider checks; never truncate
 speech to satisfy the target or claim that audio length alone guarantees enough action time.
 Track state_at_shot_start/end for changing physical processes: relative fill level AND active/stopped
