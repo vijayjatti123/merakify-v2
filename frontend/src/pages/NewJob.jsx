@@ -11,7 +11,7 @@ import ScriptResolutionPanel from "../components/ScriptResolutionPanel";
 
 import BriefCharacterInput from "../components/BriefCharacterInput";
 import ClarifierPanel from "../components/ClarifierPanel";
-import { activeMentions, recordMentionJob } from "../utils/characterMentions";
+import { activeMentions, recordMentionJob, preserveRefinedMentions } from "../utils/characterMentions";
 
 const COLORS = {
   bg: "var(--mui-palette-background-default)",
@@ -238,6 +238,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
             </Typography>}
             <ProductPicker selected={products} onChange={setProducts} disabled={collapsed || submitting} />
             <ClarifierPanel brief={brief} inputMode={scriptMode ? "script" : "idea"} productIds={products.map(p => p.id)}
+              prepareRefined={text => scriptMode ? text : preserveRefinedMentions(text, brief, characterSelections)}
               knownFields={knownFields} disabled={collapsed || submitting} onUse={(text, row) => {
                 const acceptedBrief = scriptMode ? brief : text;
                 if (!scriptMode) setBrief(text);

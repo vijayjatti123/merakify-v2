@@ -6,16 +6,31 @@ import { clarifierRequest } from "../api/clarifier";
 const topicLabels = { product: "Product benefit", audience: "Audience", outcome: "Viewer takeaway", execution: "Visual execution",
   script_clarity: "Script details", tone: "Tone", differentiator: "Main selling point", constraints: "Must-haves and exclusions" };
 
-// A new brief/settings snapshot starts a new conversation, never reuses stale answers.
-export default function ClarifierPanel({ brief, knownFields, onUse, inputMode = "idea", productIds = [], disabled = false }) {
+// Input changes must never silently discard a conversation.
+export default function ClarifierPanel({ brief, knownFields, onUse, prepareRefined = text => text, inputMode = "idea", productIds = [], disabled = false }) {
   const [appliedBrief, setAppliedBrief] = useState(null);
+  const [source, setSource] = useState(null);
+  const [generation, setGeneration] = useState(0);
   const context = JSON.stringify([knownFields, inputMode, productIds]);
-  if (JSON.stringify([brief, context]) === appliedBrief || brief.trim().length < 20 || brief.trim().split(/\s+/).length < 4 || disabled) return null;
-  return <Conversation key={JSON.stringify([brief, context])} brief={brief} knownFields={knownFields} inputMode={inputMode} productIds={productIds}
-    onUse={(text, row) => { setAppliedBrief(JSON.stringify([inputMode === "script" ? brief : text, context])); onUse(text, row); }} />;
+  const signature = JSON.stringify([brief, context]);
+  const eligible = brief.trim().length >= 20 && brief.trim().split(/\s+/).length >= 4;
+  const changed = source && source.signature !== signature;
+  const inputs = source || { brief, knownFields, inputMode, productIds, signature };
+  return <Box hidden={disabled || signature === appliedBrief || (!eligible && !source)}>
+    {changed && <Alert severity="info" data-testid="clarifier-inputs-changed" sx={{ mb: 2 }}>
+      Your brief or settings changed. Your questions, answers and draft are kept below.
+      Restore your previous inputs to continue, or explicitly start again with the new inputs.
+      <Button type="button" data-testid="clarifier-restart" disabled={!eligible}
+        onClick={() => { setSource(null); setGeneration(n => n + 1); }}>Start again with updated inputs</Button>
+    </Alert>}
+    <Conversation key={generation} {...inputs} paused={Boolean(changed) || disabled}
+      prepareRefined={prepareRefined}
+      onStart={() => setSource(inputs)}
+      onUse={(text, row) => { setAppliedBrief(JSON.stringify([inputMode === "script" ? brief : text, context])); onUse(text, row); }} />
+  </Box>;
 }
 
-function Conversation({ brief, knownFields, onUse, inputMode, productIds }) {
+function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, productIds, onStart, paused }) {
   const [session, setSession] = useState(null);
   const [answer, setAnswer] = useState("");
   const [draft, setDraft] = useState("");
@@ -27,7 +42,7 @@ function Conversation({ brief, knownFields, onUse, inputMode, productIds }) {
   const cancel = (row) => row && clarifierRequest(`/${row.session_id}/cancel`, { revision: row.revision }).catch(() => {});
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; if (!accepted.current && !inFlight.current) cancel(latest.current); };
+    return () => { alive.current = false; };
   }, []);
   const pending = !session?.refined_prompt && session?.turns?.find(t => t.answer === null);
   const degraded = session?.status === "degraded";
@@ -43,11 +58,11 @@ function Conversation({ brief, knownFields, onUse, inputMode, productIds }) {
     latest.current = row; setSession(row); setDraft(row.refined_prompt || ""); setAnswer("");
   }
   async function run(work) {
-    if (inFlight.current || !alive.current) return;
+    if (inFlight.current || !alive.current || paused) return;
     inFlight.current = true; setBusy(true); setError(null);
     try {
       const row = await work();
-      if (!alive.current) { if (!accepted.current) cancel(row); return; }
+      if (!alive.current) return;
       acceptSnapshot(row);
     } catch (e) {
       if (alive.current) setError({ message: e.name === "AbortError"
@@ -71,8 +86,9 @@ function Conversation({ brief, knownFields, onUse, inputMode, productIds }) {
   async function useRefined() {
     if (inFlight.current || !draft.trim()) return;
     await run(async () => {
-      const row = draft === latest.current.refined_prompt ? latest.current
-        : await post(latest.current, "edit", { refined_prompt: draft });
+      const prepared = prepareRefined(draft);
+      const row = prepared === latest.current.refined_prompt ? latest.current
+        : await post(latest.current, "edit", { refined_prompt: prepared });
       if (alive.current) { accepted.current = true; onUse(row.refined_prompt, row); setDismissed(true); }
       return row;
     });
@@ -82,7 +98,7 @@ function Conversation({ brief, knownFields, onUse, inputMode, productIds }) {
     onKeyDown={e => { if (e.key === "Enter") e.stopPropagation(); }}
     sx={{ p: { xs: 2, sm: 3 }, bgcolor: "background.paper",
       ...(degraded && { borderLeft: "5px solid", borderLeftColor: "warning.main" }) }}>
-    <Stack spacing={2}>
+    <Stack component="fieldset" disabled={paused} spacing={2} sx={{ border: 0, p: 0, m: 0, minWidth: 0 }}>
       <Typography ref={heading} tabIndex={-1} variant="h6" data-testid="clarifier-heading">A little clarity, a stronger idea</Typography>
       {degraded && <Chip size="small" color="warning" variant="outlined" sx={{ alignSelf: "flex-start" }}
         data-testid="clarifier-general-label" label={session.refined_prompt ? "General guidance" : "General question"} />}
@@ -96,7 +112,7 @@ function Conversation({ brief, knownFields, onUse, inputMode, productIds }) {
       {!session && <Stack spacing={2} data-testid="clarifier-initial">
         <Typography color="text.secondary">We'll read your {inputMode === "script" ? "script" : "idea"} and ask about missing product details, your audience, and how you want the ad to look. Up to five questions; skip whenever you like.</Typography>
         <Stack direction="row" spacing={1}><Button type="button" variant="contained" startIcon={<Sparkles size={18} />} data-testid="clarifier-start" disabled={busy}
-          onClick={() => run(() => clarifierRequest("/start", { raw_brief: brief, input_mode: inputMode, product_ids: productIds, known_fields: Object.fromEntries(Object.entries(knownFields).filter(([,v]) => v?.trim())) }))}>Refine with AI</Button>
+          onClick={() => { onStart(); return run(() => clarifierRequest("/start", { raw_brief: brief, input_mode: inputMode, product_ids: productIds, known_fields: Object.fromEntries(Object.entries(knownFields).filter(([,v]) => v?.trim())) })); }}>Refine with AI</Button>
           <Button type="button" data-testid="clarifier-skip" onClick={leave}>Skip</Button></Stack>
       </Stack>}
       {session?.assessment?.understanding && <Box data-testid="clarifier-understanding"><Typography variant="subtitle2">Here's what we understand</Typography><Typography variant="body2" color="text.secondary">{session.assessment.understanding}</Typography></Box>}

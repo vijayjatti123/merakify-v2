@@ -4,6 +4,34 @@ export function activeMentions(brief, selections) {
   return Object.fromEntries(Object.entries(selections).filter(([token]) => mentionPattern(token).test(brief))
     .map(([token, character]) => [token, character.id]));
 }
+
+// Only the user's active selections are authoritative, never the model's names.
+export function preserveRefinedMentions(text, original, selections) {
+  const active = Object.keys(activeMentions(original, selections));
+  if (!active.length) return text;
+  const aliases = new Map();
+  for (const token of active) {
+    for (const alias of [token, selections[token].display_name?.trim()]) {
+      if (!alias) continue;
+      const key = alias.toLocaleLowerCase();
+      if (!aliases.has(key)) aliases.set(key, new Set());
+      aliases.get(key).add(token);
+    }
+  }
+  const alternatives = [...aliases.keys()].sort((a, b) => b.length - a.length).map(escape).join('|');
+  const pattern = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_@])(?:${alternatives})(?![\\p{L}\\p{M}\\p{N}_-])`, 'giu');
+  const restored = text.replace(pattern, match => {
+    const tokens = [...aliases.get(match.toLocaleLowerCase())];
+    if (tokens.length !== 1) {
+      throw new Error(`More than one selected character is named ${match}. In this draft, use their original @tags to identify which one you mean.`);
+    }
+    return tokens[0];
+  });
+  const missing = active.filter(token => !mentionPattern(token).test(restored));
+  // A rewrite may omit a name completely. Keep the selection visible, editable,
+  // and in the normal submission path rather than silently dropping its ID.
+  return missing.length ? `${restored.trim()}\n\nSelected characters: ${missing.join(', ')}` : restored;
+}
 export function typedMentions(text) {
   return [...text.matchAll(/(?<![\p{L}\p{M}\p{N}_@])@[\p{L}\p{M}\p{N}_-]+/gu)].map(match => match[0]);
 }
