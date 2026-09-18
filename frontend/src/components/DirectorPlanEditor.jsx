@@ -37,5 +37,15 @@ export default function DirectorPlanEditor({ value, onChange, shotNumber, cast =
       </TextField>)}
     {Object.entries({purpose:"Purpose",performance:"Character performance",product_props:"Product and props",edit_intent:"Edit and transition intention"}).map(([key,label]) =>
       <TextField key={key} label={label} multiline minRows={2} value={value.shot_direction?.[key] || ""} onChange={e => set("shot_direction", {...value.shot_direction,[key]:e.target.value})} />)}
+    {value.shot_direction?.action_beats && <>
+      {[['blocking', 'Where everyone is'], ['critical_outcome', 'What the viewer must see']].map(([key, label]) =>
+        <TextField key={key} label={label} multiline minRows={2} value={value.shot_direction[key] || ''}
+          slotProps={{htmlInput: {'data-testid': `edit-${key}-${shotNumber}`}}}
+          onChange={e => set('shot_direction', {...value.shot_direction, [key]: e.target.value})} />)}
+      {value.shot_direction.action_beats.map((beat, i) => <TextField key={`beat-${i}`} label={`Action ${i + 1}`}
+        multiline minRows={2} value={beat} slotProps={{htmlInput: {'data-testid': `edit-action-${i + 1}-${shotNumber}`}}}
+        onChange={e => set('shot_direction', {...value.shot_direction,
+          action_beats: value.shot_direction.action_beats.map((text, n) => n === i ? e.target.value : text)})} />)}
+    </>}
   </Box>;
 }

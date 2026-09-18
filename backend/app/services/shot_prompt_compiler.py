@@ -739,11 +739,13 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=No
         # another model to reinterpret or repeatedly self-audit the same story.
         outputs = []
         for source in payload["shots"]:
+            from app.services.ad_direction import execution_sections
             direction = source.get("shot_direction") or {}
             sections = [("Locked style", "; ".join(f"{k}: {v}" for k, v in payload.get("style_bible", {}).items() if k != "rendering" and isinstance(v, str) and v)),
                 ("Action", source.get("description")), ("Framing", source.get("camera_angle")),
                 ("Lens", source.get("lens")), ("Lighting", source.get("lighting")),
                 ("Composition", source.get("composition_note")), ("Opening", source.get("state_at_shot_start")),
+                *execution_sections(source),
                 ("Performance", direction.get("performance")), ("Product and props", direction.get("product_props")),
                 ("Ending", source.get("state_at_shot_end"))]
             visual = " ".join(f"{label}: {text.strip().rstrip('.')}." for label, text in sections if isinstance(text, str) and text.strip())

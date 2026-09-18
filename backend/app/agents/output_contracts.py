@@ -29,7 +29,8 @@ def contracts():
     cam = obj({key: {'type': 'string', 'enum': sorted(values)} for key, values in (
         ('movement', camera.MOVEMENTS), ('direction', camera.DIRECTIONS),
         ('speed', camera.SPEEDS), ('stabilization', camera.STABILIZATIONS))})
-    direction = obj({k: TEXT for k in SHOT_FIELDS})
+    direction = obj({**{k: TEXT for k in SHOT_FIELDS}, 'blocking': TEXT,
+                     'action_beats': array(TEXT), 'critical_outcome': TEXT}, list(SHOT_FIELDS))
     visual = {k: TEXT for k in ('camera_angle', 'lens', 'lighting', 'composition_note',
                                'description', 'state_at_shot_start', 'state_at_shot_end')}
     visual.update(camera_direction=cam, duration_sec=NUMBER, opening_characters=array(TEXT), shot_direction=direction)
@@ -42,8 +43,11 @@ def contracts():
         requirement_id=TEXT, repair_kind={'type':'string', 'enum':['visual_fields', 'insert_after', 'structural']},
         repair_fields=array(TEXT)))
     requirement = obj(dict(requirement_id=TEXT, shot_numbers=array(INTEGER), covered=BOOLEAN, evidence=TEXT))
+    directed_shot = copy.deepcopy(shot)
+    directed_shot['properties']['shot_direction']['required'] = list(direction['properties'])
     return {
         'director-v1': obj(dict(ad_direction=obj({k: TEXT for k in AD_FIELDS}), shots=array(shot))),
+        'director-v2': obj(dict(ad_direction=obj({k: TEXT for k in AD_FIELDS}), shots=array(directed_shot))),
         'qa-v1': obj(dict(approved=BOOLEAN, scene_coverage=array(coverage), issues=array(issue))),
         'qa-v2': obj(dict(approved=BOOLEAN, scene_coverage=array(coverage),
                           requirement_coverage=array(requirement),
@@ -72,7 +76,7 @@ def contract_for(system, content):
         return None, None
     name = None
     if system == prompts.CINEMATOGRAPHY_AGENT:
-        name = 'director-v1'
+        name = 'director-v2'
     elif system == prompts.CINEMATOGRAPHY_PATCH:
         name = 'patch-insert-v1' if insert_contract else 'patch-v1'
     elif system == prompts.QA_AGENT:

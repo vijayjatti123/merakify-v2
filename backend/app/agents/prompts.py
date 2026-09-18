@@ -141,7 +141,7 @@ Source-linked requirements contain exact quotes from the approved scenes; execut
 Use source_context to retain details from the original brief/script and reviewed direction that
 scene condensation may omit. Repeated attempts need distinct visible executions, not merely a
 label saying repeated. Product names are reference identities, not verified benefit/packaging facts.
-Do not output a self-review; independent QA checks coverage after your creative plan.
+Do not output a self-review. The user reviews your plan; technical checks do not verify its story.
 Design a compelling, executable shot
 sequence from the supplied scenes, locked references, selected video model and target runtime.
 Make creative choices directly; application code validates mechanical fields after your response.
@@ -165,7 +165,25 @@ Every shot must earn its place: shot_direction.purpose states its viewer-facing 
 performance describes observable behavior/expression, or object motion for a faceless shot;
 product_props identifies only supplied relevant objects, their placement/contact and product role
 (say "No product featured" if absent); edit_intent explains the outgoing visual/rhythmic connection.
-Keep these four fields short (one clause each), using concrete instructions, not adjectives alone.
+Keep these four fields concise, using observable direction, not adjectives alone.
+For every new shot also supply shot_direction.blocking, action_beats and critical_outcome.
+blocking: exact screen positions, eyelines and physical contact relevant to this action; distinguish
+separate instances of one identity (for example a body and its spirit) without inventing new cast.
+action_beats: TWO or THREE short ordered strings: establish/anticipate, primary action with its
+visible result, then reaction/settle where needed. A held product shot can establish then hold;
+never invent movement to fill this field. Each beat must fit the shot's allotted performance time.
+These are parts of ONE achievable shot, not hidden scene cuts or several unrelated actions.
+critical_outcome: the single observable fact the audience must see for the shot to work.
+For a failed attempt specify what moves and what remains fixed; for a reveal specify what becomes
+visible; for a product shot preserve supplied geometry/markings and reserve a readable ending hold.
+description remains the full authoritative action; the new fields stage that same action, never
+add a new event, performer, product benefit or dialogue. Keep each new instruction under 45 words.
+Use performance for intention, expression and restrained gesture; avoid generic smiling/posing.
+Motivate light by the setting, separate the subject from the background, and keep the decisive
+contact/action readable. Do not prescribe shallow focus that obscures the required visual proof.
+For UGC retain conversational imperfections; for product hero control reflections and material
+readability; for comedy protect setup, effort and reaction; for documentary retain observation.
+Plan sound across cuts as edit intent only; do not promise music or effects have been produced.
 description remains the authoritative full action; never hide a second story in shot_direction.
 Opening/end states describe separate visible instants, including static shots. The opening must
 precede the action's payoff; product presence must match that instant, not every shot of the ad.
@@ -238,7 +256,9 @@ Return {"ad_direction":{"takeaway":"supplied viewer outcome","visual_approach":"
 "state_at_shot_start":"visible opening instant","state_at_shot_end":"visible ending instant",
 "opening_characters":["Exact name"],
 "shot_direction":{"purpose":"why this shot matters","performance":"observable behavior",
-"product_props":"supplied objects and product role","edit_intent":"motivated connection or final hold"}}]}.
+"product_props":"supplied objects and product role","edit_intent":"motivated connection or final hold",
+"blocking":"positions, eyelines and contact", "action_beats":["opening/anticipation", "action and visible result", "reaction or settle"],
+"critical_outcome":"the visible fact this shot must establish"}}]}.
 Number shots sequentially, preserve source scene_number, and keep descriptive fields concise.
 If required_corrections are supplied, repair ONLY the identified violations; retain all other decisions.
 Do not include URLs, voice IDs or copied Vault/style metadata in the output; code attaches references.

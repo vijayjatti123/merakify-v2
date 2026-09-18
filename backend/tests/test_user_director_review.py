@@ -62,6 +62,19 @@ class ReviewApiTests(unittest.TestCase):
         with self.sessions() as db: job_service.set_result(db,self.job_id,self.plan)
     def tearDown(self): test_module_f.ModuleFTests.tearDown(self)
 
+    def test_execution_edit_persists_in_plan_without_provider_call(self):
+        direction={**self.plan['shots'][0]['shot_direction'], 'blocking':'Hand enters screen right.',
+            'action_beats':['Hand grips handle.','Cup lifts and holds.'], 'critical_outcome':'Cup clears table.'}
+        with patch.object(director,'call_agent',side_effect=AssertionError('No model call')):
+            with self.sessions() as db:
+                revised=revise_job(self.job_id,JobRevise(shots=[dict(shot_number=1,shot_direction=direction,
+                    description=self.plan['shots'][0]['description'],dialogue_text=self.plan['shots'][0]['dialogue_text'])]),db)
+                self.assertEqual(revised.result['shots'][0]['shot_direction'],direction)
+                saved=job_service.get_job(db,self.job_id)
+                import json
+                self.assertEqual(json.loads(saved.result_json)['shots'][0]['shot_direction'],direction)
+                self.assertFalse(revised.result['generation_approved'])
+
     def test_edit_persists_without_generation_then_approval_queues_once(self):
         with patch.object(director,"call_agent",side_effect=AssertionError("No model call")):
             with self.sessions() as db:

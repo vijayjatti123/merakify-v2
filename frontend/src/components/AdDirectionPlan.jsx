@@ -18,6 +18,9 @@ export function ShotDirectionPlan({ shot, expanded = false }) {
     {[["Speaker", shot.has_dialogue ? (shot.speech_mode === "voiceover" ? "Narrator · off screen" : shot.speaker_name || "Choose a speaker before approval") : "No speech"], ["Transition", shot.transition_after || "cut"], ["Framing", shot.camera_angle], ["Camera movement", shot.camera_movement], ["Lens", shot.lens], ["Lighting", shot.lighting], ["Planned duration", `${shot.duration_sec}s`], ["Why this shot", shot.shot_direction.purpose], ["Starts with", shot.state_at_shot_start],
       ...(Array.isArray(shot.opening_characters) ? [["Visible at the start", shot.opening_characters.join(', ') || 'No visible characters']] : []),
       ["Performance", shot.shot_direction.performance], ["Product and props", shot.shot_direction.product_props],
+      ...(shot.shot_direction.blocking ? [["Where everyone is", shot.shot_direction.blocking]] : []),
+      ...(shot.shot_direction.action_beats || []).map((beat, i) => [`Action ${i + 1}`, beat]),
+      ...(shot.shot_direction.critical_outcome ? [["What the viewer must see", shot.shot_direction.critical_outcome]] : []),
       ["Ends with", shot.state_at_shot_end], ["Next cut", shot.shot_direction.edit_intent]].map(([label, text]) =>
       <Box key={label} sx={{ mt: 1 }}><Typography variant="caption" color="text.secondary">{label}</Typography>
         <Typography variant="body2">{text}</Typography></Box>)}

@@ -7,6 +7,15 @@ from app.agents import output_contracts as contracts, llm_client, prompts
 
 
 class OutputContractTests(unittest.TestCase):
+    def test_fresh_director_requires_execution_while_legacy_patch_can_preserve_old_fields(self):
+        schema=contracts.contracts()['director-v2']['properties']['shots']['items']['properties']['shot_direction']
+        value={'purpose':'Show the lift','performance':'Unhurried reach','product_props':'Blue cup', 'edit_intent':'Hold'}
+        with self.assertRaises(ValueError): contracts.validate(value,schema)
+        value.update(blocking='Hand screen right',action_beats=['Reach','Lift and settle'],critical_outcome='Cup clears table')
+        contracts.validate(value,schema)
+        patch_schema=contracts.contracts()['patch-v1']
+        contracts.validate({'patches':[{'shot_number':1,'changes':{'shot_direction':value}}]},patch_schema)
+
     def setUp(self):
         from app.config import settings
         enabled = patch.object(settings, 'planning_structured_outputs', True)

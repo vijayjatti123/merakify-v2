@@ -24,6 +24,43 @@ def directed():
 
 
 class AdDirectionTests(unittest.TestCase):
+    def test_execution_contract_is_all_or_none_and_legacy_remains_usable(self):
+        shot = directed()['shots'][0]
+        self.assertEqual(ad_direction.problems(shot), [])
+        shot['shot_direction']['blocking'] = 'Hand enters from screen right; cup stays centered.'
+        self.assertTrue(ad_direction.problems(shot))
+        shot['shot_direction'].update(action_beats=['Hand approaches the handle.', 'Hand lifts the cup and holds.'],
+                                     critical_outcome='Cup visibly clears the table.')
+        self.assertEqual(ad_direction.problems(shot), [])
+        shot['shot_direction']['action_beats'] = ['']
+        self.assertTrue(ad_direction.problems(shot))
+
+    def test_ordered_execution_reaches_final_video_request_not_opening_preview(self):
+        from app.services import video_generation_service, director_review
+        result = directed()
+        shot = result['shots'][0]
+        result['continuity']['characters'] = [{'name': 'Meera', 'description': 'A woman holding a cup'}]
+        shot.update(speech_mode='onscreen', speaker_label='Meera', speaker_name='Meera',
+                    characters_in_shot=['Meera'], opening_characters=['Meera'],
+                    dialogue_audio_url='https://example.com/audio.wav', dialogue_audio_duration_sec=4.5,
+                    still_frame_url='https://example.com/scene.jpg', still_frame_status='ready')
+        shot.pop('direction_source', None)
+        shot['shot_direction'].update(blocking='The cup stays centered; Meera is screen right.',
+            action_beats=['Meera reaches for the handle.', 'She lifts the cup, then settles her hand.'],
+            critical_outcome='The cup visibly clears the table.')
+        ad_direction.accept_shots([shot])
+        result.update(director.validate_and_correct([shot], [], 5))
+        result['assembly'] = director_review.timeline(result['shots'])
+        result.update(video_model='seedance_mini_evolink', language='Hindi', quality='720p')
+        output=shot_prompt_compiler.compile_shot_prompts(result, emit=lambda *a:None,
+            call_agent=lambda *a,**k: self.fail('No extra model pass permitted'))[0]
+        prompt=video_generation_service.translate(result, output)['request']['prompt']
+        for value in [shot['shot_direction']['blocking'], shot['shot_direction']['critical_outcome'], *shot['shot_direction']['action_beats'], shot['dialogue_text']]:
+            self.assertIn(value, prompt)
+        self.assertLess(prompt.index('Meera reaches'),prompt.index('She lifts'))
+        still=preview_plan.preview_visual(preview_plan.preview_input(result,shot))
+        self.assertNotIn('She lifts the cup, then settles',still)
+
     def test_coverage_cannot_approve_omitted_or_unsubstantiated_scene(self):
         story = {'scenes':[{'scene_number':1,'heading':'Two attempts'}]}
         shots = [{'shot_number':1,'scene_number':1}]

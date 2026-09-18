@@ -9,6 +9,7 @@ import re
 
 AD_FIELDS = ("takeaway", "visual_approach", "pacing", "sound_direction")
 SHOT_FIELDS = ("purpose", "performance", "product_props", "edit_intent")
+EXECUTION_FIELDS = ("blocking", "action_beats", "critical_outcome")
 DIRECTION_FIELDS = ("shot_direction", "state_at_shot_start", "state_at_shot_end", "opening_characters")
 
 
@@ -40,16 +41,39 @@ def problems(shot):
             or len(cast) != len(set(cast))):
         found.append('opening_characters must list only the exact cast names visible at the opening, not later arrivals')
     direction = shot.get("shot_direction")
-    if (not isinstance(direction, dict) or set(direction) != set(SHOT_FIELDS)
+    if (not isinstance(direction, dict) or not set(SHOT_FIELDS).issubset(direction)
+            or set(direction) - set(SHOT_FIELDS) - set(EXECUTION_FIELDS)
             or any(not isinstance(direction.get(k), str) or not direction[k].strip()
                    or len(direction[k]) > 350 for k in SHOT_FIELDS)):
         found.append("shot_direction needs concise purpose, performance, product_props and edit_intent")
+    if isinstance(direction, dict) and any(k in direction for k in EXECUTION_FIELDS):
+        for key in ('blocking', 'critical_outcome'):
+            if not isinstance(direction.get(key), str) or not direction[key].strip() or len(direction[key]) > 500:
+                found.append(f"shot_direction.{key} needs one concrete, concise visual instruction")
+        beats = direction.get('action_beats')
+        if (not isinstance(beats, list) or not 2 <= len(beats) <= 3
+                or any(not isinstance(b, str) or not b.strip() or len(b) > 350 for b in beats)):
+            found.append('shot_direction.action_beats needs two or three ordered, achievable visual beats')
     for field in ("state_at_shot_start", "state_at_shot_end"):
         if not isinstance(shot.get(field), str) or not shot[field].strip() or len(shot[field]) > 500:
             found.append(f"{field} must describe one visible instant, including static shots")
     if shot.get("direction_source") and shot["direction_source"] != source_key(shot):
         found.append("The action or dialogue was edited; refresh opening/end states and performance to match it")
     return found
+
+
+def execution_sections(shot):
+    """Project approved decisions verbatim; never invent action during compilation."""
+    direction = shot.get('shot_direction') or {}
+    sections = []
+    if direction.get('blocking'):
+        sections.append(('Staging', direction['blocking']))
+    if direction.get('action_beats'):
+        sections.append(('Action progression', ' Then '.join(
+            f'{i + 1}) {text.strip()}' for i, text in enumerate(direction['action_beats']))))
+    if direction.get('critical_outcome'):
+        sections.append(('Must-see outcome', direction['critical_outcome']))
+    return sections
 
 
 def check_plan(qa, shots):
