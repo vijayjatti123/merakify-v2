@@ -93,7 +93,7 @@ def check_plan(qa, shots):
         try:
             for_shot(shot)
         except (ValueError, TypeError) as error:
-            issues.append({"shot_number": shot["shot_number"], "problem": f"Invalid camera direction: {error}",
+            issues.append({"shot_number": shot["shot_number"], "code": "invalid_camera_direction", "problem": f"Invalid camera direction: {error}",
                            "fix_instruction": "Correct camera_direction and its camera_movement summary together; preserve the intended visual action and all dialogue. Use one explicit primary movement."})
     return {**qa, "approved": False, "issues": [*qa.get("issues", []), *issues]} if issues else qa
 

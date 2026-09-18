@@ -327,6 +327,15 @@ def job_result(job: Job) -> Optional[Any]:
             if shot.get("still_frame_key"):
                 try:
                     shot["still_frame_url"] = storage_service.asset_url(shot["still_frame_key"])
+                    display = shot.get("still_frame_display") or {}
+                    if display.get("source_key") != shot["still_frame_key"]:
+                        shot.pop("still_frame_display", None)
+                    else:
+                        try:
+                            for variant in display.get("variants", []):
+                                variant["url"] = storage_service.asset_url(variant["key"])
+                        except Exception:
+                            shot.pop("still_frame_display", None)
                 except Exception:
                     # Reading a job must remain possible during storage outages.
                     shot["still_frame_url"] = None

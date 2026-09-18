@@ -4,6 +4,7 @@ from pydantic import AliasChoices, Field
 
 class Settings(BaseSettings):
     anthropic_api_key: str = ""
+    planning_structured_outputs: bool = False
     google_ai_api_key: str = ""
     gemini_image_model: str = "gemini-3.1-flash-image"
     sarvam_api_key: str = ""

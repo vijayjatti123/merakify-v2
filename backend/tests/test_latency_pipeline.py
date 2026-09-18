@@ -55,6 +55,25 @@ class LatencyPipelineTests(unittest.TestCase):
         execute(call, prompts.QA_AGENT, "a", {}, (self.db, retried.id, emit, owner))
         self.assertEqual(calls, ["a", "b"])
 
+    def test_invalid_coverage_is_not_cached_across_retry(self):
+        content = json.dumps({'ad_direction':{'takeaway':'Test'},
+            'shots':[{'shot_number':1,'scene_number':1}],
+            'approved_story':{'scenes':[{'scene_number':1,'description':'An action'}]}})
+        calls = []
+        def provider(*args, **kwargs):
+            calls.append(1)
+            result = {'approved':True,'issues':[]}
+            if len(calls) > 1:
+                result['scene_coverage'] = [{'scene_number':1,'shot_numbers':[1],
+                    'covered':True,'evidence':'Action shown'}]
+            return result
+        scope = (self.db, 'test', lambda *args: None, threading.get_ident())
+        with self.assertRaisesRegex(ValueError, 'omitted scene coverage'):
+            execute(provider, prompts.QA_AGENT, content, {}, scope)
+        self.assertTrue(execute(provider, prompts.QA_AGENT, content, {}, scope)['approved'])
+        execute(provider, prompts.QA_AGENT, content, {}, scope)
+        self.assertEqual(len(calls), 2)
+
     def test_independent_previews_overlap_without_compilation_and_persist_on_owner(self):
         barrier = threading.Barrier(2)
         active, peak = 0, 0

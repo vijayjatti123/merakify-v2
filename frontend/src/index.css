@@ -1275,3 +1275,22 @@ input {
 .character-views[open] summary { margin-bottom:16px; }
 @media(max-width:800px) { .creative-widgets { grid-template-columns:1fr; } }
 @media(max-width:600px) { .creative-widgets section { padding:16px; } .intake-header h1 { font-size:2.4rem; } }
+
+/* The storyboard is the workspace, rather than a narrow secondary panel. */
+.phase-one-shell--active { grid-template-columns: minmax(0, 1fr); grid-template-areas: "generation" "panel" "input"; padding-bottom: 110px; }
+.storyboard-progress .director-progress-card { padding: 20px 24px; min-height: 0; }
+.storyboard-progress .generation-placeholder { min-height: 0; padding: 24px; }
+.storyboard-panel { border: 0; border-radius: 24px; overflow: visible; }
+.storyboard-panel .shot-card-list, .draft-storyboard-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; gap: 24px; }
+.storyboard-panel .shot-card { padding: 24px; border: 0; border-radius: 24px; min-width: 0; }
+.storyboard-panel .shot-card:has(.shot-edit-fields) { grid-column: 1 / -1; }
+.storyboard-panel .shot-card-list > section { grid-column: 1 / -1; }
+.preview-enlarge { display: block; width: 100%; border: 0; padding: 0; background: transparent; cursor: zoom-in; border-radius: 16px; }
+.preview-enlarge:focus-visible { outline: 3px solid var(--mui-palette-primary-main); outline-offset: 4px; }
+.preview-reveal { animation: previewReveal 300ms ease-out; }
+@keyframes previewReveal { from { opacity: 0; } to { opacity: 1; } }
+.storyboard-wait-footer { position: fixed; bottom: 0; left: 240px; right: 0; padding: 20px 24px; background: var(--mui-palette-background-paper); border-top: 1px solid var(--mui-palette-divider); z-index: 1100; }
+@media (max-width: 1200px) { .storyboard-panel .shot-card-list, .draft-storyboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .storyboard-panel .shot-card-list, .draft-storyboard-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; } .storyboard-panel .shot-card { padding: 20px; } }
+@media (max-width: 899px) { .storyboard-wait-footer { left: 0; } }
+@media (prefers-reduced-motion: reduce) { .preview-reveal { animation: none; } }

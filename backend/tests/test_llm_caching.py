@@ -24,7 +24,9 @@ def check_static_prompt_is_identical_and_variable_input_uncached(name):
     client.messages.create.return_value = SimpleNamespace(
         stop_reason="end_turn", content=[SimpleNamespace(type="text", text='{"ok":true}')]
     )
-    with patch.object(llm_client, "_client", client):
+    # This test isolates unchanged cache/model routing. Contract behavior has its
+    # own tests with full typed provider outputs rather than the {ok:true} stub.
+    with patch.object(llm_client, "_client", client), patch('app.agents.output_contracts.contract_for', return_value=(None, None)):
         assert llm_client.call_agent(system, "Variable job content", fast=fast) == {"ok": True}
     request = client.messages.create.call_args.kwargs
     assert request == {
@@ -45,7 +47,7 @@ def check_only_classifier_and_extractor_opt_into_haiku():
                     if keyword.arg == "fast":
                         assert isinstance(keyword.value, ast.Constant) and keyword.value.value is True
                         fast_sites.append(ast.unparse(node.args[0]))
-    assert sorted(fast_sites) == ["prompts.FORMAT_CLASSIFIER", "prompts.SCRIPT_EXTRACTOR"]
+    assert sorted(fast_sites) == ["prompts.BOUNDARY_CONTINUITY_REVIEW", "prompts.FORMAT_CLASSIFIER", "prompts.SCRIPT_EXTRACTOR"]
 
 
 def check_compiler_deadline_and_truncation_handling_unchanged(test):

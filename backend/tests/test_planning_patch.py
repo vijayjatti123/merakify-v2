@@ -56,3 +56,19 @@ class PlanningPatchTests(unittest.TestCase):
         with patch.object(director, 'call_agent', return_value={'approved': True, 'issues': []}) as call:
             director.validate_and_correct(copy.deepcopy(self.shots), [{'name': 'Meera'}], 10)
         self.assertEqual(call.call_count, 1)
+
+    def test_mechanical_camera_error_uses_actual_patch_path_and_rechecks_qa(self):
+        shots = copy.deepcopy(self.shots)
+        shots[1]['camera_direction'] = dict(movement='zoom', direction='in', speed='slow', stabilization='locked')
+        calls = []
+        def provider(system, content, **kwargs):
+            calls.append(system)
+            if system == prompts.CINEMATOGRAPHY_PATCH:
+                return {'patches': [{'shot_number': 2, 'changes': {'camera_direction':
+                    dict(movement='zoom', direction='in', speed='slow', stabilization='smooth')}}]}
+            return {'approved': True, 'issues': []}
+        with patch.object(director, 'call_agent', side_effect=provider):
+            result = director.validate_and_correct(shots, [{'name':'Meera'}], 10)
+        self.assertEqual(calls, [prompts.QA_AGENT, prompts.CINEMATOGRAPHY_PATCH, prompts.QA_AGENT])
+        self.assertTrue(result['qa']['approved'])
+        self.assertEqual([s['dialogue_text'] for s in result['shots']], [s['dialogue_text'] for s in self.shots])

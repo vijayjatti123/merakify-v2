@@ -93,6 +93,12 @@ def insert_dialogue(response, payload):
             elif source.get("placement_instruction") and source["placement_instruction"] not in visual:
                 # Compatibility with old/cached prose: still preserve placement.
                 visual = visual.rstrip(".") + "; " + source["placement_instruction"] + "."
+        # The approved visible subject is a fixed fact, not a creative decision.
+        # Put it early deterministically rather than spending a retry on omission.
+        if source.get("subject_instruction") and source["subject_instruction"] not in visual:
+            label = re.match(r"\[Shot \d+:[^\]]*\]\s*", visual)
+            at = label.end() if label else 0
+            visual = visual[:at] + source["subject_instruction"] + " " + visual[at:]
         if source.get("camera_instruction") and source["camera_instruction"] not in visual:
             visual += " " + source["camera_instruction"]
         image_reference = reference_insert(source)
@@ -291,6 +297,7 @@ def hardware_reference(language):
 
 
 def compiler_input(result, *, brief="", emit, camera_contract=False):
+    from app.services.ad_direction import visual_direction
     from app.services.boundary_continuity import reviewed_boundaries
     from app.services.clarifier_service import planning_direction
     verified = reviewed_boundaries(result, brief)
@@ -341,9 +348,17 @@ def compiler_input(result, *, brief="", emit, camera_contract=False):
     inputs = []
     continuing_speaker = None
     for shot in shots:
+        if shot.get('direction_version') == 1:
+            from app.services.ad_direction import problems
+            errors = problems(shot)
+            if errors:
+                raise ValueError(f"Shot {shot['shot_number']}: direction needs review before video: {'; '.join(errors)}")
         item = {k: shot.get(k) for k in ("shot_number", "scene_number", "camera_angle", "lens", "lighting",
                                         "composition_note", "description", "dialogue_text", "has_dialogue", "speech_mode", "characters_in_shot",
                                         "state_at_shot_start", "state_at_shot_end")}
+        if shot.get('direction_version') == 1:
+            item['shot_direction'] = copy.deepcopy(shot['shot_direction'])
+            item['opening_characters'] = copy.deepcopy(shot['opening_characters'])
         if camera_contract:
             try:
                 spec = camera_direction.for_shot(shot)
@@ -398,6 +413,8 @@ def compiler_input(result, *, brief="", emit, camera_contract=False):
                 item["foreground_insert"] = True
         if not item["subject_anchor"]:
             raise ValueError("Shot compiler needs an existing subject description")
+        if camera_contract and (refs or item.get("foreground_insert")):
+            item["subject_instruction"] = "Subject: " + item["subject_anchor"].rstrip(". ") + ";"
         # Establish speech from a sole dialogue performer, not a silent bystander.
         # Carry it across insert shots and batch boundaries without adding an
         # off-camera person to characters_in_shot or changing upstream audio.
@@ -436,6 +453,7 @@ def compiler_input(result, *, brief="", emit, camera_contract=False):
         item["tagged_product_references"] = [copy.deepcopy(a) for a in shot.get("reference_assets", []) if a.get("role") == "product"]
         inputs.append(item)
     return {"ai_model": result["ai_model"], "model_family": family, "content_type": content_type,
+            "ad_visual_direction": visual_direction(result),
             "production_direction": planning_direction(result.get("creative_direction")),
             "format": result.get("format"), "style_bible": bible, "multi_shot_context": len(shots) > 1,
             "locations": continuity.get("locations", []), "props": continuity.get("props", []),
@@ -620,7 +638,7 @@ def validate_compiled(response, payload):
         prose = output.get("compiled_prompt", "")
         if source.get("camera_instruction"):
             prose = prose.replace(source["camera_instruction"], "")
-        for field in ("locked_visual_instruction", "placement_instruction"):
+        for field in ("locked_visual_instruction", "placement_instruction", "subject_instruction"):
             if source.get(field):
                 prose = prose.replace(source[field], "")
         if reference_insert(source):
@@ -676,7 +694,7 @@ def validate_compiled(response, payload):
             right_visual = by_number[right]
             # Code-owned style/placement must not masquerade as the matched
             # opening action or make unrelated shots share a visual motif.
-            for field in ("locked_visual_instruction", "placement_instruction"):
+            for field in ("locked_visual_instruction", "placement_instruction", "subject_instruction"):
                 if left_source.get(field):
                     left_visual = left_visual.replace(left_source[field], "")
                 if right_source.get(field):
@@ -734,7 +752,7 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=No
     model_input = copy.deepcopy(payload)
     for source, item in zip(payload["shots"], model_input["shots"]):
         reference = dialogue_insert(source, payload["model_family"])
-        reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split()) + len(TEXT_GUARD.split()) + len(source.get("camera_instruction", "").split()) + len(source.get("locked_visual_instruction", "").split())
+        reserved = (len((reference + " " + AUDIO_GUARD).split()) if reference else 0) + len(reference_insert(source).split()) + len(TEXT_GUARD.split()) + len(source.get("camera_instruction", "").split()) + len(source.get("locked_visual_instruction", "").split()) + len(source.get("subject_instruction", "").split())
         for ref in item["character_references"]:
             ref["has_image_reference"] = bool(ref.pop("image_url", None))
             ref["has_locked_identity"] = bool(ref.get("locked_vault_description"))
@@ -827,6 +845,34 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=No
     return [{**shot, "compiled_prompt": text["compiled_prompt"]} for shot, text in zip(result["shots"], rendered_done)]
 
 
+def merge_correction(response, requested, readonly, order, emit):
+    """Accept each target once; never apply returned edits to readonly siblings.
+
+    Some providers echo context despite the output contract. Known sibling echoes
+    are discarded, not adopted; unknown/duplicate/missing targets remain errors.
+    ALL combined semantic and mechanical checks still run after this merge.
+    """
+    returned = response.get("shots") if isinstance(response, dict) else None
+    if not isinstance(returned, list):
+        raise ValueError("Compiler correction must return a shots array")
+    allowed = set(requested)
+    kept = {s["shot_number"]: s for s in readonly}
+    corrected, seen = {}, set()
+    for shot in returned:
+        number = shot.get("shot_number") if isinstance(shot, dict) else None
+        if type(number) is not int or number in seen or number not in allowed | kept.keys():
+            raise ValueError("Compiler correction returned an unknown or duplicate shot")
+        seen.add(number)
+        if number in allowed:
+            corrected[number] = shot
+        else:
+            emit("shot_prompt_compiler", f"Correction echoed readonly shot {number}; original accepted prose retained.")
+    if set(corrected) != allowed:
+        raise ValueError("Compiler correction omitted a requested shot")
+    combined = {**kept, **corrected}
+    return {"shots": [combined[n] for n in order]}
+
+
 def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
                    started, deadline, batch_index, emit, call_agent, initial, system, on_checkpoint=None):
     content = json.dumps(model_input, ensure_ascii=False)
@@ -849,25 +895,24 @@ def _compile_batch(payload, model_input, *, validation_payload, rendered_done,
         try:
             # Capture immutable arguments; a late worker must not see a later retry.
             request_content = content
+            request_system = system
+            if retry_numbers is not None:
+                request_system += ("\nCORRECTION OUTPUT CONTRACT: Return JSON {\"shots\": [...]} containing ONLY shot_numbers "
+                    + json.dumps(retry_numbers) + ". readonly_compiled_shots are immutable context, not output targets. "
+                    "Do not include or revise them. Return each target exactly once.")
             request_timeout = min(_provider_time_budget(tokens), max(0.001, deadline - time.monotonic()))
             attempt_deadline = min(deadline, initial["deadline"] if attempt == 0 else time.monotonic() + request_timeout)
             response = _await_provider(initial["completed"], deadline=attempt_deadline) if attempt == 0 else _attempt_before_deadline(
-                lambda body=request_content, budget=request_timeout, record=recorder, token_budget=tokens: call_agent(
-                    system, body,
+                lambda body=request_content, budget=request_timeout, record=recorder, token_budget=tokens, retry_system=request_system: call_agent(
+                    retry_system, body,
                     max_tokens=token_budget, request_timeout=budget, on_response=record),
                 deadline=attempt_deadline)
             if attempt == 0 and initial.get("cached"):
-                returned = response.get("shots") if isinstance(response, dict) else None
-                if not isinstance(returned, list) or [s.get("shot_number") for s in returned if isinstance(s, dict)] != initial["requested"]:
-                    raise ValueError("Compiler must return only the uncached requested shots")
-                combined = {s["shot_number"]: s for s in initial["cached"] + returned}
-                response = {"shots": [combined[s["shot_number"]] for s in payload["shots"]]}
+                response = merge_correction(response, initial["requested"], initial["cached"],
+                    [s["shot_number"] for s in payload["shots"]], emit)
             if retry_numbers is not None:
-                returned = response.get("shots") if isinstance(response, dict) else None
-                if not isinstance(returned, list) or [s.get("shot_number") for s in returned if isinstance(s, dict)] != retry_numbers:
-                    raise ValueError("Corrective camera/prompt retry must return only its requested shot numbers")
-                combined = {s["shot_number"]: s for s in retry_kept + returned}
-                response = {"shots": [combined[s["shot_number"]] for s in payload["shots"]]}
+                response = merge_correction(response, retry_numbers, retry_kept,
+                    [s["shot_number"] for s in payload["shots"]], emit)
             errors = []
             if isinstance(response, dict) and isinstance(response.get("shots"), list):
                 for output in response["shots"]:

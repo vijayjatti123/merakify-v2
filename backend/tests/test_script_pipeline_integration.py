@@ -145,6 +145,8 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
                 }
             if system_prompt == prompts.CINEMATOGRAPHY_AGENT:
                 return {
+                    "ad_direction": {"takeaway": "A quiet arrival", "visual_approach": "Warm cafe light",
+                                     "pacing": "A measured entrance", "sound_direction": "No music requested"},
                     "shots": [{
                         "shot_number": 1,
                         "scene_number": 1,
@@ -155,19 +157,30 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
                         "composition_note": "centered",
                         "duration_sec": 5,
                         "description": "Ravi enters",
+                        "state_at_shot_start": "Ravi stands in the doorway",
+                        "state_at_shot_end": "Ravi stands inside the cafe",
+                        "opening_characters": ["Ravi"],
+                        "shot_direction": {"purpose": "Introduce Ravi", "performance": "Ravi steps inside calmly",
+                                           "product_props": "No product featured", "edit_intent": "Hold on arrival"},
                         "characters_in_shot": ["Ravi"],
                         "has_dialogue": False,
                         "dialogue_text": "",
                     }]
                 }
             if system_prompt == prompts.QA_AGENT:
-                return {"approved": True, "issues": []}
+                draft_result = set_result.call_args.args[2]
+                self.assertEqual(draft_result['planning_draft']['shots'][0]['description'], 'Ravi enters')
+                self.assertNotIn('shots', draft_result)
+                self.assertNotIn('generation_approved', draft_result)
+                self.assertNotIn('voice_refs', draft_result['planning_draft']['shots'][0])
+                return {"approved": True, "issues": [], "scene_coverage": [{"scene_number":1,"shot_numbers":[1],"covered":True,"evidence":"Ravi enters"}]}
             if system_prompt == prompts.SHOT_ASSEMBLER:
                 return {"total_duration_sec": 5, "transitions": []}
             raise AssertionError("unexpected prompt")
 
         with (
             patch("app.agents.director.call_agent", side_effect=fake_call),
+            patch("app.services.product_service.job_references", return_value=[]),
             patch("app.services.voice_timing.measured_budget", return_value={"measured_mean_chars_per_second": 18.4}),
             patch("app.agents.director.character_service.list_approved_characters", return_value=[]),
             patch("app.agents.director.job_service.get_job", return_value=job),
@@ -190,6 +203,9 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
             self.assertIn("Show the lamp adjustment clearly; no invented claims.", next(c[1] for c in calls if c[0] == system))
         self.assertEqual(result['creative_direction']['production_brief'], 'Show the lamp adjustment clearly; no invented claims.')
         self.assertEqual(result["source_script_text"], source)
+        self.assertEqual(result['ad_direction']['takeaway'], 'A quiet arrival')
+        self.assertEqual(result['sound_direction_status'], 'planned_only')
+        self.assertTrue(result['shots'][0]['direction_source'])
         continuity_call = next(c for c in calls if c[0] == prompts.CONTINUITY_AGENT)
         self.assertIn('"visual_style": "Cartoon / Anime", "color_grade": "Warm"', continuity_call[1])
         cine_call = next(c for c in calls if c[0] == prompts.CINEMATOGRAPHY_AGENT)

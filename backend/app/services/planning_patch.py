@@ -10,6 +10,16 @@ def patch_permissions(shots, issues):
         number = issue.get('shot_number')
         if number not in by_number:
             return None
+        if issue.get('code') == 'invalid_camera_direction':
+            allowed.setdefault(number, set()).add('camera_direction')
+            continue
+        if issue.get('code') == 'duration_bounds':
+            allowed.setdefault(number, set()).add('duration_sec')
+            continue
+        if issue.get('code') == 'ad_direction_contract':
+            from app.services.ad_direction import DIRECTION_FIELDS
+            allowed.setdefault(number, set()).update(DIRECTION_FIELDS)
+            continue
         text = (str(issue.get('problem', '')) + ' ' + str(issue.get('fix_instruction', ''))).lower()
         # Relationship/structural repairs need the established complete-plan path.
         if re.search(r'dialogue|utterance|speaker|split|merge|boundary|state_|180|eyeline|axis|screen.direction|delete|remove', text):
@@ -50,6 +60,14 @@ def apply_patch_response(shots, response, permissions):
             if field == 'camera_direction':
                 from app.services.camera_direction import validate
                 validate(value)
+            elif field == 'opening_characters':
+                if not isinstance(value, list) or any(not isinstance(n, str) or n not in by_number[number].get('characters_in_shot', []) for n in value):
+                    raise ValueError('Opening cast must be drawn from the existing shot cast.')
+            elif field == 'shot_direction':
+                from app.services.ad_direction import SHOT_FIELDS
+                if (not isinstance(value, dict) or set(value) != set(SHOT_FIELDS)
+                        or any(not isinstance(v, str) or not v.strip() or len(v) > 350 for v in value.values())):
+                    raise ValueError('Planning correction returned incomplete shot direction.')
             elif field == 'duration_sec':
                 import math
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
@@ -57,6 +75,9 @@ def apply_patch_response(shots, response, permissions):
             elif not isinstance(value, str) or not value.strip():
                 raise ValueError('Planning correction returned an empty visual instruction.')
         by_number[number].update(changes)
+        from app.services.ad_direction import DIRECTION_FIELDS, source_key
+        if set(DIRECTION_FIELDS) <= set(changes):
+            by_number[number]['direction_source'] = source_key(by_number[number])
         seen.add(number)
     if seen != set(permissions):
         raise ValueError('Planning correction omitted a flagged shot. Please retry planning.')

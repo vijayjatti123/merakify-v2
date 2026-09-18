@@ -95,13 +95,17 @@ class CameraDirectionTests(unittest.TestCase):
         shot.update(camera_movement='static push in', has_dialogue=True, dialogue_text='Keep this complete line.', duration_sec=5)
         fixed = {**shot, 'camera_movement': 'slow push in', 'camera_direction':
                  dict(movement='dolly', direction='in', speed='slow', stabilization='smooth')}
-        call = Mock(side_effect=[{'approved': True, 'issues': []}, {'shots': [fixed]}, {'approved': True, 'issues': []}])
+        call = Mock(side_effect=[{'approved': True, 'issues': []},
+                                {'patches': [{'shot_number': shot['shot_number'], 'changes': {'camera_direction': fixed['camera_direction']}}]},
+                                {'approved': True, 'issues': []}])
         with patch.object(director, 'call_agent', call):
             result = director.validate_and_correct([shot], [], 5, source_script_text='Keep this complete line.')
         self.assertEqual(call.call_count, 3)
-        self.assertEqual(call.call_args_list[1].args[0], prompts.CINEMATOGRAPHY_FIX)
+        self.assertEqual(call.call_args_list[1].args[0], prompts.CINEMATOGRAPHY_PATCH)
         self.assertTrue(result['qa']['approved'])
         self.assertEqual(result['shots'][0]['dialogue_text'], shot['dialogue_text'])
+        self.assertEqual(result['shots'][0]['description'], shot['description'])
+        self.assertEqual(result['shots'][0]['camera_direction'], fixed['camera_direction'])
 
     @patch('app.services.prompt_technique_service.shot_knowledge', return_value={})
     def test_corrective_retry_only_rewrites_failed_shot(self, knowledge):

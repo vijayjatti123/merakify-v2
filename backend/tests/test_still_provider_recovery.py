@@ -9,6 +9,9 @@ from app.services import still_frame_service as service
 
 class StillProviderRecoveryTests(unittest.TestCase):
     def setUp(self):
+        display = patch('app.services.preview_display.store_variants', return_value=None)
+        display.start()
+        self.addCleanup(display.stop)
         raw = io.BytesIO()
         Image.new("RGB", (160, 90)).save(raw, "PNG")
         self.good = {"candidates": [{"finishReason": "STOP", "content": {"parts": [

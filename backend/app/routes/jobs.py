@@ -470,6 +470,9 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
         target_duration_sec,
         narrator_voice_ref=continuity.get("narrator_voice_ref"),
         source_script_text=result.get("source_script_text"),
+        ad_direction_plan=result.get("ad_direction"),
+        approved_story=result.get("script"),
+        minimum_shot_seconds=result.get("planning_constraints", {}).get("minimum_shot_seconds"),
         emit=lambda key, note: job_service.append_event(db, job_id, key, note),
     )
     validated_shots = _attach_voice_refs(

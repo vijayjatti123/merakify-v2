@@ -11,6 +11,11 @@ from app.services.character_image_service import GeneratedCharacterImage
 
 class StillFramesTests(unittest.TestCase):
     def setUp(self):
+        # Original-generation tests count original uploads; derivatives have
+        # separate byte-level/integration coverage in test_preparation_latency.
+        display = patch('app.services.preview_display.store_variants', return_value=None)
+        display.start()
+        self.addCleanup(display.stop)
         self.result = {"aspect_ratio": "9:16", "continuity": {"characters": []}, "shots": [
             {"shot_number": 1, "compiled_prompt": "A blue cup on a table. No on-screen text, logos or readable signage; composite text in post.",
              "characters_in_shot": []}]}
@@ -36,10 +41,12 @@ class StillFramesTests(unittest.TestCase):
         self.result['continuity']['props'] = [{'name': 'Cup'}]
         for shot in self.result['shots']:
             shot['characters_in_shot'] = ['Meera']
+            shot['compiled_prompt'] = f"Audit frame {shot['shot_number']}. " + shot['compiled_prompt']
         check.return_value['visible_entities'] = ['props:cup']
         order = []
         def generate(visual, refs, aspect, feedback, *, continuation, emit):
-            number = 1 + sum(item.startswith('generate') for item in order)
+            import re
+            number = int(re.search(r'Audit frame (\d+)', visual).group(1))
             order.append(f'generate{number}')
             self.assertEqual(refs[0][:2], ('Meera', self.image))
             if number > 1:
@@ -51,16 +58,19 @@ class StillFramesTests(unittest.TestCase):
                 self.assertIsNone(continuation)
             return self.image
         def upload(**kwargs):
-            number = len([x for x in order if x.startswith('upload')]) + 1
+            number = int(kwargs['key'].split('/stills/')[1].split('-')[0])
             order.append(f'upload{number}')
             return {'url': f'https://stored/{number}', 'key': str(number)}
         with patch.object(service, '_download_reference_image', return_value=self.image), \
              patch.object(service, 'generate_still', side_effect=generate), \
              patch.object(service.storage_service, 'upload_bytes', side_effect=upload):
             self.run_stills()
-        self.assertEqual(order, ['generate1','upload1','generate2','upload2','generate3','upload3','generate4','upload4'])
-        self.assertEqual([c.kwargs['continuation'][:2] if c.kwargs['continuation'] else None for c in check.call_args_list],
-                         [None, (1,self.image), None, (3,self.image)])
+        self.assertEqual(set(order), {f'{phase}{n}' for phase in ('generate', 'upload') for n in range(1, 5)})
+        for n in range(1, 5): self.assertLess(order.index(f'generate{n}'), order.index(f'upload{n}'))
+        for predecessor, successor in ((1, 2), (1, 3), (3, 4)):
+            self.assertLess(order.index(f'upload{predecessor}'), order.index(f'generate{successor}'))
+        continuations = [c.kwargs['continuation'][:2] for c in check.call_args_list if c.kwargs['continuation']]
+        self.assertCountEqual(continuations, [(1, self.image), (3, self.image)])
 
     @patch.object(service.storage_service, 'upload_bytes', return_value={'url': 'https://stored', 'key': 'stored'})
     @patch.object(service, 'check_still', return_value={'approved': True, 'reason': 'Matches'})

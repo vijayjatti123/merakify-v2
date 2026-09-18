@@ -1,4 +1,7 @@
 from functools import lru_cache
+from collections import OrderedDict
+from threading import Lock
+import time
 from typing import BinaryIO, Optional, Union
 from urllib.parse import unquote, urlsplit
 
@@ -48,17 +51,32 @@ def _s3_client() -> BaseClient:
     )
 
 
+_signed_urls = OrderedDict()
+_signed_urls_lock = Lock()
+
+
 def asset_url(key: str, expires_in: Optional[int] = None) -> str:
     """Return a time-limited URL for an object in the private S3 bucket."""
     normalized_key = _object_key(key)
     ttl = expires_in if expires_in is not None else settings.aws_s3_presigned_url_ttl_sec
     if ttl <= 0:
         raise ValueError("Presigned URL expiry must be greater than zero")
-    return _s3_client().generate_presigned_url(
-        "get_object",
-        Params={"Bucket": _bucket(), "Key": normalized_key},
-        ExpiresIn=ttl,
-    )
+    client, bucket = _s3_client(), _bucket()
+    cache_key = (client, bucket, normalized_key, ttl)
+    with _signed_urls_lock:
+        now = time.monotonic()
+        cached = _signed_urls.get(cache_key)
+        if cached and cached[0] > now:
+            _signed_urls.move_to_end(cache_key)
+            return cached[1]
+        url = client.generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": normalized_key}, ExpiresIn=ttl)
+        # Rotate well before expiry. Bounded process-local cache; no credentials
+        # or signed URLs in logs, and no long-lived DB-cached access URLs.
+        _signed_urls[cache_key] = (now + min(300, ttl * 0.8), url)
+        _signed_urls.move_to_end(cache_key)
+        while len(_signed_urls) > 2048:
+            _signed_urls.popitem(last=False)
+        return url
 
 
 def refresh_asset_url(url: Optional[str]) -> Optional[str]:

@@ -296,3 +296,52 @@ other content, and runs full semantic QA again. Structural/dialogue/boundary rep
 retain the existing full-plan correction and dialogue protections. Invalid patches
 fail explicitly rather than silently applying broader changes. Existing exact-input
 checkpoints and provider system-prefix caching remain in use.
+
+### Shared ad direction
+
+The existing Cinematography call also returns a compact `ad_direction` and
+per-shot `shot_direction`; this is not another orchestrator or serial model call.
+The approved story, reviewed Clarifier direction, locked references and selected
+model remain authoritative. Direction makes the audience takeaway, visual approach,
+pacing, shot purpose, performance and product/prop staging explicit. Existing
+camera/lighting/action fields are reused rather than duplicated.
+
+Versioned directed shots have an explicit opening and ending instant. Still
+requests receive the opening only, not the whole action or final pose; video
+compilation receives the action/performance and both endpoints. Existing Compiler
+inputs retain the full clip cast; `opening_characters` separately determines which
+cast descriptions, Vault images and job-entity references reach the opening still.
+A character arriving later must not be inserted into its preview. Existing Compiler
+validation and model routing remain in place. Semantic QA receives the approved
+story and overall direction. Mechanical direction errors and literal adjacent
+framing duplicates join its existing bounded correction loop. Unresolved directed
+plans stop before media instead of silently proceeding with residual issues.
+Editing action/dialogue invalidates saved direction until that same QA/repair loop
+reviews it. Duration trimming cannot delete or rewrite directed story beats.
+
+The plan UI exposes these decisions in expandable, plain-language sections.
+Sound direction is explicitly marked `planned_only`: it does not generate, license
+or mix a music bed. That is a separate future assembly capability. Historical plans
+without versioned direction retain their existing adapters; this change neither
+replans them automatically nor regenerates accepted assets on deployment.
+This extends the README core planning and real-asset-generation milestone.
+
+### Focused semantic QA (local Ad Director follow-up)
+
+The Director owns creative shot choices. The existing QA call verifies source-scene coverage,
+complete speech, feasible performance and semantic continuity; deterministic code owns field,
+cast, camera-control and duration checks. Directed QA must provide scene coverage evidence;
+missing/invalid evidence is not checkpointed, so Retry can make a real new request. An off-screen
+character is not assumed to have vanished. Mechanical camera defects use typed camera-only
+patches, with the supported camera vocabulary provided, then the same semantic recheck.
+This extends the existing planning/QA milestone; no extra orchestrator or model tier is added.
+
+### Storyboard progress workspace
+
+The job view now uses a responsive storyboard grid, with individual preview reveal and
+an enlarge dialog. The existing Director saves a display-only `planning_draft` before QA;
+it survives reloads but is never placed in approved `shots`. The existing approval status
+gate continues to reject running or failed drafts. Final persistence replaces the draft.
+Polling exposes it while the existing event stream reports progress. Paused review keeps
+the draft readable and offers the existing Retry action. No extra AI calls are introduced.
+This extends the core planning/review UI milestone; it does not reduce provider runtime.

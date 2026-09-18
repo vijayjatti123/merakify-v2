@@ -48,11 +48,13 @@ def call_agent(system: str, user_content: str, fast: bool = False, max_tokens: i
                truncation_retry_tokens: int | None = None,
                on_response: Callable[[dict], None] | None = None) -> dict:
     from app.agents.execution import current_execution, execute
+    from app.agents.output_contracts import contract_for, validate
     scope = current_execution()
     if scope and request_timeout is None:
         return execute(call_agent, system, user_content, dict(fast=fast, max_tokens=max_tokens,
             truncation_retry_tokens=truncation_retry_tokens, on_response=on_response), scope)
     model = FAST_MODEL if fast else REASONING_MODEL
+    contract_name, schema = contract_for(system, user_content)
     # Director/Compiler scopes own retries and wall-clock budgets explicitly.
     client = _client if request_timeout is None else _client.with_options(timeout=request_timeout, max_retries=0)
     deadline = time.monotonic() + request_timeout if request_timeout is not None else None
@@ -68,6 +70,8 @@ def call_agent(system: str, user_content: str, fast: bool = False, max_tokens: i
         system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user_content}],
     )
+    if schema:
+        request['output_config'] = {'format': {'type': 'json_schema', 'schema': schema}}
     budgets = [max_tokens] + ([truncation_retry_tokens] if truncation_retry_tokens is not None else [])
     for attempt, budget in enumerate(budgets, 1):
         # Opt-in only. A completed truncated response is not a transport error;
@@ -90,9 +94,15 @@ def call_agent(system: str, user_content: str, fast: bool = False, max_tokens: i
                 "stop_reason": response.stop_reason,
                 "usage": usage.model_dump(mode="json") if usage is not None else None,
                 "visible_text_chars": len(text), "will_retry": will_retry,
+                "output_contract": contract_name,
             })
         if response.stop_reason != "max_tokens":
-            return _extract_json(text)
+            if response.stop_reason == 'refusal':
+                raise ValueError('The provider could not complete this planning request. Please revise or retry.')
+            result = _extract_json(text)
+            if schema:
+                validate(result, schema)
+            return result
         if will_retry:
             continue
         if truncation_retry_tokens is not None:

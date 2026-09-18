@@ -39,6 +39,7 @@ def check_mechanics(qa, shots, characters, minimum_shot_seconds=None):
             problems.append("silent shots retain the 9-second planning cap")
         elif shot.get("speech_mode") == "voiceover" and duration > 15:
             problems.append("voiceover visuals retain the 15-second planning cap; never split or delete dialogue")
+        duration_only = bool(problems)
         cast = shot.get("characters_in_shot", [])
         if not isinstance(cast, list) or any(not isinstance(n, str) or n not in names for n in cast):
             problems.append("characters_in_shot must contain only exact names from the reference library")
@@ -50,5 +51,6 @@ def check_mechanics(qa, shots, characters, minimum_shot_seconds=None):
             problems.append("silent shots must not carry spoken text")
         if problems:
             issues.append({"shot_number": shot["shot_number"], "problem": "; ".join(problems),
+                **({"code": "duration_bounds"} if duration_only and len(problems) == 1 else {}),
                 "fix_instruction": "Correct only these mechanical violations, retaining story, camera choices and all complete source dialogue: " + "; ".join(problems)})
     return {**qa, "approved": False, "issues": [*qa.get("issues", []), *issues]} if issues else qa

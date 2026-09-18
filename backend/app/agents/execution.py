@@ -59,8 +59,13 @@ def execute(call, system, content, kwargs, scope):
     db, job_id, emit, _ = scope
     stage = stage_name(system)
     from app.agents.llm_client import FAST_MODEL, REASONING_MODEL
-    key = hashlib.sha256(json.dumps(["planning-v1", FAST_MODEL if kwargs.get("fast") else REASONING_MODEL, system, content,
-        {k: v for k, v in kwargs.items() if k != "on_response"}], sort_keys=True).encode()).hexdigest()
+    from app.agents.output_contracts import contract_for
+    contract = contract_for(system, content)
+    key_parts = ["planning-v1", FAST_MODEL if kwargs.get("fast") else REASONING_MODEL, system, content,
+                 {k: v for k, v in kwargs.items() if k != "on_response"}]
+    if contract[1] is not None:
+        key_parts.append(contract)  # Opt-in schema changes invalidate only affected calls.
+    key = hashlib.sha256(json.dumps(key_parts, sort_keys=True).encode()).hexdigest()
     cached = job_service.get_agent_checkpoint(db, job_id, key)
     if cached is not None:
         emit("pipeline_timing", json.dumps({"stage": stage, "phase": "checkpoint_reused", "elapsed_sec": 0}))
@@ -128,6 +133,17 @@ def execute(call, system, content, kwargs, scope):
                 "shot_assembler": {"transitions"}}.get(stage, set())
             if not isinstance(value, dict) or not required <= value.keys():
                 raise ValueError("Planning returned incomplete structured data. Please retry this step.")
+            if stage == 'qa_agent':
+                try:
+                    review = json.loads(content)
+                except (ValueError, TypeError):
+                    review = None  # Legacy review text has no coverage contract.
+                if isinstance(review, dict) and review.get('ad_direction'):
+                    from app.services.ad_direction import check_coverage
+                    # Invalid evidence must not become a checkpoint that every
+                    # Retry reuses forever. Persist genuine semantic rejections;
+                    # the Director still owns their normal correction loop.
+                    check_coverage(value, review.get('shots', []), review.get('approved_story'))
             job_service.save_agent_checkpoint(db, job_id, key, value)
             emit("pipeline_timing", json.dumps({"stage": stage, "phase": "completed", "attempt": attempt,
                  "elapsed_sec": round(time.monotonic() - started, 3)}))

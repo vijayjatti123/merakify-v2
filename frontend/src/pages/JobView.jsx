@@ -1,12 +1,14 @@
 import { AlertTriangle, Check, Clapperboard, Clock3, Loader2, Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Alert, AlertTitle, Button, Card, Stepper, Step, StepLabel, Box, Stack, Typography } from "@mui/material";
+import { Alert, AlertTitle, Button, Card, Stepper, Step, StepLabel, Box, Stack, Typography, Chip, Dialog, DialogTitle, DialogContent } from "@mui/material";
+import StoryboardDraft from "../components/StoryboardDraft";
 import ActionProgress from "../components/ActionProgress";
 import ShotImageActions from "../components/ShotImageActions";
+import { AdDirectionPlan, ShotDirectionPlan } from "../components/AdDirectionPlan";
+import ShotPreviewImage from "../components/ShotPreviewImage";
 import { friendlyMessage, progressMessage } from "../utils/presentation";
 import { retryFailedJob, retryShotPreview, retryPreviewPreparation } from "../api/client";
 import { previewState, previewSummary } from "../utils/previewState";
-
 import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, assembleFinalVideo } from "../api/client";
 import FaceEnhancement, { ShotVideo } from "../components/FaceEnhancement";
 import { CAMERA_VOCABULARY } from "../utils/cameraVocabulary";
@@ -65,6 +67,7 @@ function FinalVideo({ data, shots, busy, onAssemble }) {
 const isCompilerTimeout = (text) => /Shot Prompt Compiler.*(?:deadline exceeded|timed?\s*out)/i.test(text || "");
 
 export default function JobView({ jobId, onReset, initialJob = null, onRetry }) {
+  const [expandedPreview, setExpandedPreview] = useState(null);
   const [trace, setTrace] = useState([]);
   const [final, setFinal] = useState(initialJob);
   const [retrying, setRetrying] = useState(false);
@@ -81,7 +84,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const [videoSubmitting, setVideoSubmitting] = useState(null);
   const [videoHints, setVideoHints] = useState({});
   const [previewSubmitting, setPreviewSubmitting] = useState(null);
-  const videoBusy = final?.result?.audio_assembly_pending || final?.result?.preview_preparation_pending || final?.status === "running" || final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
+  const videoBusy = !final || final?.result?.audio_assembly_pending || final?.result?.preview_preparation_pending || final?.status === "running" || final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
 
   useEffect(() => {
     if (!videoBusy && !final?.result?.shots?.some(s => s.preview_replacement?.status === "working")) return;
@@ -153,6 +156,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const errored = final?.status === "error";
   const result = final?.result;
   const shots = result?.shots || [];
+  const draft = result?.planning_draft;
   const editingSource = shots.find(shot => shot.shot_number === editingShot);
   const hasUnsavedEdit = Boolean(editingSource && (
     editValues.description !== (editingSource.description || "") ||
@@ -266,10 +270,17 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
 
   return (
     <>
-      <section className="generation-area">
+      <section className="generation-area storyboard-progress">
         <Box sx={{ mb: 3 }}><Stepper activeStep={currentStep} alternativeLabel>
           {["Your idea & plan", "Shot previews", "Video clips", "Final video"].map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
         </Stepper></Box>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2, '& .MuiChip-root': { maxWidth: '100%' } }} aria-label="Your ad settings">
+          <Chip label={result?.format?.format || 'Your ad'} />
+          {(result?.format?.duration_target_sec || draft?.target_duration_sec) && <Chip label={`${result?.format?.duration_target_sec || draft.target_duration_sec}s target`} />}
+          {final?.aspect_ratio && <Chip label={final.aspect_ratio} />}
+          {(draft?.characters || result?.continuity?.characters?.map(c => c.name) || []).map(name => <Chip key={name} label={name} variant="outlined" />)}
+        </Box>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Your progress is saved. You can return to this job from Job History.</Typography>
         {approved ? (
           audioReady && !previews.busy && !canResumePreviews ? (
             <FinalVideo data={result?.final_video} shots={shots} busy={assembling || result?.final_video?.status === "running"} onAssemble={handleAssemble} />
@@ -286,25 +297,25 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
         ) : (
           <Card className="director-progress-card">
             <div className="director-progress-icon">
-              {compilerTimeout ? <AlertTriangle size={19} /> : done ? <Check size={19} /> : <Loader2 size={19} className="animate-spin" />}
+              {errored ? <AlertTriangle size={19} /> : done ? <Check size={19} /> : <Loader2 size={19} className="animate-spin" />}
             </div>
             <div>
               <p className="eyebrow">{done ? "Ready for review" : "Your video"}</p>
-              <h2>{compilerTimeout ? "Planning paused" : done ? "Your written plan is ready" : "Building your shot plan"}</h2>
-              <p>{done ? (previews.ready === previews.total ? "Your preview images are ready too. Review the plan, then continue to video clips." : "Review the shots below, then click 'Create shot previews' to see them as images. This prepares any speech too; it does not generate video clips.") : progressNote || "Preparing the creative direction…"}</p>
-              {!done && !errored && <ActionProgress label={`${progressNote}…`} />}
+              <h2>{errored ? "Planning paused" : done ? "Your written plan is ready" : draft ? "Checking your storyboard" : "Directing your story"}</h2>
+              <p>{done ? (previews.ready === previews.total ? "Your preview images are ready too. Review the plan, then continue to video clips." : "Review the shots below, then click 'Create shot previews' to see them as images. This prepares any speech too; it does not generate video clips.") : errored ? "Your work is saved. Retry planning to continue." : draft ? "Checking every story moment, spoken line and scene connection." : progressNote || "Preparing the creative direction…"}</p>
+              {!done && !errored && <ActionProgress label={draft ? "Checking your plan…" : `${progressNote}…`} />}
+              {errored && !approved && <Button variant="contained" disabled={retrying} onClick={handleTimeoutRetry}>Retry planning</Button>}
             </div>
           </Card>
         )}
       </section>
 
-      <Card component="aside" className="shot-panel" aria-label="Shot plan">
+      <Card component="section" className="shot-panel storyboard-panel" aria-label="Your storyboard">
         <div className="shot-panel-header">
           <div>
-            <p className="eyebrow">Shot plan</p>
-            <h2>{shots.length ? `${shots.length} ${shots.length === 1 ? "shot" : "shots"}` : "In progress"}</h2>
+            <p className="eyebrow">Your storyboard</p>
+            <h2>{shots.length ? `${shots.length} ${shots.length === 1 ? "shot" : "shots"}` : draft ? `${draft.shots.length} draft shots` : "Taking shape"}</h2>
           </div>
-          <Button type="button" onClick={onReset} className="icon-button" aria-label="Start over"><X size={17} /></Button>
         </div>
 
         <details className="px-4 py-3 text-sm shrink-0">
@@ -328,7 +339,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
           </div>
         ))}
 
-        {!done && !errored && !shots.length && (
+        {!done && !errored && !shots.length && !draft && (
           <div className="panel-waiting">
             <Loader2 size={22} className="animate-spin" />
             <p>{progressNote || "The first shots will appear here when the plan is complete."}</p>
@@ -342,6 +353,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
         {retrying && <ActionProgress label="Restarting your video plan…" />}
         {retryError && <Alert severity="error" sx={{ m: 2 }}>{friendlyMessage(retryError)}</Alert>}
 
+        {draft && !shots.length && <StoryboardDraft draft={draft} stopped={errored} />}
         {result && shots.length > 0 && (
           <>
             {previews.failed > 0 && <Alert severity="warning" sx={{ m: 2 }}>{previews.failed} preview{previews.failed === 1 ? " needs" : "s need"} another try. Use Retry preview on the affected shot. Your other previews are kept.</Alert>}
@@ -350,6 +362,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
               <p>{result.script.logline}</p>
             </div>
 
+            <AdDirectionPlan direction={result.ad_direction} />
             <div className="qa-banner" data-approved={result.qa.approved}>
               <Check size={14} />
               <span>{result.qa.approved ? "Consistency checked" : "Some details need your review"} · {result.assembly.total_duration_sec}s{result.assembly.provisional ? " · Timing will update after audio" : ""}</span>
@@ -391,16 +404,17 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       </>
                     )}
 
+                    {!isEditing && <ShotDirectionPlan shot={shot} />}
                     {shot.experimental_audio_sync && <p className="audio-warning">Speech timing is experimental</p>}
                     {visualStatus === "error" && shot.error_message && <Alert severity="error">{friendlyMessage(shot.error_message, "This shot could not be completed. Please try again.")}</Alert>}
                     <div className="shot-characters">
-                      <span>Characters present</span>
+                      <span>{shot.direction_version === 1 ? "Characters in this clip" : "Characters present"}</span>
                       <p>{shot.characters_in_shot?.length ? shot.characters_in_shot.join(", ") : "None"}</p>
                     </div>
                     {shot.still_frame_url ? (
                       <figure className="my-3" aria-label={`Opening still for shot ${shot.shot_number}`}>
-                        <img src={shot.still_frame_url} alt={`Shot ${shot.shot_number} opening frame — ${shot.description}`} className="w-full rounded-md" loading="lazy" />
-                        <figcaption className="mt-1 text-xs" style={{ color: COLORS.muted }}>Opening still preview</figcaption>
+                        <ShotPreviewImage shot={shot} onOpen={() => setExpandedPreview(shot)} />
+                        <figcaption className="mt-1 text-xs" style={{ color: COLORS.muted }}>Opening preview · click to enlarge</figcaption>
                       </figure>
                     ) : null}
                     {approved && (shot.still_frame_url || shot.preview_input || shot.compiled_prompt) && <ShotImageActions jobId={jobId} shot={shot} aspectRatio={result.aspect_ratio || final.aspect_ratio} disabled={previews.busy || videoBusy || editBlocksApproval} onRefresh={async () => setFinal(await getJob(jobId))} />}
@@ -478,6 +492,11 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
 
         {error && <Alert severity="error" sx={{ m: 2 }}>{friendlyMessage(error)}</Alert>}
       </Card>
+      <Dialog open={Boolean(expandedPreview)} onClose={() => setExpandedPreview(null)} maxWidth="lg" fullWidth>
+        <DialogTitle>Shot {expandedPreview?.shot_number} preview <Button onClick={() => setExpandedPreview(null)} sx={{ float: 'right' }}>Close preview</Button></DialogTitle>
+        <DialogContent><img src={expandedPreview?.still_frame_url} alt={expandedPreview?.description || 'Shot preview'} style={{ width: '100%', borderRadius: 16 }} /></DialogContent>
+      </Dialog>
+      {(!done && !approved) && <Box component="footer" className="storyboard-wait-footer" role="status">{errored ? 'Planning paused · your work is saved' : draft ? 'Checking your draft · no images or videos are being generated yet' : 'Directing your story · your progress is saved'}</Box>}
       {(done || canResumePreviews) && shots.length > 0 && <Box component="footer" data-testid="job-primary-action" sx={{ position: "fixed", bottom: 0, left: { xs: 0, md: 240 }, right: 0, zIndex: 1100, bgcolor: "background.paper", borderTop: 1, borderColor: "divider", p: 2, display: "flex", flexWrap: "wrap", gap: 2, alignItems: "center", justifyContent: "space-between", boxShadow: "0 -6px 28px #0000000a" }}>
         <Box role="status">{editingShot !== null ? <>
           <Typography fontWeight={600}>Editing shot {editingShot}</Typography>

@@ -18,6 +18,8 @@ from PIL import Image, ImageOps
 
 from app.config import settings
 from app.services import storage_service
+from app.services.ad_direction import opening_cast
+from app.services.preview_reference_cache import ReferenceCache
 from app.services.character_image_service import GeneratedCharacterImage, _download_reference_image
 
 
@@ -322,7 +324,7 @@ def match_entities(result, shot, visual):
                 continue
             catalog[kind + ":" + " ".join(_words(entity["name"]))] = (kind, entity)
     text = _words(visual)
-    visible = {" ".join(_words(n)) for n in shot.get("characters_in_shot", [])}
+    visible = {" ".join(_words(n)) for n in opening_cast(shot)}
     matches = {}
     for key, (kind, entity) in catalog.items():
         words = _words(entity["name"])
@@ -356,14 +358,25 @@ def _continuous_pair(previous, shot, result):
                 re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I))
 
 
-def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on_progress=None, feedback_by_shot=None):
+def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on_progress=None, feedback_by_shot=None, reference_cache=None, on_accepted=None):
     """Keep the plan reviewable, but explicitly mark missing output as failed."""
     characters = {c["name"].strip().casefold(): c for c in result.get("continuity", {}).get("characters", [])}
     # References live only in this job's result JSON, pointing to its own stills.
     # Rebuild on each full still pass so revised plans cannot inherit stale anchors.
     reference_map = result.setdefault("entity_references", {}) if shot_numbers is not None else {}
     result["entity_references"] = reference_map
-    reference_bytes = {}
+    cache = reference_cache if reference_cache is not None else ReferenceCache()
+    def reference(url, number):
+        started = time.monotonic()
+        def load():
+            downloaded = _download_reference_image(fresh_reference(url))
+            emit("preview_timing", json.dumps({"shot_number": number, "phase": "reference_download",
+                "elapsed_sec": round(time.monotonic() - started, 3), "bytes": len(downloaded.data)}))
+            return downloaded
+        image, hit = cache.get(url, load)
+        emit("preview_timing", json.dumps({"shot_number": number, "phase": "reference_ready",
+            "cache_hit": hit, "elapsed_sec": round(time.monotonic() - started, 3)}))
+        return image
     from app.db import SessionLocal
     from app.services.product_service import job_references
     with SessionLocal() as product_db:
@@ -382,7 +395,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
         if _continuous_pair(previous, shot, result):
             if shot_numbers is not None and previous.get("still_frame_url"):
                 try:
-                    previous_image = _download_reference_image(fresh_reference(previous["still_frame_url"]))
+                    previous_image = reference(previous["still_frame_url"], shot["shot_number"])
                 except Exception:
                     emit("still_frame", f"WARNING: Shot {shot['shot_number']}: previous still could not be loaded; no action anchor used.")
             if previous.get("still_frame_url") and previous_image is not None:
@@ -393,6 +406,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
         previous_image = None  # A skipped/failed shot must break the anchor chain.
         shot["still_frame_url"] = None
         shot.pop("still_frame_key", None)
+        shot.pop("still_frame_display", None)
         shot.pop("still_frame_source_hash", None)
         shot.pop("still_frame_warning", None)
         shot["still_frame_status"] = "pending"
@@ -411,19 +425,18 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
             references = []
             if products:
                 shot["approved_product_references"] = products
-            for name in shot.get("characters_in_shot", []):
+            for name in opening_cast(shot):
                 character = characters.get(name.strip().casefold(), {})
                 if character.get("character_id"):
                     if not character.get("image_url"):
                         raise StillFrameError("Locked character has no reference image")
-                    references.append((name, _download_reference_image(fresh_reference(character["image_url"])),
+                    references.append((name, reference(character["image_url"], number),
                                        character["image_url"], 0, 0))
             for product in products:
                 key = product["object_key"]
-                if key not in reference_bytes:
-                    reference_bytes[key] = _download_reference_image(storage_service.asset_url(key))
+                product_image = reference(storage_service.asset_url(key), number)
                 references.append(("Product " + product["name"] + "; preserve packaging, geometry, color, logo and printed text. Use only when this shot calls for the product; never copy the reference layout or unrelated props",
-                                   reference_bytes[key], "product:" + key, 0, 0))
+                                   product_image, "product:" + key, 0, 0))
                 emit("still_frame", f"Shot {number}: approved product reference {product['product_id']} attached for generation and QA.")
             if products:
                 visual += "\nApproved product images lock product identity, NOT this scene's framing. Do not insert a product into a shot that does not call for it."
@@ -431,10 +444,9 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                     raise StillFrameError("Too many locked character/product references for this shot; reduce the selected references.")
             for entity_id in entities:
                 if entity_id in reference_map and reference_map[entity_id]["shot_number"] < number:
-                    if entity_id not in reference_bytes:
-                        reference_bytes[entity_id] = _download_reference_image(fresh_reference(reference_map[entity_id]["url"]))
+                    entity_image = reference(reference_map[entity_id]["url"], number)
                     references.append(("Job entity " + entity_id + "; preserve only this entity, not the old shot layout",
-                                       reference_bytes[entity_id], reference_map[entity_id]["url"],
+                                       entity_image, reference_map[entity_id]["url"],
                                        1, reference_map[entity_id]["shot_number"]))
                     emit("still_frame", f"Shot {number}: conditioning {entity_id} from job reference shot {reference_map[entity_id]['shot_number']}.")
             if entities:
@@ -472,7 +484,10 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                     continue
                 emit("preview_timing", json.dumps({"shot_number": number, "phase": "image_request_completed", "attempt": attempt + 1,
                     "elapsed_sec": round(time.monotonic() - started, 3)}))
+                decoded_at = time.monotonic()
                 dimensions = check_dimensions(image, aspect_ratio)
+                emit("preview_timing", json.dumps({"shot_number": number, "phase": "image_decode",
+                    "attempt": attempt + 1, "elapsed_sec": round(time.monotonic() - decoded_at, 3)}))
                 if not dimensions["matches"]:
                     feedback = (f"Decoded image is {dimensions['width']}x{dimensions['height']}; expected "
                                 f"{aspect_ratio} within 2% ratio tolerance. Generate the correct aspect ratio.")
@@ -503,12 +518,16 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
             ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[image.content_type]
             key = f"jobs/{job_id}/stills/{number}-{uuid.uuid4().hex}.{ext}"
             started = time.monotonic()
-            stored = storage_service.upload_bytes(key=key, body=image.data, content_type=image.content_type)
+            stored = storage_service.upload_bytes(key=key, body=image.data, content_type=image.content_type,
+                cache_control="private, max-age=300")
             emit("preview_timing", json.dumps({"shot_number": number, "phase": "stored", "elapsed_sec": round(time.monotonic() - started, 3)}))
             shot.update(still_frame_url=stored["url"], still_frame_key=stored["key"],
                         still_frame_source_hash=shot_fingerprint(shot), still_frame_status="ready")
+            if on_accepted:
+                on_accepted(number, image, stored["key"])
             # Reuse the exact bytes uploaded at this URL; no redundant S3 download.
             previous_image = image
+            cache.seed(stored["url"], image)
             observed = verdict.get("visible_entities", [])
             if not isinstance(observed, list):
                 observed = []
@@ -517,7 +536,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                     reference_map[entity_id] = {"name": entities[entity_id], "url": stored["url"],
                                                 "key": stored["key"], "shot_number": number,
                                                 "source_hash": shot_fingerprint(shot)}
-                    reference_bytes[entity_id] = image
+                    cache.seed(stored["url"], image)
                     emit("still_frame", f"Shot {number}: established job-only reference for {entity_id}.")
                 elif entity_id not in reference_map:
                     emit("still_frame", f"WARNING: Shot {number}: QA did not confirm visibility of {entity_id}; no job reference established.")
@@ -534,11 +553,24 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
     return result["shots"]
 
 
+def dependency_priority(ordered, deps, pending):
+    """Prefer ready work that unlocks more pending work; never bypass an edge."""
+    def descendants(number):
+        reached, frontier = set(), {number}
+        while frontier:
+            children = {n for n in pending if deps.get(n, set()) & frontier} - reached - {number}
+            reached.update(children)
+            frontier = children
+        return len(reached)
+    return sorted(ordered, key=lambda s: (-descendants(s['shot_number']), s['shot_number']))
+
+
 def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progress=None, feedback_by_shot=None):
     """Two bounded workers; only the owning thread persists progress or emits DB events.
 
-    Dependencies serialize shared job entities and accepted action anchors. Each
-    worker receives a snapshot, never the owner's mutable plan or DB session.
+    Potential entity seeders serialize until QA establishes a canonical reference;
+    continuous action anchors remain sequential. Each worker receives a snapshot,
+    never the owner's mutable plan or DB session.
     """
     from app.services.preview_plan import preview_input, preview_visual
     ordered = sorted(result.get("shots", []), key=lambda s: s["shot_number"])
@@ -549,18 +581,27 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
             shot["preview_input"] = facts
     invalidate_changed_stills(result)
     references = result.setdefault("entity_references", {})
-    deps, previous_entities = {}, {}
-    for index, shot in enumerate(ordered):
-        number = shot["shot_number"]
-        visual = preview_visual(shot["preview_input"]) if shot.get("preview_input") else visual_description(shot["compiled_prompt"]) if shot.get("compiled_prompt") else ""
-        dependencies = set()
-        for entity in match_entities(result, shot, visual):
-            if entity in previous_entities:
-                dependencies.add(previous_entities[entity])
-            previous_entities[entity] = number
-        if index and _continuous_pair(ordered[index - 1], shot, result):
-            dependencies.add(ordered[index - 1]["shot_number"])
-        deps[number] = dependencies & targets
+    def dependency_graph():
+        deps, previous_entities = {}, {}
+        for index, shot in enumerate(ordered):
+            number = shot["shot_number"]
+            visual = preview_visual(shot["preview_input"]) if shot.get("preview_input") else visual_description(shot["compiled_prompt"]) if shot.get("compiled_prompt") else ""
+            dependencies = set()
+            for entity in match_entities(result, shot, visual):
+                anchor = references.get(entity, {}).get("shot_number")
+                if anchor is not None and anchor < number:
+                    dependencies.add(anchor)
+                elif entity in previous_entities:
+                    # Until QA establishes an anchor, serialize potential seeders.
+                    # A failed/unseen seed cannot license ungrounded parallelism.
+                    dependencies.add(previous_entities[entity])
+                previous_entities[entity] = number
+            if index and _continuous_pair(ordered[index - 1], shot, result):
+                dependencies.add(ordered[index - 1]["shot_number"])
+            deps[number] = dependencies
+        return deps
+    deps = dependency_graph()
+    cache = ReferenceCache()
     pending = set(targets)
     done, futures = set(), {}
     events = queue.Queue()
@@ -575,37 +616,56 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
         number = shot["shot_number"]
         if number not in pending:
             continue
-        shot["preview_dependencies"] = dependencies_for(number)
-        if shot.get("still_frame_url") and shot.get("still_frame_source_hash") == shot_fingerprint(shot):
-            pending.remove(number)
-            done.add(number)
-            emit("still_frame", f"Shot {number}: unchanged accepted preview reused.")
-        else:
+        if not shot.get("still_frame_url"):
             shot["still_frame_status"] = "pending"
-            shot["still_frame_url"] = None
-            shot.pop("still_frame_key", None)
     persist()
-    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="still-preview") as pool:
+    display_tasks = queue.Queue()
+    def display_job(number, image, key):
+        from app.services.preview_display import store_variants
+        try:
+            return store_variants(image, key, emit=lambda k, n: events.put((k, n)), shot_number=number)
+        except Exception as error:
+            events.put(("still_frame", f"Shot {number}: display derivative unavailable ({type(error).__name__}); original retained."))
+            return None
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="preview-display") as display_pool, \
+         ThreadPoolExecutor(max_workers=2, thread_name_prefix="still-preview") as pool:
+        def accepted(number, image, key):
+            display_tasks.put((number, key, display_pool.submit(display_job, number, image, key)))
         while pending or futures:
-            for shot in ordered:
+            pending_before = len(pending)
+            deps = dependency_graph()
+            for shot in dependency_priority(ordered, deps, pending):
                 number = shot["shot_number"]
                 if len(futures) >= 2:
                     break
-                if number not in pending or not deps[number] <= done:
+                if number not in pending or not (deps[number] & targets) <= done:
                     continue
                 pending.remove(number)
                 shot["preview_dependencies"] = dependencies_for(number)
+                if shot.get("still_frame_url") and shot.get("still_frame_source_hash") == shot_fingerprint(shot):
+                    done.add(number)
+                    emit("still_frame", f"Shot {number}: unchanged accepted preview reused.")
+                    continue
                 shot["still_frame_status"] = "generating"
+                shot["still_frame_url"] = None
+                shot.pop("still_frame_key", None)
+                shot.pop("still_frame_display", None)
+                emit("preview_timing", json.dumps({"shot_number": number, "phase": "dependencies_ready",
+                    "dependencies": sorted(deps[number])}))
                 persist()
                 snapshot = copy.deepcopy(result)
                 started = time.monotonic()
                 def work(snapshot=snapshot, number=number):
                     _generate_still_frames_serial(snapshot, job_id=job_id,
-                        emit=lambda k, n: events.put((k, n)), shot_numbers={number}, feedback_by_shot=feedback_by_shot)
+                        emit=lambda k, n: events.put((k, n)), shot_numbers={number}, feedback_by_shot=feedback_by_shot, reference_cache=cache, on_accepted=accepted)
                     return snapshot
                 futures[pool.submit(work)] = (number, started)
-            if not futures and pending:
-                raise StillFrameError("Preview dependency graph cannot advance")
+            if not futures:
+                if pending:
+                    if len(pending) == pending_before:
+                        raise StillFrameError("Preview dependency graph cannot advance")
+                    continue  # Reused upstream previews may have unlocked work.
+                break
             complete, _ = wait(futures, timeout=.1, return_when=FIRST_COMPLETED)
             while not events.empty():
                 emit(*events.get_nowait())
@@ -623,4 +683,12 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
                 persist()
                 emit("preview_timing", json.dumps({"shot_number": number, "phase": "completed",
                     "elapsed_sec": round(time.monotonic() - started, 3), "status": target.get("still_frame_status")}))
+        while not display_tasks.empty():
+            number, key, future = display_tasks.get_nowait()
+            display = future.result()
+            if display and by_number[number].get("still_frame_key") == key:
+                by_number[number]["still_frame_display"] = display
+        while not events.empty():
+            emit(*events.get_nowait())
+        persist()
     return result["shots"]
