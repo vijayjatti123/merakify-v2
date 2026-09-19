@@ -1,6 +1,6 @@
-"""Validate EvoLink Seedance audio assets before a paid generation submission.
+"""Validate EvoLink Seedance and fal H3 Max audio assets before a paid generation submission.
 
-Its reference contract requires 2–15 second WAV/MP3 clips. Short speech is
+Their reference contracts require 2–15 second WAV/MP3 clips. Short speech is
 preserved at its original speed; only trailing silence is added to a COPY.
 The approved speech asset, its duration and the requested video stay unchanged.
 """
@@ -23,7 +23,7 @@ MAX_SECONDS = 15.0
 
 def inspect_and_pad(data, expected_duration):
     if not data or len(data) > MAX_BYTES:
-        raise ValueError("The speech reference is empty or exceeds Seedance's 15 MB limit. Recreate this shot's speech.")
+        raise ValueError("The speech reference is empty or exceeds the 15 MB reference limit. Recreate this shot's speech.")
     try:
         with wave.open(io.BytesIO(data), 'rb') as source:
             params = source.getparams()
@@ -57,7 +57,7 @@ def inspect_and_pad(data, expected_duration):
         except Exception as error:
             raise ValueError("The speech reference cannot be decoded as a supported WAV/MP3 of at most 15 seconds. Recreate this shot's speech.") from error
     if not 0 < duration <= MAX_SECONDS:
-        raise ValueError("Seedance needs reference speech of at most 15 seconds. Split longer dialogue into complete lines.")
+        raise ValueError("The video model needs reference speech of at most 15 seconds. Split longer dialogue into complete lines.")
     expected = float(expected_duration)
     if not math.isfinite(expected) or abs(expected - duration) > 0.05:
         raise ValueError("The speech file does not match its saved duration. Recreate this shot's speech before generating video.")
@@ -80,19 +80,21 @@ def inspect_and_pad(data, expected_duration):
 
 def prepare(translated, shot, job_id):
     """Called after the duplicate-submission claim, before any paid API call."""
-    if translated.get('provider') != 'evolink' or not translated.get('audio_model', '').startswith('seedance_'):
+    h3 = translated.get('audio_model') == 'h3_max_fal'
+    if not h3 and (translated.get('provider') != 'evolink' or not translated.get('audio_model', '').startswith('seedance_')):
         return None
     request = translated['request']
-    if len(request.get('audio_urls', [])) != 1:
+    audio_key = 'reference_audio_urls' if h3 else 'audio_urls'
+    if len(request.get(audio_key, [])) != 1:
         raise ValueError("This speaking-shot path requires exactly one approved speech reference.")
     try:
-        with httpx.stream('GET', request['audio_urls'][0], timeout=60, follow_redirects=True) as response:
+        with httpx.stream('GET', request[audio_key][0], timeout=60, follow_redirects=True) as response:
             response.raise_for_status()
             chunks, size = [], 0
             for chunk in response.iter_bytes():
                 size += len(chunk)
                 if size > MAX_BYTES:
-                    raise ValueError("The speech reference exceeds Seedance's 15 MB limit. Recreate this shot's speech.")
+                    raise ValueError("The speech reference exceeds the 15 MB reference limit. Recreate this shot's speech.")
                 chunks.append(chunk)
         padded, evidence = inspect_and_pad(b''.join(chunks), shot['dialogue_audio_duration_sec'])
     except ValueError:
@@ -105,7 +107,7 @@ def prepare(translated, shot, job_id):
         try:
             asset = storage_service.upload_bytes(key, padded, content_type='audio/wav')
             # Provider references need enough URL lifetime for queue + processing.
-            request['audio_urls'] = [storage_service.asset_url(asset['key'], expires_in=86400)]
+            request[audio_key] = [storage_service.asset_url(asset['key'], expires_in=86400)]
         except Exception as error:
             raise ValueError("We couldn't prepare this short speech reference. No video request was sent; try again.") from error
         evidence['reference_key'] = key

@@ -85,7 +85,7 @@ class JobCreate(BaseModel):
     color_grade: ColorGrade = "None"
     quality: Literal["480p", "720p"] = "720p"
     language: str = "English"
-    ai_model: Literal["Wan 2.5", "Seedance 2.0", "Kling 3.0", "Seedance 2.5", "Veo 3.1", "Sora 2"] = (
+    ai_model: Literal["MiniMax H3 Max", "Wan 2.5", "Seedance 2.0", "Kling 3.0", "Seedance 2.5", "Veo 3.1", "Sora 2"] = (
         "Seedance 2.5"
     )
     video_model: Optional[VideoModel] = None
@@ -98,6 +98,8 @@ class JobCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_request(self):
+        if not ({"ai_model", "video_model"} & self.model_fields_set):
+            self.ai_model, self.video_model = "MiniMax H3 Max", "h3_max_fal"
         if (self.clarifier_session_id is None) != (self.clarifier_revision is None):
             raise ValueError("Clarifier session and revision must be supplied together")
         validate_selection(self.video_model, self.ai_model, self.language, self.quality)

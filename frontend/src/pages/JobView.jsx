@@ -453,7 +453,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     {videoReviewWarnings(shot).map((warning) => <Alert severity="info" key={warning} data-testid={`video-review-note-${shot.shot_number}`}>{warning}</Alert>)}
                     {approved && !errored && (shot.has_dialogue || result.video_model || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && shot.still_frame_url && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
                       <Button id={`generate-video-${shot.shot_number}`} type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
-                        {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate speaking video" : `Generate video · ${Math.max(4, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
+                        {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate speaking video" : `Generate video · ${Math.max(5, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
                       </Button>
                     )}
                     <div className="shot-technical">
@@ -468,7 +468,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       </details>
                     )}
 
-                    {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && shot.video_provider !== "hedra" && shot.video_url && (
+                    {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && result.video_model !== "h3_max_fal" && shot.video_provider !== "hedra" && shot.video_url && (
                       <div className="my-3 text-xs">
                         <label className="block">What should change? (required for Edit Shot)
                           <textarea required aria-label={`Edit hint for shot ${shot.shot_number}`} maxLength={700} value={videoHints[shot.shot_number] || ""} onChange={(event) => setVideoHints((current) => ({ ...current, [shot.shot_number]: event.target.value }))} className="block w-full rounded-md p-2 mt-1" style={{ background: COLORS.field, color: COLORS.text }} placeholder="For example: make the lighting warmer" />
@@ -491,7 +491,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                           {(shot.video_url || ["error", "failed"].includes(shot.video_status)) && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate video
                           </Button>}
-                          {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && shot.video_provider !== "hedra" && shot.video_url && (
+                          {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && result.video_model !== "h3_max_fal" && shot.video_provider !== "hedra" && shot.video_url && (
                             <Button type="button" onClick={() => handleRegenerate(shot.shot_number, true)} disabled={!(videoHints[shot.shot_number] || "").trim() || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action" style={{ background: "transparent", border: `1px solid ${COLORS.border}`, fontSize: "0.62rem", padding: "0.3rem 0.45rem" }} aria-label={`Edit shot video ${shot.shot_number}`}>
                               Edit Shot
                             </Button>

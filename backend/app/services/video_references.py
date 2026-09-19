@@ -80,7 +80,7 @@ def build(result, shot, *, limit, tag_style, refresh):
             lookup[key] = len(entries)
             entries.append({"source": key, "url": refresh(url), "roles": [{"kind": kind, "id": asset_id, "instruction": role}]})
     for index, entry in enumerate(entries):
-        entry["tag"] = f"<IMAGE_REF_{index}>" if tag_style == "omni" else f"@{'Image' if tag_style == 'fal' else 'image'}{index+1}"
+        entry["tag"] = f"Image {index+1}" if tag_style == "h3" else f"<IMAGE_REF_{index}>" if tag_style == "omni" else f"@{'Image' if tag_style == 'fal' else 'image'}{index+1}"
     instructions = "Reference roles (identity views never introduce extra people):\n" + "\n".join(
         f"{e['tag']}: " + "; ".join(r["instruction"] for r in e["roles"]) + "." for e in entries)
     return {"images": [e["url"] for e in entries], "instructions": instructions,
@@ -89,7 +89,7 @@ def build(result, shot, *, limit, tag_style, refresh):
 
 
 def check_prompt(prompt, manifest, *, omni=False):
-    tags = set(re.findall(r"<IMAGE_REF_\d+>|@(?:Image|image)\d+", prompt))
+    tags = set(re.findall(r"<IMAGE_REF_\d+>|@(?:Image|image)\d+|\bImage \d+\b", prompt))
     if tags - {e["tag"] for e in manifest}:
         raise ValueError("Video instructions contain an unbound image reference tag")
     if omni and len(prompt) > 20000:

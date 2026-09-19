@@ -18,6 +18,7 @@ from app.services import video_references
 
 DEFAULT = "seedance_evolink"
 MODELS = {
+    "h3_max_fal": ("fal", "minimax/h3-max/reference-to-video"),
     DEFAULT: ("evolink", "seedance-2.0-reference-to-video"),
     "seedance_fal": ("fal", "bytedance/seedance-2.0/reference-to-video"),
     "seedance_fast_evolink": ("evolink", "seedance-2.0-fast-reference-to-video"),
@@ -74,6 +75,9 @@ def translate(result, shot, choice=None):
     choice = selected or choice or shot.get("video_audio_model") or DEFAULT
     if choice not in MODELS:
         raise ValueError("Choose a supported audio-reference video model")
+    if choice == "h3_max_fal":
+        from app.services.h3_video_service import translate as h3_translate
+        return h3_translate(result, shot)
     provider, model = MODELS[choice]
     if not shot.get("still_frame_url") or shot.get("still_frame_status") not in (None, "ready"):
         raise ValueError("Create or retry this shot's preview before generating its video")
@@ -185,4 +189,4 @@ def poll(shot):
     result = fal_request("GET", shot["video_fal_response_url"])
     return {"status": "completed", "model": shot["video_model"],
             "results": [result["video"]["url"]] if result.get("video", {}).get("url") else [],
-            "usage": {"metrics": status.get("metrics"), "cost": result.get("cost")}}
+            "usage": {"metrics": status.get("metrics"), "cost": result.get("cost"), "timings": result.get("timings")}}

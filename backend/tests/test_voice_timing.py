@@ -161,9 +161,9 @@ class CorrectionTests(unittest.IsolatedAsyncioTestCase):
                 "dialogue_text": "A test line", "voice_refs": {"Asha": "priya"}}, "English", Mock(), mood)
         return updates[-1], retry_mock, first, events
 
-    async def test_within_tolerance_keeps_target_without_retry(self):
+    async def test_within_tolerance_preserves_full_speech_without_retry(self):
         result, retry, first, _ = await self.run_shot(5.45, mood="excited")
-        self.assertEqual(result["duration_sec"], 5)
+        self.assertEqual(result["duration_sec"], 5.45)
         self.assertEqual(first.call_args.kwargs["pace"], 1.12)
         retry.assert_not_awaited()
 
@@ -173,7 +173,7 @@ class CorrectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(retry.call_args.kwargs["pace"], 1.12)
         self.assertEqual(result["duration_sec"], 6)
         self.assertEqual(len(result["dialogue_timing"]["attempts"]), 2)
-        self.assertTrue(any("corrected" in event for event in events))
+        self.assertTrue(any("one bounded pace retry" in event for event in events))
 
     async def test_large_mismatch_adjusts_duration_without_retry(self):
         result, retry, _, _ = await self.run_shot(7)
@@ -215,7 +215,7 @@ class CorrectionTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(voice, "synthesize_dialogue", new=AsyncMock(return_value=voice.GeneratedAudio(pcm(4), "audio/wav", ".wav", "sarvam"))), patch.object(voice.storage_service, "upload_bytes", return_value={"url": "saved.wav"}), patch.object(director, "call_agent", side_effect=assemble), patch.object(director, "compile_shot_prompts", side_effect=compile_after_assembly) as compiler:
                 await voice.generate_job_dialogue_audio(db, job.id)
             compiler.assert_called_once()
-            self.assertEqual(seen[0]["duration_sec"], 4)
+            self.assertEqual(seen[0]["duration_sec"], 5)
             self.assertEqual(seen[0]["dialogue_audio_duration_sec"], 4)
             self.assertEqual(seen[0]["status"], "done")
             final = job_service.job_result(job_service.get_job(db, job.id))

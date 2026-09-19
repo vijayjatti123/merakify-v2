@@ -59,6 +59,11 @@ def translate(result, shot, *, audio_model=None):
 
 
 def _translate(result, shot, *, audio_model=None):
+    if result.get("video_model") == "h3_max_fal":
+        if audio_model and audio_model != "h3_max_fal":
+            raise ValueError("Shots inherit the video model selected for this job")
+        from app.services.h3_video_service import translate as h3_translate
+        return h3_translate(result, shot)
     if result.get("video_model") == AUTOMATIC:
         return automatic_translation(result, shot, audio_model=audio_model)
     if is_onscreen_speech(shot):
@@ -100,13 +105,15 @@ def _translate(result, shot, *, audio_model=None):
         raise ValueError("Unsupported Seedance quality")
     if is_voiceover(shot) and shot.get("dialogue_audio_duration_sec") is None:
         raise ValueError("Finish narration audio measurement before video generation")
+    if float(shot["duration_sec"]) <= 0:
+        raise ValueError("A positive planned shot duration is required")
     planned = performance_duration(shot["duration_sec"], shot.get("dialogue_audio_duration_sec") or 0)
     if not math.isfinite(planned) or planned <= 0 or planned > 15:
         raise ValueError("Seedance duration must fit within 15 seconds")
-    duration = max(4, math.ceil(planned))
+    duration = math.ceil(planned)  # performance_duration enforces the universal shot floor.
     warnings = []
     if duration != planned:
-        warnings.append(f"Provider bills {duration}s (integer minimum 4s); planned duration remains {planned:g}s.")
+        warnings.append(f"Provider bills {duration}s (whole seconds); planned duration remains {planned:g}s.")
     visual = visual_description(shot["compiled_prompt"])
     if is_voiceover(shot):
         # The spoken text belongs to post-production, never a visible performance.
@@ -213,7 +220,7 @@ def provider(method, path, body=None):
 
 def regenerate_translation(result, shot, hint="", *, audio_model=None):
     translated = translate(result, shot, audio_model=audio_model)
-    if is_onscreen_speech(shot) or result.get("video_model") == AUTOMATIC:
+    if is_onscreen_speech(shot) or result.get("video_model") in {AUTOMATIC, "h3_max_fal"}:
         if hint:
             translated["request"]["prompt"] += "\nRequested correction: " + hint.strip()
             translated["warnings"].append("Full regeneration from the accepted preview; existing approved speech is reused where present.")
@@ -284,7 +291,7 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
         if audio_evidence:
             job_service.update_video(db, job_id, number,
                 video_audio_reference_validation=audio_evidence,
-                video_audio_reference_url=translated['request']['audio_urls'][0],
+                video_audio_reference_url=(translated['request'].get('audio_urls') or translated['request']['reference_audio_urls'])[0],
                 video_retry_request=translated['request'])
             job_service.append_event(db, job_id, 'video_generation',
                 f"Shot {number}: audio reference checked; speech {audio_evidence['source_duration_sec']:.6f}s, "

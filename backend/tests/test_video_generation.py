@@ -51,7 +51,7 @@ class VideoTests(unittest.TestCase):
         self.assertIn('No photorealism', out['constraints'])
         self.assertEqual(out['request']['prompt'].count('Constraints:'), 1)
         self.shot['duration_sec'] = 1
-        self.assertEqual(video.translate(self.result, self.shot)['request']['duration'], 4)
+        self.assertEqual(video.translate(self.result, self.shot)['request']['duration'], 5)
         for value in [16, float('nan'), 0]:
             self.shot['duration_sec'] = value
             with self.assertRaises(ValueError): video.translate(self.result, self.shot)

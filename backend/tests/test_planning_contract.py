@@ -29,8 +29,18 @@ class PlanningContractTests(unittest.TestCase):
  def test_speech_never_shrinks_performance(self):
   from app.services.dialogue_duration import performance_duration
   for speech in (2.56, 1.7066666667, .8533333333):
-   self.assertEqual(performance_duration(4, speech), 4)
+   self.assertEqual(performance_duration(4, speech), 5)
   self.assertEqual(performance_duration(12, 2.56), 12)
   self.assertEqual(performance_duration(4, 6), 6)
   with self.assertRaises(ValueError): performance_duration(float('nan'), 2)
+
+ def test_five_second_floor_overrides_legacy_four_second_contract(self):
+  for mode in ("none", "onscreen", "voiceover"):
+   shot={"shot_number":1,"duration_sec":4.99,"has_dialogue":mode!="none","speech_mode":mode,
+         "dialogue_text":"Keep the words." if mode!="none" else "",
+         "characters_in_shot":["Meera"] if mode=="onscreen" else []}
+   for legacy_floor in (None,4,5):
+    self.assertFalse(check_mechanics({"approved":True,"issues":[]},[shot],[{"name":"Meera"}],legacy_floor)["approved"])
+   shot["duration_sec"]=5
+   self.assertTrue(check_mechanics({"approved":True,"issues":[]},[shot],[{"name":"Meera"}])["approved"])
 if __name__=='__main__' :unittest.main()

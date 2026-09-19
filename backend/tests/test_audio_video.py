@@ -40,7 +40,7 @@ class AudioVideoTests(unittest.TestCase):
         translated = audio.translate(self.result, self.shot, 'seedance_mini_evolink')
         self.assertEqual(translated['request']['duration'], 12)
         self.shot.update(duration_sec=0.85, dialogue_audio_duration_sec=0.85)
-        self.assertEqual(audio.translate(self.result, self.shot, 'seedance_mini_evolink')['request']['duration'], 4)
+        self.assertEqual(audio.translate(self.result, self.shot, 'seedance_mini_evolink')['request']['duration'], 5)
         self.shot['duration_sec'] = 16
         with self.assertRaises(ValueError):
             audio.translate(self.result, self.shot, 'seedance_mini_evolink')
@@ -58,6 +58,11 @@ class AudioVideoTests(unittest.TestCase):
                     self.assertEqual(r['image_url'],self.shot['still_frame_url'])
                     self.assertEqual(r['audio_url'],self.shot['dialogue_audio_url'])
                     self.assertNotIn('duration',r);self.assertNotIn('resolution',r)
+                elif model=='h3_max_fal':
+                    self.assertEqual(r['reference_image_urls'], [self.shot['still_frame_url'], 'https://example.com/portrait.jpg'])
+                    self.assertEqual(r['reference_audio_urls'], [self.shot['dialogue_audio_url']])
+                    self.assertEqual(r['resolution'], '768P')
+                    self.assertEqual(r['duration'], 5)
                 elif model=='kling_voice_fal':
                     self.assertEqual(r['start_image_url'],self.shot['still_frame_url'])
                     self.assertIn('Hello there.',r['prompt'])

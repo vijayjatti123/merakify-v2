@@ -45,7 +45,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const [quality, setQuality] = useState("720p");
   const [language, setLanguage] = useState("English");
   const [customLanguage, setCustomLanguage] = useState("");
-  const [modelChoice, setModelChoice] = useState("seedance_mini_evolink");
+  const [modelChoice, setModelChoice] = useState("h3_max_fal");
   const chosenModel = VIDEO_MODELS.find(model => model.id === modelChoice);
   const aiModel = chosenModel?.family || modelChoice;
   const videoModel = chosenModel?.id || null;

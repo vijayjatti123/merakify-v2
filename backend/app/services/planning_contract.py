@@ -26,7 +26,8 @@ def render_camera_summaries(shots):
 
 
 def check_mechanics(qa, shots, characters, minimum_shot_seconds=None):
-    minimum_shot_seconds = max(4, minimum_shot_seconds or 4)
+    from app.services.dialogue_duration import MIN_SHOT_SECONDS
+    minimum_shot_seconds = max(MIN_SHOT_SECONDS, minimum_shot_seconds or MIN_SHOT_SECONDS)
     names = {c["name"] for c in characters}
     issues = []
     for shot in shots:

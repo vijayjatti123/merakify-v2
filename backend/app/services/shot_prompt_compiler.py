@@ -204,7 +204,7 @@ def model_family(ai_model):
     for prefix in ("Veo", "Sora", "Kling"):
         if ai_model.startswith(prefix):
             return prefix.lower()
-    if ai_model.startswith(("Seedance", "Wan")):
+    if ai_model.startswith(("Seedance", "Wan", "MiniMax H3 Max")):
         # No verified special syntax for Seedance/Wan: plain prose is deliberately
         # unverified, pending real-output testing. Module M never calls these models.
         return "generic"

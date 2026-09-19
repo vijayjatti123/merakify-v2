@@ -74,9 +74,11 @@ def shot_knowledge(payload, emit):
     found = {}
     with SessionLocal() as db:
         for shot in payload["shots"]:
-            # Visible speech now defaults to audio-referenced Seedance scenes.
+            # Preserve legacy speech guidance; H3 retrieves its own model-tagged facts.
             content = "dialogue" if is_onscreen_speech(shot) else payload["content_type"]
-            model = "seedance" if is_onscreen_speech(shot) else model_tag(payload["ai_model"])
+            model = model_tag(payload["ai_model"])
+            if is_onscreen_speech(shot) and payload["ai_model"] != "MiniMax H3 Max":
+                model = "seedance"
             rows = lookup_techniques(db, content, model)
             found[shot["shot_number"]] = rows
             emit("shot_prompt_compiler", "Prompt technique lookup: " + json.dumps({

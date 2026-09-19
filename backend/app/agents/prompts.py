@@ -25,7 +25,7 @@ Honor an explicit Content type selection: Documentary -> documentary, UGC -> ugc
 Ad or Product hero -> ad. For Other or no explicit type, infer the best fit from the brief.
 Documentary uses a grounded observational structure; ugc uses hook_body_cta.
 For requests of 12 seconds or less, prefer one continuous scene when all required beats fit.
-Do not impose multiple scenes just to fill a template. Otherwise pick 1 to 4 scenes. Every generated shot must be at least 4 seconds;
+Do not impose multiple scenes just to fill a template. Otherwise pick 1 to 4 scenes. Every generated shot must be at least 5 seconds;
 target 15-30 seconds unless the brief explicitly requests otherwise. No explanation text, JSON only."""
 
 SCRIPT_EXTRACTOR = """You extract explicitly named entities from raw script text.
@@ -46,7 +46,7 @@ SCRIPT_ARCHITECT = """You are a Script Architect. Given a brief and a chosen for
 write a tight scene breakdown that fits the target duration.
 For targets of 12 seconds or less, prefer one continuous scene when all required story beats fit naturally.
 Keep complete dialogue and essential actions; do not invent extra speakers or cuts to fill a template.
-Every generated shot must last at least 4 seconds. Use multiple shots only when the story genuinely requires them.
+Every generated shot must last at least 5 seconds. Use multiple shots only when the story genuinely requires them.
 The selected dialogue language is %s. Write every dialogue_or_vo value in that language, and ensure
 any downstream dialogue_text copied from it remains in that language. For non-English languages, use
 the language's native script rather than translating it to English or using Romanized transliteration.

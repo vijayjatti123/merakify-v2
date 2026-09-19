@@ -1,4 +1,5 @@
 export const VIDEO_MODELS = [
+  { id: "h3_max_fal", label: "MiniMax H3 Max — fal", family: "MiniMax H3 Max" },
   { id: "automatic_omni_mini", label: "Seedance 2.0 Mini — saved Automatic selection", family: "Seedance 2.0" },
   { id: "seedance_evolink", label: "Seedance 2.0 Standard — EvoLink", family: "Seedance 2.0" },
   { id: "seedance_fast_evolink", label: "Seedance 2.0 Fast — EvoLink", family: "Seedance 2.0" },
@@ -10,6 +11,7 @@ export const VIDEO_MODELS = [
   { id: "kling_avatar_fal", label: "Kling Avatar — fal · Experimental", family: "Kling 3.0" },
 ];
 export function modelNote(id) {
+  if (id === "h3_max_fal") return "H3 Max for every scene. Uses the accepted preview, character references and approved speech. Clips are 5–15 seconds. The 720p setting uses H3 Max’s native 768p output; 480p is also available.";
   if (id === "automatic_omni_mini") return "All scenes now use Seedance Mini via EvoLink, including silent scenes, dialogue and narration. This saved selection uses 720p.";
   if (id === "seedance_mini_evolink" || id === "seedance_mini_fal") return "Seedance Mini for every scene. Uses your accepted preview and character references, plus approved speech for dialogue or narration. Supports 480p and 720p.";
   if (id === "kling_voice_fal") return "All shots use Kling. English/Chinese speech only; always 4K. Generates new speech in the saved voice. First voice setup needs 5–30 seconds of approved speech and an extra setup call.";
