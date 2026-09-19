@@ -32,6 +32,23 @@ class ComplianceTests(unittest.TestCase):
         with patch.object(gate,'inspect',return_value=verdict()) as vision,patch.object(video,'provider') as api:
             self.assertTrue(self.check());self.assertTrue(self.check())
             vision.assert_called_once();api.assert_not_called()
+
+    def test_computed_check_survives_exhausted_database_save_retries(self):
+        from sqlalchemy.orm import Query
+        original = Query.update
+        remaining = [3]
+        def conflict(query, values, **kwargs):
+            if remaining[0]:
+                remaining[0] -= 1
+                return 0
+            return original(query, values, **kwargs)
+        cache = {}
+        with patch.object(Query,'update',conflict), patch.object(gate,'inspect',return_value=verdict()) as vision:
+            with self.assertRaises(jobs.VideoCheckConflict):
+                gate.accept(self.db,self.job.id,self.shot,io.BytesIO(b'video'),check_cache=cache)
+            self.assertTrue(gate.accept(self.db,self.job.id,self.shot,io.BytesIO(b'video'),check_cache=cache))
+            vision.assert_called_once()
+        self.assertEqual(self.data()['video_compliance_checks']['first'], verdict())
     def test_mismatch_one_retry_then_accept_with_warning(self):
         with patch.object(gate,'inspect',return_value=verdict('mismatch')),patch.object(video,'provider',return_value={'id':'second'}) as api:
             self.assertFalse(self.check());self.assertFalse(self.check())

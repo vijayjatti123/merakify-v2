@@ -652,6 +652,19 @@ def video_worker_lease(db, job_id, number, task, token, *, renew=False, release=
 
 def video_check_state(db, job_id, number, task, *, check=None, claim_retry=False):
     """CAS the existing task JSON: at most one paid compliance retry across workers/restarts."""
+    for _ in range(3):
+        try:
+            return _video_check_state_once(db, job_id, number, task, check=check, claim_retry=claim_retry)
+        except VideoCheckConflict:
+            db.rollback()
+    raise VideoCheckConflict('Compliance save conflicted; retain computed check and retry persistence')
+
+
+class VideoCheckConflict(RuntimeError):
+    pass
+
+
+def _video_check_state_once(db, job_id, number, task, *, check=None, claim_retry=False):
     row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).populate_existing().one()
     old_json = row.data_json
     data = json.loads(old_json)
@@ -659,9 +672,11 @@ def video_check_state(db, job_id, number, task, *, check=None, claim_retry=False
         db.rollback()
         return None
     if check is None and not claim_retry:
+        db.rollback()  # No transaction remains open during slow vision calls.
         return data
     if claim_retry:
         if data.get("video_compliance_retries", 0):
+            db.rollback()
             return None
         data.update(video_compliance_retries=1, video_status="submitting", video_retry_parent_task=task)
         from datetime import datetime, timezone
@@ -672,7 +687,7 @@ def video_check_state(db, job_id, number, task, *, check=None, claim_retry=False
         {VideoTask.data_json: json.dumps(data), VideoTask.status: data["video_status"]}, synchronize_session=False)
     if changed != 1:
         db.rollback()
-        return None
+        raise VideoCheckConflict('Concurrent task metadata update')
     db.commit()
     db.expire_all()
     return data

@@ -102,7 +102,7 @@ def warning(db, job_id, number, task, data, message):
     job_service.append_event(db, job_id, "render_compliance", f"Shot {number}: {message}")
 
 
-def accept(db, job_id, shot, media):
+def accept(db, job_id, shot, media, *, check_cache=None):
     """False defers acceptance while one durable full-generation retry is in flight."""
     number, task = shot["shot_number"], shot["video_task_id"]
     data = job_service.video_check_state(db, job_id, number, task)
@@ -110,14 +110,18 @@ def accept(db, job_id, shot, media):
         return False
     check = data.get("video_compliance_checks", {}).get(task)
     if check is None:
-        try:
-            expected = data.get("video_compliance_expected")
-            if not expected:
-                raise ValueError("No submission-time compliance snapshot (legacy task)")
-            check = inspect(media, expected)
-        except Exception as error:
-            # No retry for checker outages, malformed JSON, missing frames or expired references.
-            check = {"error": type(error).__name__, "unverified": True}
+        check = check_cache.get(task) if check_cache is not None else None
+        if check is None:
+            try:
+                expected = data.get("video_compliance_expected")
+                if not expected:
+                    raise ValueError("No submission-time compliance snapshot (legacy task)")
+                check = inspect(media, expected)
+            except Exception as error:
+                # Preserve existing outage/user-review policy, never spend on a rerender here.
+                check = {"error": type(error).__name__, "unverified": True}
+            if check_cache is not None:
+                check_cache[task] = check
         data = job_service.video_check_state(db, job_id, number, task, check=check)
         if data is None:
             return False

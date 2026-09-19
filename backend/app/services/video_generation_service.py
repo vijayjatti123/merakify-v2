@@ -7,6 +7,7 @@ import re
 import tempfile
 import time
 import httpx
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit, unquote, quote
 from urllib.request import Request, urlopen
@@ -347,7 +348,43 @@ def poll(db, job_id, shot, *, defer_completed=False):
         finish_completed(db, job_id, shot, response)
 
 
-def finish_completed(db, job_id, shot, response):
+class CompletionCache:
+    """Task-scoped temporary disk storage, bounded by the dispatcher's media slots.
+
+    No user media is retained after completion/lease loss. A process restart may
+    redownload; durable compliance verdicts still survive in the task record.
+    """
+    def __init__(self, task):
+        self.task = task
+        self.media = tempfile.TemporaryFile()
+        self.downloaded = False
+        self.validated = False
+        self.checks = {}
+        self.stored = None
+        self.size = 0
+        self.digest = None
+        self.attempts = 0
+        self.processing_sec = 0
+
+    def close(self):
+        self.media.close()
+
+
+def finish_completed(db, job_id, shot, response, *, completion=None):
+    cache = completion or CompletionCache(shot['video_task_id'])
+    started = time.monotonic()
+    try:
+        if cache.task != shot['video_task_id']:
+            raise ValueError('Completion cache belongs to another provider task')
+        return _finish_completed(db, job_id, shot, response, cache)
+    finally:
+        cache.attempts += 1
+        cache.processing_sec += time.monotonic() - started
+        if completion is None:
+            cache.close()
+
+
+def _finish_completed(db, job_id, shot, response, cache):
     number, task = shot['shot_number'], shot['video_task_id']
     started = time.monotonic()
     timings = {}
@@ -356,25 +393,30 @@ def finish_completed(db, job_id, shot, response):
         raise ValueError("Completed video task has no downloadable result")
     if urlsplit(urls[0]).scheme != "https":
         raise ValueError("Provider download must use HTTPS")
-    with tempfile.TemporaryFile() as video:
+    with nullcontext(cache.media) as video:
         phase = time.monotonic()
-        digest, size = hashlib.sha256(), 0
         # The provider CDN rejects urllib with Cloudflare 1010; the app's
         # existing HTTPX client is accepted without credentials or a proxy.
-        with httpx.stream("GET", urls[0], timeout=120, follow_redirects=True) as download:
-            download.raise_for_status()
-            for chunk in download.iter_bytes(1024 * 1024):
-                size += len(chunk)
-                if size > 512 * 1024 * 1024:
-                    raise ValueError("Video exceeds 512MB download bound")
-                digest.update(chunk); video.write(chunk)
+        timings['download_reused'] = cache.downloaded
+        if not cache.downloaded:
+            video.seek(0); video.truncate()
+            digest, size = hashlib.sha256(), 0
+            with httpx.stream("GET", urls[0], timeout=120, follow_redirects=True) as download:
+                download.raise_for_status()
+                for chunk in download.iter_bytes(1024 * 1024):
+                    size += len(chunk)
+                    if size > 512 * 1024 * 1024:
+                        raise ValueError("Video exceeds 512MB download bound")
+                    digest.update(chunk); video.write(chunk)
+            cache.size, cache.digest, cache.downloaded = size, digest.hexdigest(), True
+        size = cache.size
         timings["download_sec"] = time.monotonic() - phase
         phase = time.monotonic()
         video.seek(0)
         if video.read(12)[4:8] != b"ftyp":
             raise ValueError("Downloaded result is not an MP4 container")
         video.seek(0)
-        if shot.get("video_audio_model"):
+        if shot.get("video_audio_model") and not cache.validated:
             from app.services import audio_video_service
             try:
                 audio_video_service.validate_audio_result(video)
@@ -383,9 +425,11 @@ def finish_completed(db, job_id, shot, response):
                     video_status="review_required", video_error=str(error))
                 job_service.append_event(db, job_id, "video_generation", f"Shot {number}: {error}")
                 return
+        cache.validated = True
         timings["media_validation_sec"] = time.monotonic() - phase
         phase = time.monotonic()
-        accepted = render_compliance_service.accept(db, job_id, shot, video)
+        timings['compliance_check_reused'] = task in cache.checks
+        accepted = render_compliance_service.accept(db, job_id, shot, video, check_cache=cache.checks)
         timings["compliance_sec"] = time.monotonic() - phase
         if not accepted:
             job_service.append_event(db, job_id, "video_timing", f"Shot {number}: completion deferred by compliance; " + json.dumps(timings))
@@ -393,14 +437,18 @@ def finish_completed(db, job_id, shot, response):
         phase = time.monotonic()
         video.seek(0)
         key = f"jobs/{job_id}/videos/{number}-{task}.mp4"
-        stored = storage_service.upload_file(key, video, content_type="video/mp4")
+        if cache.stored is None:
+            cache.stored = storage_service.upload_file(key, video, content_type="video/mp4")
+        stored = cache.stored
     timings["upload_sec"] = time.monotonic() - phase
     timings["completion_processing_sec"] = time.monotonic() - started
+    timings['completion_attempts'] = cache.attempts + 1
+    timings['total_completion_processing_sec'] = cache.processing_sec + timings['completion_processing_sec']
     job_service.update_video(db, job_id, number, expected_task_id=task, video_processing_timings=timings, video_status="done", video_url=stored['url'],
-                                  video_key=key, video_sha256=digest.hexdigest(), video_bytes=size,
+                                  video_key=key, video_sha256=cache.digest, video_bytes=size,
                                   video_usage=response.get("usage"), video_error=None,
                                   video_stored_at=datetime.now(timezone.utc).isoformat())
-    job_service.append_event(db, job_id, "video_generation", f"Shot {number}: video persisted to S3 ({size} bytes, SHA256 {digest.hexdigest()}); provider expiry no longer controls retention.")
+    job_service.append_event(db, job_id, "video_generation", f"Shot {number}: video persisted to S3 ({size} bytes, SHA256 {cache.digest}); provider expiry no longer controls retention.")
 
 
 def polling_loop(stop):
