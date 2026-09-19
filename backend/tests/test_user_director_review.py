@@ -53,6 +53,25 @@ class UserReviewTests(unittest.TestCase):
             self.assertIn("Render style:",shot["compiled_prompt"])
             self.assertIn("Camera direction:",shot["compiled_prompt"])
 
+    def test_structured_beats_override_stale_card_action_synopsis(self):
+        result = directed()
+        shot = result["shots"][0]
+        shot["description"] = "Obsolete instruction: speak before the handoff."
+        shot.pop("direction_source", None)
+        shot["shot_direction"].update(
+            blocking="Woman beside the man.",
+            action_beats=["Hand over the bottle silently.", "Speak the approved line only after drinking."],
+            critical_outcome="The man receives the bottle.")
+        result.update(director.validate_and_correct(result["shots"], [], 5))
+        result["assembly"]["provisional"] = False
+        out = compile_shot_prompts(result, emit=lambda *a:None,
+            call_agent=lambda *a, **k: (_ for _ in ()).throw(AssertionError("No model call")))
+        prompt = out[0]["compiled_prompt"]
+        self.assertNotIn("Obsolete instruction", prompt)
+        self.assertIn("Hand over the bottle silently", prompt)
+        self.assertIn("Speak the approved line only after drinking", prompt)
+        self.assertEqual(out[0]["description"], shot["description"])
+
 class ReviewApiTests(unittest.TestCase):
     def setUp(self):
         test_module_f.ModuleFTests.setUp(self)

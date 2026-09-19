@@ -742,7 +742,11 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=No
             from app.services.ad_direction import execution_sections
             direction = source.get("shot_direction") or {}
             sections = [("Locked style", "; ".join(f"{k}: {v}" for k, v in payload.get("style_bible", {}).items() if k != "rendering" and isinstance(v, str) and v)),
-                ("Action", source.get("description")), ("Framing", source.get("camera_angle")),
+                # Structured action beats are the approved execution sequence.
+                # The card synopsis can predate an edit and must not introduce a
+                # second, conflicting sequence (especially extra speech events).
+                ("Action", None if direction.get("action_beats") else source.get("description")),
+                ("Framing", source.get("camera_angle")),
                 ("Lens", source.get("lens")), ("Lighting", source.get("lighting")),
                 ("Composition", source.get("composition_note")), ("Opening", source.get("state_at_shot_start")),
                 *execution_sections(source),
