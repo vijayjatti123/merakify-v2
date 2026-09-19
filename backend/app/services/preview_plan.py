@@ -43,8 +43,14 @@ def preview_visual(facts):
     visible = {k: v for k, v in facts.items() if k not in {"state_at_shot_end", "camera_movement"}}
     if facts.get("state_at_shot_start"):
         visible.pop("description", None)
+        # Whole-shot composition can describe a later reveal (e.g. an open
+        # parachute). The opening state and camera angle own still staging.
+        visible.pop("composition_note", None)
     visible = {**visible, "characters": [{k: v for k, v in c.items() if k != "image_url"}
                                       for c in facts["characters"]]}
+    spatial = ["Follow each person's inside/outside position, support surface and contact relationships in the opening state. Show enough surrounding geometry to establish those relationships. A camera looking out through a doorway must not relocate an inside person into the exterior. An explicitly airborne or outside person must remain outside. Do not infer containment merely from a mentioned vehicle or room."]
+    if spatial:
+        visible["spatial_requirements"] = spatial
     if facts.get('direction_version') == 1:
         for key in ('description', 'camera_movement', 'state_at_shot_end'):
             visible.pop(key, None)
@@ -54,10 +60,12 @@ def preview_visual(facts):
                 "The ad takeaway and shot purpose explain attention, not extra objects to insert. "
                 "Show only products/props present in the opening state. Preserve the real markings on any "
                 "approved product reference; invent no captions, logos, claims or additional subjects.\n"
-                + json.dumps(visible, ensure_ascii=False))
+                + ("\nSpatial requirements are hard acceptance criteria:\n" + "\n".join(spatial) if spatial else "")
+                + "\n" + json.dumps(visible, ensure_ascii=False))
     return ("Depict the opening physical instant of this approved shot. Preserve its subject, framing, "
             "style and locked identity facts. state_at_shot_start is the authoritative instant; "
             "do not advance the action. If no start state is supplied, freeze the beginning of the description. "
             "No collage, invented captions, invented logos or additional subjects. Preserve existing printed "
             "text and logos ONLY on products supplied as approved product image references.\n"
-            + json.dumps(visible, ensure_ascii=False))
+            + ("\nSpatial requirements are hard acceptance criteria:\n" + "\n".join(spatial) if spatial else "")
+            + "\n" + json.dumps(visible, ensure_ascii=False))

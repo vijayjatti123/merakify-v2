@@ -24,6 +24,58 @@ class StillFramesTests(unittest.TestCase):
         self.image = GeneratedCharacterImage(buffer.getvalue(), "image/png")
         self.emit = Mock()
 
+    def test_verification_outage_reuses_saved_candidate_without_generation(self):
+        with patch.object(service, 'generate_still', return_value=self.image) as generate, \
+             patch.object(service, 'check_still', side_effect=service.VerificationUnavailable('offline')), \
+             patch.object(service.storage_service, 'upload_bytes', return_value={'key':'candidate','url':'https://stored'}):
+            self.run_stills()
+        shot = self.result['shots'][0]
+        self.assertEqual(generate.call_count, 1)
+        self.assertEqual(shot['still_frame_error_kind'], 'verification')
+        self.assertIsNone(shot['still_frame_url'])
+        self.assertIn('still_frame_candidate', shot)
+        with patch.object(service, 'generate_still') as generate, \
+             patch.object(service, '_download_reference_image', return_value=self.image), \
+             patch.object(service.storage_service, 'asset_url', return_value='https://candidate'), \
+             patch.object(service.storage_service, 'upload_bytes', return_value={'key':'approved','url':'https://approved'}), \
+             patch.object(service, 'check_still', return_value={'approved':True,'reason':'Matches'}):
+            self.run_stills()
+        generate.assert_not_called()
+        self.assertEqual(shot['still_frame_status'], 'ready')
+        self.assertNotIn('still_frame_candidate', shot)
+
+    def test_opening_prompt_excludes_later_composition(self):
+        from app.services.preview_plan import preview_visual
+        text = preview_visual({'state_at_shot_start':'Kabir in freefall, pilot chute trailing.',
+            'composition_note':'Open main canopy fills frame', 'description':'Parachute deploys',
+            'characters':[], 'direction_version':1, 'camera_angle':'High angle'})
+        self.assertIn('pilot chute', text)
+        self.assertNotIn('Open main canopy', text)
+        self.assertNotIn('Parachute deploys', text)
+        self.assertIn('High angle', text)
+
+    def test_checker_requests_text_model_and_schema(self):
+        with patch.object(service.settings, 'google_ai_api_key', 'test'), \
+             patch.object(service, 'urlopen') as opened:
+            opened.return_value.__enter__.return_value.read.return_value = b'{}'
+            service._google([{'text':'Check'}], verification=True)
+        request = opened.call_args.args[0]
+        self.assertIn(service.settings.gemini_preview_check_model, request.full_url)
+        config = json.loads(request.data)['generationConfig']
+        self.assertEqual(config['responseModalities'], ['TEXT'])
+        self.assertEqual(config['responseSchema']['required'], ['approved','reason','visible_entities','spatially_grounded'])
+
+    def test_helicopter_opening_requires_interior_spatial_grounding(self):
+        from app.services.preview_plan import preview_visual
+        text = preview_visual({
+            'state_at_shot_start': 'Kabir grips the helicopter doorframe inside the cabin.',
+            'description': 'Tara hands him a can inside the helicopter.',
+            'characters': [], 'camera_angle': 'Eye-level medium',
+        })
+        self.assertIn('spatial requirements are hard acceptance criteria', text.casefold())
+        self.assertIn('support surface and contact relationships', text)
+        self.assertNotIn('every listed person must be visibly inside', text)
+
     def run_stills(self):
         return service.generate_still_frames(self.result, job_id="audit", emit=self.emit)
 
@@ -140,7 +192,7 @@ class StillFramesTests(unittest.TestCase):
 
     @patch.object(service, "_google")
     def test_real_provider_approval_with_null_reason(self, google):
-        google.return_value = {"candidates": [{"content": {"parts": [{"text": json.dumps({"approved": True, "reason": None})}]}}]}
+        google.return_value = {"candidates": [{"content": {"parts": [{"text": json.dumps({"approved": True, "reason": None, "spatially_grounded": True})}]}}]}
         self.assertTrue(service.check_still("A cup", [], self.image)["approved"])
         google.return_value["candidates"][0]["content"]["parts"][0]["text"] = '{"approved":false,"reason":null}'
         with self.assertRaises(service.StillFrameError):

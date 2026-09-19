@@ -1,8 +1,8 @@
 // Derive the stage from persisted output, never from a local click or planning's "done".
 export function previewState(shot) {
   if (shot.still_frame_url) return { key: "ready", label: "Preview ready" };
-  if (shot.still_frame_status === "generating") return { key: "generating", label: "Creating preview" };
-  if (shot.still_frame_status === "failed") return { key: "failed", label: "Preview failed" };
+  if (shot.still_frame_status === "generating") return { key: "generating", label: shot.still_frame_candidate ? "Verifying preview" : "Creating preview" };
+  if (shot.still_frame_status === "failed") return { key: "failed", label: shot.still_frame_error_kind === "verification" ? "Verification unavailable" : "Preview failed" };
   return { key: "waiting", label: "Waiting" };
 }
 

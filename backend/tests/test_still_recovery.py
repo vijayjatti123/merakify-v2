@@ -97,6 +97,31 @@ class StillRecoveryTests(unittest.TestCase):
                 shot_numbers={1}, on_progress=lambda result: seen.append(result['shots'][0]['still_frame_status']))
         self.assertEqual(seen, ['pending', 'generating', 'failed'])
 
+    def test_verification_retry_persists_candidate_and_leaves_sibling_unchanged(self):
+        def run(error=False):
+            task = BackgroundTasks()
+            with patch.object(routes, 'SessionLocal', self.sessions), \
+                 patch.object(still, 'generate_still', return_value=self.image) as generate, \
+                 patch.object(still, 'check_still', side_effect=still.VerificationUnavailable('offline') if error else None,
+                              return_value={'approved':True,'reason':'Matches'}), \
+                 patch.object(still, '_download_reference_image', return_value=self.image), \
+                 patch.object(still.storage_service, 'upload_bytes', return_value={'key':'audit/candidate','url':'https://audit/still'}), \
+                 patch.object(still.storage_service, 'asset_url', return_value='https://audit/candidate'), \
+                 patch('app.services.preview_display.store_variants', return_value=None):
+                routes.retry_preview(self.job.id, 1, routes.VideoRegenerateRequest(expected_attempt='none'), task, self.db)
+                asyncio.run(task())
+                self.db.expire_all()
+                return jobs.job_result(jobs.get_job(self.db,self.job.id)), generate.call_count
+        failed, calls = run(True)
+        self.assertEqual(calls, 1)
+        self.assertEqual(failed['shots'][0]['still_frame_error_kind'], 'verification')
+        self.assertIn('still_frame_candidate', failed['shots'][0])
+        ready, calls = run()
+        self.assertEqual(calls, 0)
+        self.assertEqual(ready['shots'][0]['still_frame_status'], 'ready')
+        self.assertEqual(ready['shots'][1], self.result['shots'][1])
+        self.assertFalse(ready['shots'][0].get('video_url'))
+
     def test_stale_token_cannot_save(self):
         jobs.claim_still_retry(self.db,self.job.id,1,'none')
         self.assertFalse(jobs.finish_still_retry(self.db,self.job.id,1,'stale',self.result))

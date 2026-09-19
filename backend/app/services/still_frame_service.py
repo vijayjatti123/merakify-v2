@@ -27,6 +27,10 @@ class StillFrameError(RuntimeError):
     pass
 
 
+class VerificationUnavailable(StillFrameError):
+    pass
+
+
 class NoStillImageError(StillFrameError):
     def __init__(self, diagnostics):
         self.diagnostics = diagnostics
@@ -135,7 +139,7 @@ def _inline(image):
                            "data": base64.b64encode(image.data).decode("ascii")}}
 
 
-def _google(parts, *, aspect_ratio=None):
+def _google(parts, *, aspect_ratio=None, verification=False):
     if sum("inlineData" in part for part in parts) > MAX_REQUEST_IMAGES:
         raise StillFrameError("Internal still-frame image budget exceeded")
     if not settings.google_ai_api_key.strip():
@@ -145,9 +149,17 @@ def _google(parts, *, aspect_ratio=None):
         config["imageConfig"] = {"aspectRatio": aspect_ratio}
     else:
         config["responseMimeType"] = "application/json"
+    model = settings.gemini_image_model
+    if verification:
+        model = settings.gemini_preview_check_model
+        config["responseSchema"] = {"type": "OBJECT", "properties": {
+            "approved": {"type": "BOOLEAN"}, "reason": {"type": "STRING"},
+            "visible_entities": {"type": "ARRAY", "items": {"type": "STRING"}},
+            "spatially_grounded": {"type": "BOOLEAN"}},
+            "required": ["approved", "reason", "visible_entities", "spatially_grounded"]}
     request = Request(
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{quote(settings.gemini_image_model.strip(), safe='')}:generateContent",
+        f"{quote(model.strip(), safe='')}:generateContent",
         data=json.dumps({"contents": [{"parts": parts}], "generationConfig": config}).encode("utf-8"),
         headers={"Content-Type": "application/json", "x-goog-api-key": settings.google_ai_api_key},
         method="POST",
@@ -259,8 +271,10 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
         "locked character references. Reject clear identity/outfit changes, wrong subject or framing, "
         + ("collages, invented captions, changed product branding/shape/packaging, or a later completed action. Existing text/logos on approved product packaging are required and must NOT be rejected as readable text. " if product_reference
            else "collages, readable text, or a later completed action instead of the described opening. ") +
-        "Ignore motion/audio requirements that cannot be depicted in a still. Do not demand new "
-        "details absent from the description. Return JSON only: {\"approved\": boolean, \"reason\": string}.\n"
+        "Ignore motion/audio requirements that cannot be depicted in a still. Treat explicit "
+        "spatial requirements as hard acceptance criteria: reject a person visibly outside a named "
+        "interior/container or floating beside it. Do not demand new details absent from the "
+        "description. Return JSON only with approved, reason, visible_entities and spatially_grounded.\n"
         + visual
     )}]
     if entities:
@@ -272,24 +286,31 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
     parts.extend(_reference_parts(references, continuation, checking=True, emit=emit))
     parts.extend([{"text": "Candidate opening frame to check:"}, _inline(image)])
     for attempt in range(2):
-        response = _google(parts)
-        output = [p for c in response.get("candidates", [])
-                  for p in c.get("content", {}).get("parts", []) if not p.get("thought")]
-        content = "".join(p.get("text", "") for p in output)
-        if content.strip() or not any(p.get("inlineData", {}).get("mimeType", "").startswith("image/") for p in output):
+        try:
+            response = _google(parts, verification=True)
+            output = [p for c in response.get("candidates", [])
+                      for p in c.get("content", {}).get("parts", []) if not p.get("thought")]
+            content = "".join(p.get("text", "") for p in output)
+            verdict = json.loads(content.strip().removeprefix("```json").removesuffix("```").strip())
+            if verdict.get("approved") is True and verdict.get("reason") is None:
+                verdict["reason"] = "Approved"
+            if not isinstance(verdict.get("spatially_grounded"), bool):
+                raise ValueError("Missing spatial verification")
+            if not isinstance(verdict.get("approved"), bool) or not isinstance(verdict.get("reason"), str):
+                raise ValueError("Invalid verification verdict")
+            if verdict.get("approved") and not verdict.get("spatially_grounded"):
+                verdict["approved"] = False
+                verdict["reason"] = "Spatial relationships do not match the opening state. " + verdict["reason"]
+            if not verdict["approved"] and not verdict["reason"].strip():
+                raise ValueError("Missing rejection reason")
             break
-        if emit:
-            emit("still_frame", "WARNING: Still QA returned an image instead of JSON text. "
-                 + ("Retrying the identical QA request once." if attempt == 0 else "Retry exhausted; using text fallback."))
-        if attempt == 1:
-            raise StillFrameError("Still QA returned image instead of JSON text twice")
-    verdict = json.loads(content.strip().removeprefix("```json").removesuffix("```").strip())
-    # Google can return a null reason for approval. No correction text is needed
-    # then; a rejection still requires a real explanation for the retry.
-    if verdict.get("approved") is True and verdict.get("reason") is None:
-        verdict["reason"] = "Approved"
-    if not isinstance(verdict.get("approved"), bool) or not isinstance(verdict.get("reason"), str):
-        raise StillFrameError("Invalid still-frame visual check")
+        except Exception as error:
+            if emit:
+                emit("still_frame", "Preview verification unavailable; " +
+                     ("retrying verification of the same image once." if attempt == 0 else "candidate retained for verification retry."))
+            if attempt == 1:
+                raise VerificationUnavailable("Preview verification unavailable") from error
+
     return verdict
 
 
@@ -409,6 +430,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
         shot.pop("still_frame_display", None)
         shot.pop("still_frame_source_hash", None)
         shot.pop("still_frame_warning", None)
+        shot.pop("still_frame_error_kind", None)
         shot["still_frame_status"] = "pending"
         if not shot.get("compiled_prompt") and not shot.get("preview_input"):
             continue  # Dialogue jobs wait for real post-approval compilation.
@@ -460,7 +482,14 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                      f"subject to reference budget (image SHA256 {hashlib.sha256(continuation[1].data).hexdigest()}).")
             feedback = ""
             aspect_ratio = result.get("aspect_ratio") or "16:9"
-            for attempt in range(2):
+            verification_source = hashlib.sha256(json.dumps([visual, aspect_ratio,
+                [hashlib.sha256(r[1].data).hexdigest() for r in references],
+                hashlib.sha256(continuation[1].data).hexdigest() if continuation else None], sort_keys=True).encode()).hexdigest()
+            candidate = shot.get("still_frame_candidate")
+            if candidate and candidate.get("source") != verification_source:
+                shot.pop("still_frame_candidate", None)
+                candidate = None
+            for attempt in range(candidate.get("attempt", 0) if candidate else 0, 2):
                 started = time.monotonic()
                 emit("preview_timing", json.dumps({"shot_number": number, "phase": "image_request_started", "attempt": attempt + 1}))
                 def attempt_emit(key, note):
@@ -468,7 +497,13 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                         note = json.dumps({**json.loads(note), "shot_number": number, "attempt": attempt + 1})
                     emit(key, note)
                 try:
-                    image = generate_still(visual, references, aspect_ratio, feedback, continuation=continuation, emit=attempt_emit)
+                    if candidate:
+                        try:
+                            image = reference(storage_service.asset_url(candidate["key"]), number)
+                        except Exception as error:
+                            raise VerificationUnavailable("Saved preview could not be loaded for verification") from error
+                    else:
+                        image = generate_still(visual, references, aspect_ratio, feedback, continuation=continuation, emit=attempt_emit)
                 except NoStillImageError as error:
                     if not error.retryable or attempt == 1:
                         raise
@@ -500,7 +535,18 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                      f"matches {aspect_ratio} within 2% ratio tolerance.")
                 started = time.monotonic()
                 emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_started", "attempt": attempt + 1}))
-                verdict = check_still(visual, references, image, emit=emit, entities=entities, continuation=continuation)
+                try:
+                    verdict = check_still(visual, references, image, emit=emit, entities=entities, continuation=continuation)
+                except Exception as error:
+                    if not candidate:
+                        ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[image.content_type]
+                        key = f"jobs/{job_id}/preview-candidates/{number}-{uuid.uuid4().hex}.{ext}"
+                        storage_service.upload_bytes(key=key, body=image.data, content_type=image.content_type,
+                                                    cache_control="private, max-age=300")
+                        shot["still_frame_candidate"] = {"key": key, "source": verification_source, "attempt": attempt}
+                    raise VerificationUnavailable("Image created, but verification is unavailable") from error
+                shot.pop("still_frame_candidate", None)
+                candidate = None
                 emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_completed", "attempt": attempt + 1,
                     "elapsed_sec": round(time.monotonic() - started, 3), "approved": verdict["approved"]}))
                 if verdict["approved"]:
@@ -545,6 +591,9 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
             detail = str(error) if isinstance(error, StillFrameError) else type(error).__name__
             warning = f"Shot {number}: This shot couldn't be generated — try regenerating it. No still was accepted. Reason: {detail}."
             shot["still_frame_status"] = "failed"
+            shot["still_frame_error_kind"] = "verification" if isinstance(error, VerificationUnavailable) else "generation"
+            if isinstance(error, VerificationUnavailable):
+                warning = "Your image is saved, but we couldn't verify it. Retry verification to check the same image."
             shot["still_frame_warning"] = warning
             emit("still_frame", "WARNING: " + warning)
         shot.pop("still_frame_retrying", None)
