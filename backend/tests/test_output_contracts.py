@@ -21,10 +21,11 @@ class OutputContractTests(unittest.TestCase):
         enabled = patch.object(settings, 'planning_structured_outputs', True)
         enabled.start(); self.addCleanup(enabled.stop)
 
-    def test_disabled_preserves_existing_request_format(self):
+    def test_director_contract_is_mandatory_even_when_legacy_flag_disabled(self):
         from app.config import settings
         with patch.object(settings, 'planning_structured_outputs', False):
-            self.assertEqual(contracts.contract_for(prompts.CINEMATOGRAPHY_AGENT, '{}'), (None, None))
+            self.assertEqual(contracts.contract_for(prompts.CINEMATOGRAPHY_AGENT, '{}')[0], 'director-v2')
+            self.assertEqual(contracts.contract_for(prompts.CINEMATOGRAPHY_PATCH, '{}')[0], 'patch-v1')
 
     def test_directed_qa_uses_stable_schema_and_still_allows_rejection(self):
         result = {'approved': False, 'issues': [{'shot_number': 2, 'problem': 'Missing second attempt',

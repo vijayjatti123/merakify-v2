@@ -72,7 +72,8 @@ def contract_for(system, content):
     # in the first live audit; local semantic/reference checks remain mandatory.
     insert_contract = system == prompts.CINEMATOGRAPHY_PATCH and '\nallowed_insert_after:' in content
     required_evidence = (isinstance(payload, dict) and bool(payload.get('requirements'))) or insert_contract
-    if not settings.planning_structured_outputs and not required_evidence:
+    required_director = system in (prompts.CINEMATOGRAPHY_AGENT, prompts.CINEMATOGRAPHY_PATCH)
+    if not settings.planning_structured_outputs and not required_evidence and not required_director:
         return None, None
     name = None
     if system == prompts.CINEMATOGRAPHY_AGENT:
