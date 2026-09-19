@@ -7,15 +7,15 @@ const topicLabels = { product: "Product benefit", audience: "Audience", outcome:
   script_clarity: "Script details", tone: "Tone", differentiator: "Main selling point", constraints: "Must-haves and exclusions" };
 
 // Input changes must never silently discard a conversation.
-export default function ClarifierPanel({ brief, knownFields, onUse, prepareRefined = text => text, inputMode = "idea", productIds = [], disabled = false }) {
+export default function ClarifierPanel({ brief, knownFields, onUse, prepareRefined = text => text, inputMode = "idea", productIds = [], adType = "character", adBrief = {}, disabled = false }) {
   const [appliedBrief, setAppliedBrief] = useState(null);
   const [source, setSource] = useState(null);
   const [generation, setGeneration] = useState(0);
-  const context = JSON.stringify([knownFields, inputMode, productIds]);
+  const context = JSON.stringify([knownFields, inputMode, productIds, adType, adBrief]);
   const signature = JSON.stringify([brief, context]);
   const eligible = brief.trim().length >= 20 && brief.trim().split(/\s+/).length >= 4;
   const changed = source && source.signature !== signature;
-  const inputs = source || { brief, knownFields, inputMode, productIds, signature };
+  const inputs = source || { brief, knownFields, inputMode, productIds, adType, adBrief, signature };
   return <Box hidden={disabled || signature === appliedBrief || (!eligible && !source)}>
     {changed && <Alert severity="info" data-testid="clarifier-inputs-changed" sx={{ mb: 2 }}>
       Your brief or settings changed. Your questions, answers and draft are kept below.
@@ -30,7 +30,7 @@ export default function ClarifierPanel({ brief, knownFields, onUse, prepareRefin
   </Box>;
 }
 
-function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, productIds, onStart, paused }) {
+function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, productIds, adType, adBrief, onStart, paused }) {
   const [session, setSession] = useState(null);
   const [answer, setAnswer] = useState("");
   const [draft, setDraft] = useState("");
@@ -112,7 +112,7 @@ function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, pr
       {!session && <Stack spacing={2} data-testid="clarifier-initial">
         <Typography color="text.secondary">We'll read your {inputMode === "script" ? "script" : "idea"} and ask about missing product details, your audience, and how you want the ad to look. Up to five questions; skip whenever you like.</Typography>
         <Stack direction="row" spacing={1}><Button type="button" variant="contained" startIcon={<Sparkles size={18} />} data-testid="clarifier-start" disabled={busy}
-          onClick={() => { onStart(); return run(() => clarifierRequest("/start", { raw_brief: brief, input_mode: inputMode, product_ids: productIds, known_fields: Object.fromEntries(Object.entries(knownFields).filter(([,v]) => v?.trim())) })); }}>Refine with AI</Button>
+          onClick={() => { onStart(); return run(() => clarifierRequest("/start", { raw_brief: brief, input_mode: inputMode, product_ids: productIds, ad_type: adType, ad_brief: adBrief, known_fields: Object.fromEntries(Object.entries(knownFields).filter(([,v]) => v?.trim())) })); }}>Refine with AI</Button>
           <Button type="button" data-testid="clarifier-skip" onClick={leave}>Skip</Button></Stack>
       </Stack>}
       {session?.assessment?.understanding && <Box data-testid="clarifier-understanding"><Typography variant="subtitle2">Here's what we understand</Typography><Typography variant="body2" color="text.secondary">{session.assessment.understanding}</Typography></Box>}

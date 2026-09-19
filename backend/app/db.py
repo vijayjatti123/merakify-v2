@@ -28,6 +28,8 @@ Base = declarative_base()
 
 
 JOB_COLUMN_DDL = {
+    "ad_type": "VARCHAR NOT NULL DEFAULT 'character'",
+    "ad_brief_json": "TEXT",
     "aspect_ratio": "VARCHAR NOT NULL DEFAULT '16:9'",
     "visual_style": "VARCHAR NOT NULL DEFAULT 'Natural'",
     "color_grade": "VARCHAR NOT NULL DEFAULT 'None'",

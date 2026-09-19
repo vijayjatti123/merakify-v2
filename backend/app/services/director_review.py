@@ -5,13 +5,20 @@ from app.services.camera_direction import check_plan as check_camera
 from app.services import ad_direction
 
 
-def review(shots, characters, minimum=None):
+def review(shots, characters, minimum=None, commercial=None):
     verdict = check_mechanics(check_camera({"approved": True, "issues": []}, shots), shots, characters, minimum)
     issues = list(verdict["issues"])
     def issue(number, text):
         issues.append({"shot_number": number, "problem": text, "code": "technical_plan"})
     if not shots:
         issue(0, "Add at least one shot.")
+    audio_mode = (commercial or {}).get("ad_brief", {}).get("audio_mode", "auto")
+    for shot in shots:
+        if not shot.get("has_dialogue"):
+            continue
+        mode = shot.get("speech_mode", "onscreen")
+        if audio_mode == "silent" or audio_mode in ("onscreen", "voiceover") and mode != audio_mode:
+            issue(shot.get("shot_number", 0), f"Speech conflicts with your selected {audio_mode} treatment. Edit this shot's speech setting before approval.")
     numbers = [s.get("shot_number") for s in shots]
     if len(set(numbers)) != len(numbers):
         issue(0, "Shot numbers must be unique.")

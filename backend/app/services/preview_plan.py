@@ -24,6 +24,10 @@ def preview_input(result, shot):
             parsed = urlsplit(url)
             character["image_url"] = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
     facts["visual_style"] = result.get("continuity", {}).get("visual_style", {})
+    from app.commercial import OPENING_REQUIREMENTS
+    ad_type = result.get("ad_type", result.get("script", {}).get("production_context", {}).get("commercial", {}).get("ad_type", "character"))
+    if ad_type in OPENING_REQUIREMENTS:
+        facts["commercial_opening_requirements"] = OPENING_REQUIREMENTS[ad_type]
     facts["aspect_ratio"] = result.get("aspect_ratio", "16:9")
     if shot.get("direction_version") == 1:
         from app.services.ad_direction import visual_direction

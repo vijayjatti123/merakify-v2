@@ -63,15 +63,24 @@ def snapshot(row):
     return result
 
 
+def _commercial_guidance(state):
+    from app.agents.prompts import COMMERCIAL_DIRECTIONS
+    return COMMERCIAL_DIRECTIONS.get(state["gathered"].get("_context", {}).get("ad_type"), "")
+
+
 def _model_context(state):
-    return {"raw_brief": state["raw_brief"], "known_fields": state["known_fields"],
+    return {"commercial_guidance": _commercial_guidance(state),"raw_brief": state["raw_brief"], "known_fields": state["known_fields"],
         "turns": [{k: t.get(k) for k in ("topic", "question", "answer")} for t in state["turns"]],
         "gathered": {k: v for k, v in state["gathered"].items() if k in QUESTIONS or k in {"_context", "_assessment"}}}
 
 
 def advance(state):
     turns = state["turns"]
-    available = [k for k in QUESTIONS if k not in state["known_fields"]
+    ad_brief = state["gathered"].get("_context", {}).get("ad_brief", {})
+    supplied = {topic: ad_brief[field] for field, topic in {
+        "audience": "audience", "selling_point": "differentiator", "call_to_action": "outcome",
+        "treatment": "execution", "must_preserve": "constraints"}.items() if ad_brief.get(field)}
+    available = [k for k in QUESTIONS if k not in supplied and k not in state["known_fields"]
                  and k not in state["gathered"] and not any(t.get("topic") == k for t in turns)]
     try:
         if state["status"] == "degraded":
@@ -90,6 +99,7 @@ def advance(state):
             # Preserve the source for contradiction checks, but send answers and
             # assessment only once; request deltas rather than full regeneration.
             payload = {"raw_brief": state["raw_brief"], "known_fields": state["known_fields"],
+                "commercial_guidance": _commercial_guidance(state),
                 "context": state["gathered"].get("_context", {}), "previous_assessment": previous,
                 "answers": [{k: t.get(k) for k in ("topic", "question", "answer")} for t in turns],
                 "latest_topic": turns[-1]["topic"], "topics": list(QUESTIONS)}
@@ -114,6 +124,8 @@ def advance(state):
         coverage = result["coverage"]
         if not isinstance(coverage, dict) or set(coverage) != set(QUESTIONS):
             raise ValueError("Incomplete brief assessment")
+        for topic, value in supplied.items():
+            coverage[topic] = {"status": "provided", "evidence": value, "question": QUESTIONS[topic]}
         evidence_text = _source_text([state["raw_brief"], state["known_fields"],
             state["gathered"].get("_context", {}), [t.get("answer") for t in turns]]).casefold()
         gaps, unverified = [], []
@@ -182,6 +194,9 @@ def accepted_direction(db, payload):
     if not row or row.revision != payload.clarifier_revision or row.status == "cancelled" or not row.refined_prompt:
         raise ValueError("Your refined brief changed. Review it again before creating the job.")
     context = row.gathered.get("_context", {})
+    from app.commercial import normalized_brief
+    if context.get("ad_type", "character") != payload.ad_type or normalized_brief(context.get("ad_brief")) != normalized_brief(payload.ad_brief.model_dump()):
+        raise ValueError("Your commercial direction changed. Review the refinement again.")
     if (context.get("input_mode", "idea") == "script") != (payload.script_text is not None):
         raise ValueError("The input mode changed. Review your production direction again.")
     if payload.script_text is not None:

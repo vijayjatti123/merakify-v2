@@ -1,3 +1,4 @@
+import { AD_TYPES } from "../components/CommercialIntake";
 import PreviewLightbox from "../components/PreviewLightbox";
 import DirectorPlanEditor, { editablePlan } from "../components/DirectorPlanEditor";
 import { AlertTriangle, Check, Clapperboard, Clock3, Loader2, Pencil, RefreshCw, Save, X } from "lucide-react";
@@ -289,7 +290,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
           {["Your idea & plan", "Shot previews", "Video clips", "Final video"].map((label) => <Step key={label}><StepLabel>{label}</StepLabel></Step>)}
         </Stepper></Box>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2, '& .MuiChip-root': { maxWidth: '100%' } }} aria-label="Your ad settings">
-          <Chip label={result?.format?.format || 'Your ad'} />
+          <Chip label={AD_TYPES.find(type => type.id === (final?.ad_type || result?.ad_type))?.label || 'Character Commercial'} />
           {(result?.format?.duration_target_sec || draft?.target_duration_sec) && <Chip label={`${result?.format?.duration_target_sec || draft.target_duration_sec}s target`} />}
           {final?.aspect_ratio && <Chip label={final.aspect_ratio} />}
           {(draft?.characters || result?.continuity?.characters?.map(c => c.name) || []).map(name => <Chip key={name} label={name} variant="outlined" />)}

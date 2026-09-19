@@ -1,3 +1,4 @@
+from app.commercial import AdType, CommercialBrief
 from app.video_models import VideoModel, validate_selection
 from datetime import datetime
 from typing import Any, Literal, Optional, get_args
@@ -80,6 +81,8 @@ class JobCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     brief: str
+    ad_type: AdType = "character"
+    ad_brief: CommercialBrief = Field(default_factory=CommercialBrief)
     aspect_ratio: Literal["9:16", "16:9"] = "16:9"
     visual_style: VisualStyle = "Natural"
     color_grade: ColorGrade = "None"
@@ -102,6 +105,8 @@ class JobCreate(BaseModel):
             self.ai_model, self.video_model = "MiniMax H3 Max", "h3_max_fal"
         if (self.clarifier_session_id is None) != (self.clarifier_revision is None):
             raise ValueError("Clarifier session and revision must be supplied together")
+        from app.commercial import validate_commercial
+        validate_commercial(self.ad_type, self.ad_brief.model_dump(), self.product_ids)
         validate_selection(self.video_model, self.ai_model, self.language, self.quality)
         if (self.script_text is None) != (self.resolutions is None):
             raise ValueError("script_text and resolutions must be provided together")
@@ -158,6 +163,8 @@ class ShotRegenerateHints(BaseModel):
 class JobOut(BaseModel):
     id: str
     brief: str
+    ad_type: AdType = "character"
+    ad_brief: CommercialBrief = Field(default_factory=CommercialBrief)
     aspect_ratio: str
     visual_style: str = "Natural"
     color_grade: str = "None"

@@ -1,3 +1,4 @@
+import { AD_TYPES } from "./CommercialIntake";
 import StudioSelect from "./StudioSelect";
 import { ArrowUpRight, CalendarDays, Film } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -49,6 +50,7 @@ export default function JobHistory({ onResume, onNew }) {
           <Box className="history-card-top"><span className="creator-icon"><Film size={22} /></span>
           <Chip size="small" label={{done: "Ready to open", error: "Needs attention", running: "In progress", queued: "Waiting to start"}[job.status] || "In progress"} sx={{ mb: 2 }} />
           </Box>
+          <Typography variant="caption" color="text.secondary">{AD_TYPES.find(type => type.id === job.ad_type)?.label || "Character Commercial"}</Typography>
           <Typography component="h2" sx={{ fontWeight: 500, lineHeight: 1.65 }}>{job.brief}</Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 1, mt: 3 }}><CalendarDays size={15} />{new Date(job.created_at).toLocaleString()}</Typography>
         </CardContent>

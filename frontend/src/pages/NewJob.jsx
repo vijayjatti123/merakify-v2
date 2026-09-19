@@ -1,3 +1,4 @@
+import CommercialIntake, { AD_TYPES } from "../components/CommercialIntake";
 import StudioSelect from "../components/StudioSelect";
 import ProductPicker from "../components/ProductPicker";
 import { VIDEO_MODELS, modelNote } from "../utils/videoModels";
@@ -28,6 +29,10 @@ const COLORS = {
 const SelectField = StudioSelect;
 
 export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "", savedJob = null }) {
+  const [adType, setAdType] = useState("character");
+  const [commercialDrafts, setCommercialDrafts] = useState({});
+  const adBrief = commercialDrafts[adType] || {};
+  const commercialPayload = { ad_type: adType, ad_brief: adBrief };
   const [brief, setBrief] = useState("");
   const [characterSelections, setCharacterSelections] = useState({});
   const [scriptMode, setScriptMode] = useState(false);
@@ -40,6 +45,13 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const [contentType, setContentType] = useState("Ad");
   const [colorGrade, setColorGrade] = useState("None");
   const [visualStyle, setVisualStyle] = useState("Natural");
+  const [modeStyles, setModeStyles] = useState({});
+  function chooseCommercialType(next) {
+    setModeStyles(current => ({ ...current, [adType]: visualStyle }));
+    setVisualStyle(modeStyles[next] || (next === "cgi" ? "3D / CGI" : "Natural"));
+    setContentType(next === "ugc" ? "UGC" : next === "product" ? "Product hero" : "Ad");
+    setAdType(next);
+  }
   const [quality, setQuality] = useState("720p");
   const [language, setLanguage] = useState("English");
   const [customLanguage, setCustomLanguage] = useState("");
@@ -49,7 +61,10 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const videoModel = chosenModel?.id || null;
   useEffect(() => {
     if (savedJob) {
+      setAdType(savedJob.ad_type || "character");
+      setCommercialDrafts(current => ({ ...current, [savedJob.ad_type || "character"]: savedJob.ad_brief || {} }));
       setModelChoice(savedJob.video_model || savedJob.ai_model);
+      setVisualStyle(savedJob.visual_style || "Natural"); setColorGrade(savedJob.color_grade || "None");
       setQuality(savedJob.quality); setLanguage(savedJob.language); setAspectRatio(savedJob.aspect_ratio);
     }
   }, [savedJob]);
@@ -69,14 +84,15 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const effectiveDuration = duration === "Custom" ? customDuration.trim() : duration;
   const knownFields = { duration: effectiveDuration, aspect_ratio: aspectRatio, content_type: contentType,
     color_grade: colorGrade, visual_style: visualStyle, quality, language: effectiveLanguage, ai_model: aiModel };
-  const clarificationContext = JSON.stringify([knownFields, scriptMode, products.map(p => p.id)]);
+  const clarificationContext = JSON.stringify([knownFields, scriptMode, products.map(p => p.id), adType, adBrief]);
   const activeClarification = clarification?.brief === brief && clarification?.context === clarificationContext ? clarification : null;
   const clarificationPayload = activeClarification ? { clarifier_session_id: activeClarification.id, clarifier_revision: activeClarification.revision } : {};
   const modelError = videoModel === "automatic_omni_mini" && quality !== "720p"
     ? "This saved selection requires 720p. Select 720p to continue."
     : videoModel === "kling_voice_fal" && !["english", "chinese", "en", "zh", "mandarin"].includes(effectiveLanguage.toLowerCase())
     ? "Kling Voice ID supports English/Chinese only. Choose Seedance for this language." : "";
-  const canSubmit = Boolean(brief.trim() && effectiveDuration && effectiveLanguage && !submitting && !modelError);
+  const needsProduct = ["product", "cgi"].includes(adType) && products.length === 0;
+  const canSubmit = Boolean(!needsProduct && brief.trim() && effectiveDuration && effectiveLanguage && !submitting && !modelError);
   // Guidance mirrors ClarifierPanel's existing gates; it does not control activation.
   const needsRefinementCharacters = brief.trim().length < 20;
   const needsRefinementWords = brief.trim().split(/\s+/).length < 4;
@@ -154,6 +170,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     try {
       await onSubmit({
         ...clarificationPayload,
+        ...commercialPayload,
         brief: briefParts.join("\n\n"),
         product_ids: products.map(p => p.id),
         character_mentions: activeMentions(brief, characterSelections),
@@ -178,6 +195,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
     if (selectedAsset) briefParts.push(`Reference image: ${selectedAsset.url}`);
     await onSubmit({
       ...clarificationPayload,
+        ...commercialPayload,
       brief: briefParts.join("\n\n"),
         product_ids: products.map(p => p.id),
       aspect_ratio: aspectRatio,
@@ -219,7 +237,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               {collapsed ? submittedBrief : "Your story, directed. Start with an idea or a script."}
             </p>
             {collapsed && savedJob && <Typography variant="caption" color="text.secondary" data-testid="saved-video-model">
-              Video model: {chosenModel?.label || savedJob.ai_model}
+              {AD_TYPES.find(type => type.id === savedJob.ad_type)?.label || "Character Commercial"} · Video model: {chosenModel?.label || savedJob.ai_model}
             </Typography>}
           </div>
           {collapsed && <ChevronUp size={18} aria-hidden="true" style={{ color: COLORS.marigold }} />}
@@ -227,18 +245,25 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
 
         <div className="intake-collapse" aria-hidden={collapsed}>
           <fieldset disabled={collapsed} className="intake-collapse-inner flex flex-col gap-7">
+            <CommercialIntake adType={adType} onType={chooseCommercialType} value={adBrief}
+              onChange={value => setCommercialDrafts(current => ({ ...current, [adType]: value }))}
+              disabled={collapsed || submitting} />
+            {adType !== "character" && <ProductPicker selected={products} onChange={setProducts} disabled={collapsed || submitting} />}
+            {needsProduct && <Typography variant="body2" color="text.secondary" data-testid="commercial-product-required">
+              Add and approve a product photo to enable Create storyboard.
+            </Typography>}
             {scriptMode ? <TextField multiline fullWidth label="Your script" value={brief}
               onChange={event => setBrief(event.target.value)} placeholder="Paste your full script or scene breakdown here"
               minRows={3} autoFocus sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7 } }} /> :
               <BriefCharacterInput value={brief} onChange={setBrief} selections={characterSelections}
                 onSelections={setCharacterSelections} disabled={collapsed || submitting}
-                tools={<ProductPicker compact selected={products} onChange={setProducts} disabled={collapsed || submitting} />} />}
+                tools={adType === "character" ? <ProductPicker compact selected={products} onChange={setProducts} disabled={collapsed || submitting} /> : null} />}
             {!collapsed && !submitting && refinementHint && <Typography variant="body2" color="text.secondary"
               role="status" aria-live="polite" data-testid="clarifier-activation-hint" sx={{ mt: -1.5 }}>
               {refinementHint}
             </Typography>}
-            {scriptMode && <ProductPicker selected={products} onChange={setProducts} disabled={collapsed || submitting} />}
-            <ClarifierPanel brief={brief} inputMode={scriptMode ? "script" : "idea"} productIds={products.map(p => p.id)}
+            {scriptMode && adType === "character" && <ProductPicker selected={products} onChange={setProducts} disabled={collapsed || submitting} />}
+            <ClarifierPanel adType={adType} adBrief={adBrief} brief={brief} inputMode={scriptMode ? "script" : "idea"} productIds={products.map(p => p.id)}
               prepareRefined={text => scriptMode ? text : preserveRefinedMentions(text, brief, characterSelections)}
               knownFields={knownFields} disabled={collapsed || submitting} onUse={(text, row) => {
                 const acceptedBrief = scriptMode ? brief : text;
@@ -267,9 +292,13 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               <SelectField label="Duration" value={duration} onChange={event => setDuration(event.target.value)}>
                 <option>15 seconds</option><option>30 seconds</option><option>60 seconds</option><option>Custom</option>
               </SelectField>
-              <SelectField label="Content type" value={contentType} onChange={(event) => setContentType(event.target.value)}>
-                <option>Ad</option><option>Short story</option><option>Documentary</option><option>Product hero</option><option>UGC</option><option>Other</option>
+              <SelectField label="Language" value={language} onChange={handleLanguageChange}>
+                <option>English</option><option>Hindi</option><option>Tamil</option><option>Telugu</option><option>Bengali</option><option>Other</option>
               </SelectField>
+            </div>
+
+            <details data-testid="advanced-video-settings"><summary style={{ cursor: "pointer" }}>Style, quality & model</summary>
+              <div className="intake-options" style={{ marginTop: 16 }}>
               <SelectField label="Color grade" value={colorGrade} onChange={(event) => setColorGrade(event.target.value)}>
                 {["None", "Warm", "Cool", "Vintage", "Neon", "Black & white", "Vibrant"].map((value) => <option key={value}>{value}</option>)}
               </SelectField>
@@ -278,9 +307,6 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               </SelectField>
               <SelectField label="Video quality" value={quality} onChange={(event) => setQuality(event.target.value)}>
                 <option>480p</option><option>720p</option>
-              </SelectField>
-              <SelectField label="Language" value={language} onChange={handleLanguageChange}>
-                <option>English</option><option>Hindi</option><option>Tamil</option><option>Telugu</option><option>Bengali</option><option>Other</option>
               </SelectField>
               <SelectField label="AI model" value={modelChoice} onChange={(event) => setModelChoice(event.target.value)} note={modelError || (chosenModel ? modelNote(videoModel) : "Existing planning model; video generation support may be limited.")}>
                 <optgroup label="Video generation">
@@ -294,7 +320,8 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               <Button type="button" onClick={toggleAssetPanel} aria-label="Add reference image" variant="outlined" color="secondary" className="reference-toggle">
                 {assetPanelOpen ? <X size={18} /> : <ImagePlus size={18} />} Reference image
               </Button>
-            </div>
+              </div>
+            </details>
 
             {modelError && <Alert severity="warning">{modelError}</Alert>}
             {duration === "Custom" && <input value={customDuration} onChange={(event) => setCustomDuration(event.target.value)} aria-label="Custom duration" placeholder="Custom duration, e.g. 45 seconds" className="w-full max-w-xs rounded-md px-3 py-2 text-sm outline-none" style={{ background: COLORS.field, border: `1px solid ${COLORS.border}`, color: COLORS.text }} />}

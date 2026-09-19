@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db import SessionLocal
 from app.schemas import JobCreate
+from app.commercial import AdType, CommercialBrief
 from app.services import clarifier_service as service, job_service as storage
 
 router = APIRouter(prefix="/api/clarifier", tags=["clarifier"])
@@ -14,6 +15,8 @@ class Start(BaseModel):
     model_config = ConfigDict(extra="forbid")
     raw_brief: str = Field(min_length=1, max_length=20000)
     known_fields: dict[str, Any] = Field(default_factory=dict)
+    ad_type: AdType = "character"
+    ad_brief: CommercialBrief = Field(default_factory=CommercialBrief)
     input_mode: Literal["idea", "script"] = "idea"
     product_ids: list[str] = Field(default_factory=list, max_length=4)
 
@@ -52,7 +55,9 @@ def start(body: Start):
             products = selected(db, body.product_ids)
         except ValueError as error:
             raise HTTPException(422, str(error)) from error
-        context = {"input_mode": body.input_mode,
+        context = {"ad_type": body.ad_type,
+            "ad_brief": body.ad_brief.model_dump(exclude_defaults=True),
+            "input_mode": body.input_mode,
             "products": [{"id": p.id, "name": p.name} for p in products]}
         return service.snapshot(service.start(db, body.raw_brief, body.known_fields, context))
 

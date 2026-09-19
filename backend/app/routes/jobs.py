@@ -260,6 +260,8 @@ def _job_out(job, result=None) -> JobOut:
     return JobOut(
         id=job.id,
         brief=job.brief,
+        ad_type=job.ad_type,
+        ad_brief=json.loads(job.ad_brief_json or "{}"),
         aspect_ratio=job.aspect_ratio,
         visual_style=job.visual_style,
         color_grade=job.color_grade,
@@ -291,6 +293,8 @@ def _create_and_start_job(
     resolutions: dict | None = None,
     product_ids: list[str] | None = None,
     creative_direction: dict | None = None,
+    ad_type: str = "character",
+    ad_brief: dict | None = None,
 ) -> JobOut:
     job = job_service.create_job(
         db,
@@ -306,6 +310,7 @@ def _create_and_start_job(
         resolutions=resolutions,
         product_ids=product_ids,
         creative_direction=creative_direction,
+        ad_type=ad_type, ad_brief=ad_brief,
     )
     job_service.queue_pipeline_task(db, job.id, "plan")
     return _job_out(job)
@@ -429,6 +434,7 @@ def create_job(payload: JobCreate, background_tasks: BackgroundTasks, db: Sessio
         resolutions=resolutions,
         product_ids=payload.product_ids,
         creative_direction=direction,
+        ad_type=payload.ad_type, ad_brief=payload.ad_brief.model_dump(exclude_defaults=True),
     )
 
 
@@ -530,7 +536,8 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
         return _job_out(job, result)
     from app.services.director_review import review
     technical = review(result.get("shots", []), result.get("continuity", {}).get("characters", []),
-                       result.get("planning_constraints", {}).get("minimum_shot_seconds"))
+                       result.get("planning_constraints", {}).get("minimum_shot_seconds"),
+                       {"ad_type": job.ad_type, "ad_brief": json.loads(job.ad_brief_json or "{}")})
     if not technical["approved"]:
         raise HTTPException(status_code=422, detail="Correct the plan details before approval: " + "; ".join(
             f"Shot {i['shot_number']}: {i['problem']}" for i in technical["issues"]))
@@ -716,6 +723,7 @@ def retry_job(
         ai_model=job.ai_model,
         video_model=job.video_model,
         product_ids=product_ids,
+        ad_type=job.ad_type, ad_brief=json.loads(job.ad_brief_json or "{}"),
     )
     return {"id": retried.id}
 

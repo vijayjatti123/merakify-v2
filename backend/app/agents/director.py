@@ -343,7 +343,8 @@ def validate_and_correct(
     """
     from app.services.director_review import review, timeline
     current_shots = render_camera_summaries(shots)
-    verdict = review(current_shots, characters, minimum_shot_seconds)
+    verdict = review(current_shots, characters, minimum_shot_seconds,
+        (approved_story or {}).get("production_context", {}).get("commercial"))
     for shot in current_shots:
         shot["review_mode"] = "user"
     if verdict["approved"]:
@@ -589,6 +590,9 @@ def run_pipeline(db: Session, job_id: str) -> None:
         from app.services.clarifier_service import planning_direction
         direction_note = ("\nUser-reviewed production direction (not spoken dialogue; preserve source-script words):\n"
             + json.dumps(planning_direction(direction), ensure_ascii=False)) if direction else ""
+        commercial_context = {"ad_type": job.ad_type, "ad_brief": json.loads(job.ad_brief_json or "{}")}
+        direction_note += "\nCommercial format instructions:\n" + prompts.COMMERCIAL_DIRECTIONS[job.ad_type]
+        direction_note += "\nUser commercial settings (preserve explicit script; do not invent claims):\n" + json.dumps(commercial_context, ensure_ascii=False)
         if direction:
             emit("clarifier_handoff", "User-reviewed production direction and answers supplied to planning.")
 
@@ -619,6 +623,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
         # later edit/retry paths. No separate requirement-extraction model call.
         from app.services.product_service import job_references
         script['production_context'] = {
+            'commercial': commercial_context,
             'original_brief': brief, 'source_script': source_script,
             'reviewed_direction': planning_direction(direction),
             'products': [{'name': p['name']} for p in job_references(db, job_id)],
@@ -779,6 +784,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
         # not to silently patch the disclaimer instead of the pipeline.
 
         result = {
+            **commercial_context,
             "aspect_ratio": job.aspect_ratio,
             "quality": job.quality,
             "language": language,

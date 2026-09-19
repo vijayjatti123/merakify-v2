@@ -54,7 +54,11 @@ def create_job(
     resolutions: dict | None = None,
     product_ids: list[str] | None = None,
     creative_direction: dict | None = None,
+    ad_type: str = "character",
+    ad_brief: dict | None = None,
 ) -> Job:
+    from app.commercial import validate_commercial
+    ad_brief = validate_commercial(ad_type, ad_brief, product_ids)
     from app.video_models import validate_selection
     validate_selection(video_model, ai_model, language, quality)
     visual_style = visual_style if visual_style is not None else style_from_brief(brief, "visual_style")
@@ -77,6 +81,8 @@ def create_job(
         brief += "\n\nApproved product references: " + ", ".join(p.name for p in products) + ". Preserve the named products and their packaging; no voice or character identity is attached to them."
     job = Job(
         brief=brief,
+        ad_type=ad_type,
+        ad_brief_json=json.dumps(ad_brief, ensure_ascii=False),
         aspect_ratio=aspect_ratio,
         visual_style=visual_style,
         color_grade=color_grade,
@@ -103,11 +109,11 @@ def get_job(db: Session, job_id: str) -> Optional[Job]:
 
 
 def list_job_summaries(db: Session, limit: int, offset: int) -> dict:
-    rows = (db.query(Job.id, Job.brief, Job.status, Job.created_at)
+    rows = (db.query(Job.id, Job.brief, Job.status, Job.created_at, Job.ad_type)
             .order_by(Job.created_at.desc(), Job.id.desc()).offset(offset).limit(limit + 1).all())
     return {
         "jobs": [{"id": row.id, "brief": row.brief.split("\n\n")[0][:200],
-                  "status": row.status, "created_at": row.created_at} for row in rows[:limit]],
+                  "status": row.status, "ad_type": row.ad_type, "created_at": row.created_at} for row in rows[:limit]],
         "has_more": len(rows) > limit,
     }
 
@@ -116,10 +122,15 @@ def copy_job_for_retry(db: Session, source: Job) -> Job:
     # Already-validated intake must survive recovery byte-for-byte, including
     # source script and vault resolutions. Do not re-fold style prose.
     job = Job(**{field: getattr(source, field) for field in (
-        "brief", "aspect_ratio", "visual_style", "color_grade", "quality",
+        "brief", "ad_type", "ad_brief_json", "aspect_ratio", "visual_style", "color_grade", "quality",
         "language", "ai_model", "video_model", "script_text", "resolutions_json", "creative_direction_json",
     )}, status="queued")
     db.add(job)
+    db.flush()
+    from app.models import JobProduct
+    for reference in db.query(JobProduct).filter_by(job_id=source.id).all():
+        db.add(JobProduct(job_id=job.id, product_id=reference.product_id,
+                          name=reference.name, object_key=reference.object_key))
     db.commit()
     db.refresh(job)
     from app.models import AgentCheckpoint
