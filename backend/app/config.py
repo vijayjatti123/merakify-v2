@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     planning_structured_outputs: bool = False
     google_ai_api_key: str = ""
     gemini_image_model: str = "gemini-3.1-flash-image"
-    gemini_preview_check_model: str = "gemini-2.5-flash"
+    gemini_preview_check_model: str = "gemini-3.6-flash"
     sarvam_api_key: str = ""
     elevenlabs_api_key: str = ""
     evolink_api_key: str = ""

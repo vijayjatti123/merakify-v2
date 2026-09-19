@@ -31,6 +31,14 @@ class VerificationUnavailable(StillFrameError):
     pass
 
 
+class StillProviderError(StillFrameError):
+    def __init__(self, status, model):
+        self.status = status
+        self.model = model
+        self.retryable = status in (408, 429) or status >= 500
+        super().__init__(f"Google still-frame request failed (HTTP {status})")
+
+
 class NoStillImageError(StillFrameError):
     def __init__(self, diagnostics):
         self.diagnostics = diagnostics
@@ -179,7 +187,7 @@ def _google(parts, *, aspect_ratio=None, verification=False):
             return json.loads(response.read())
     except HTTPError as error:
         # Never put provider payloads, source prompts or signed URLs in shared traces.
-        raise StillFrameError(f"Google still-frame request failed (HTTP {error.code})") from error
+        raise StillProviderError(error.code, model) from error
 
 
 def _continuation_parts(continuation, *, checking=False):
@@ -343,10 +351,17 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
                 raise ValueError("Missing rejection reason")
             break
         except Exception as error:
+            retryable = not isinstance(error, StillProviderError) or error.retryable
             if emit:
+                # Status/model and exception type only: never provider bodies, prompts or URLs.
+                emit("preview_verification_error", json.dumps({
+                    "model": settings.gemini_preview_check_model, "attempt": attempt + 1,
+                    "error_type": type(error).__name__,
+                    "http_status": error.status if isinstance(error, StillProviderError) else None,
+                    "retryable": retryable}))
                 emit("still_frame", "Preview verification unavailable; " +
-                     ("retrying verification of the same image once." if attempt == 0 else "candidate retained for verification retry."))
-            if attempt == 1:
+                     ("retrying verification of the same image once." if attempt == 0 and retryable else "candidate retained for verification retry."))
+            if attempt == 1 or not retryable:
                 raise VerificationUnavailable("Preview verification unavailable") from error
 
     return verdict

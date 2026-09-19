@@ -106,6 +106,25 @@ class StillFramesTests(unittest.TestCase):
                 service.check_still('Inside helicopter', [], self.image)
         self.assertEqual(call.call_count, 2)
 
+    def test_unavailable_model_is_not_retried_and_reports_safe_diagnostics(self):
+        events = []
+        with patch.object(service, '_google', side_effect=service.StillProviderError(404, 'retired-model')) as call:
+            with self.assertRaises(service.VerificationUnavailable):
+                service.check_still('Private user prompt', [], self.image,
+                    emit=lambda key, note: events.append((key, note)))
+        self.assertEqual(call.call_count, 1)
+        error = json.loads(next(note for key, note in events if key == 'preview_verification_error'))
+        self.assertEqual(error['http_status'], 404)
+        self.assertFalse(error['retryable'])
+        self.assertNotIn('Private user prompt', str(events))
+
+    def test_transient_checker_error_retries_same_image(self):
+        response = {'candidates': [{'content': {'parts': [{'text': json.dumps(self.checked_verdict())}]}}]}
+        with patch.object(service, '_google', side_effect=[service.StillProviderError(503, 'checker'), response]) as call:
+            self.assertTrue(service.check_still('A cup', [], self.image)['approved'])
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(call.call_args_list[0], call.call_args_list[1])
+
     def test_helicopter_opening_requires_interior_spatial_grounding(self):
         from app.services.preview_plan import preview_visual
         text = preview_visual({
