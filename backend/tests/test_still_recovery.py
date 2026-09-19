@@ -126,6 +126,54 @@ class StillRecoveryTests(unittest.TestCase):
         jobs.claim_still_retry(self.db,self.job.id,1,'none')
         self.assertFalse(jobs.finish_still_retry(self.db,self.job.id,1,'stale',self.result))
 
+    def dependency_retry(self):
+        from app.services.preview_plan import preview_input
+        self.result['shots'][0].update(still_frame_url='https://audit/first', still_frame_key='first')
+        target = self.result['shots'][1]
+        target.update(description='Neighbor unchanged.', characters_in_shot=[], still_frame_url=None,
+                      still_frame_status='failed', preview_dependencies={'1': None})
+        target['preview_input'] = preview_input(self.result, target)
+        self.job.result_json = json.dumps(self.result)
+        self.db.commit()
+        token = jobs.claim_still_retry(self.db, self.job.id, 2, 'none')
+        rendered = copy.deepcopy(self.result)
+        rendered['shots'][1].update(preview_dependencies={'1': 'first'}, still_frame_status='ready',
+                                   still_frame_url='https://audit/second', still_frame_key='second')
+        rendered['shots'][1]['still_frame_source_hash'] = still.shot_fingerprint(rendered['shots'][1])
+        return token, rendered
+
+    def test_recovered_upstream_dependency_does_not_discard_finished_retry(self):
+        token, rendered = self.dependency_retry()
+        self.assertTrue(jobs.finish_still_retry(self.db, self.job.id, 2, token, rendered))
+        saved = json.loads(jobs.get_job(self.db, self.job.id).result_json)
+        self.assertEqual(saved['shots'][1]['still_frame_status'], 'ready')
+        self.assertEqual(saved['shots'][1]['preview_dependencies'], {'1': 'first'})
+        self.assertEqual(still.shot_fingerprint(saved['shots'][1]), saved['shots'][1]['still_frame_source_hash'])
+        self.assertEqual(saved['shots'][0], self.result['shots'][0])
+
+    def test_upstream_changed_during_retry_is_rejected_with_stopped_state(self):
+        token, rendered = self.dependency_retry()
+        stored = json.loads(jobs.get_job(self.db, self.job.id).result_json)
+        stored['shots'][0]['still_frame_key'] = 'changed-during-render'
+        self.job.result_json = json.dumps(stored)
+        self.db.commit()
+        self.assertFalse(jobs.finish_still_retry(self.db, self.job.id, 2, token, rendered))
+        saved = json.loads(jobs.get_job(self.db, self.job.id).result_json)['shots'][1]
+        self.assertEqual(saved['still_frame_status'], 'failed')
+        self.assertNotIn('still_retry_token', saved)
+        self.assertFalse(saved.get('still_frame_url'))
+
+    def test_plan_edited_during_retry_cannot_accept_old_image(self):
+        token, rendered = self.dependency_retry()
+        stored = json.loads(jobs.get_job(self.db, self.job.id).result_json)
+        stored['shots'][1]['description'] = 'Different action after edit'
+        self.job.result_json = json.dumps(stored)
+        self.db.commit()
+        self.assertFalse(jobs.finish_still_retry(self.db, self.job.id, 2, token, rendered))
+        saved = json.loads(jobs.get_job(self.db, self.job.id).result_json)['shots'][1]
+        self.assertEqual(saved['still_frame_status'], 'failed')
+        self.assertEqual(saved['description'], 'Different action after edit')
+
     def test_initial_generation_is_not_an_expired_manual_retry(self):
         self.result['shots'][0]['still_frame_status'] = 'generating'
         self.job.result_json = json.dumps(self.result)

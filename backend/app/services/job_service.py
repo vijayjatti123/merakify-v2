@@ -506,21 +506,46 @@ def claim_still_retry(db, job_id, number, expected_attempt):
 
 def finish_still_retry(db, job_id, number, token, regenerated):
     from app.services.still_frame_service import shot_fingerprint
+    from app.services.preview_plan import preview_input
     job = db.query(Job).filter_by(id=job_id).with_for_update().populate_existing().one()
     old = job.result_json
     result = json.loads(old)
     target = next(s for s in result["shots"] if s["shot_number"] == number)
     source = next(s for s in regenerated["shots"] if s["shot_number"] == number)
-    if target.get("still_retry_token") != token or still_retry_expired(target) or shot_fingerprint(target) != shot_fingerprint(source):
+    if target.get("still_retry_token") != token or still_retry_expired(target):
         db.rollback()
         return False
-    for key in list(target):
-        if key.startswith("still_frame_") or key.startswith("still_retry_"):
-            target.pop(key)
-    target.update({k: v for k, v in source.items() if k.startswith("still_frame_")})
-    for entity, reference in regenerated.get("entity_references", {}).items():
-        if reference.get("shot_number") == number:
-            result.setdefault("entity_references", {})[entity] = reference
+    # Dependencies are resolved by the worker after an upstream preview recovers.
+    # Compare the current creative plan separately, and verify every consumed
+    # dependency still points to the same accepted image before adopting it.
+    current = dict(target)
+    facts = preview_input(result, target)
+    if facts:
+        current['preview_input'] = facts
+    dependencies = source.get('preview_dependencies', {})
+    current['preview_dependencies'] = dependencies
+    siblings = {str(s['shot_number']): s for s in result['shots']}
+    dependencies_match = all(
+        str(n) in siblings and
+        (siblings[str(n)].get('still_frame_key') or siblings[str(n)].get('still_frame_url')) == key
+        for n, key in dependencies.items())
+    compatible = dependencies_match and shot_fingerprint(current) == shot_fingerprint(source)
+    if not compatible:
+        target.update(still_frame_status='failed', still_frame_error_kind='generation',
+                      still_frame_warning='The plan or a reference changed during preview preparation. Retry this preview.')
+        target.pop('still_retry_token', None)
+        target.pop('still_retry_started_at', None)
+    else:
+        for key in list(target):
+            if key.startswith("still_frame_") or key.startswith("still_retry_"):
+                target.pop(key)
+        target.update({k: v for k, v in source.items() if k.startswith("still_frame_")})
+        if source.get('preview_input'):
+            target['preview_input'] = source['preview_input']
+        target['preview_dependencies'] = dependencies
+        for entity, reference in regenerated.get("entity_references", {}).items():
+            if reference.get("shot_number") == number:
+                result.setdefault("entity_references", {})[entity] = reference
     changed = db.query(Job).filter(Job.id == job_id, Job.result_json == old).update(
         {Job.result_json: json.dumps(result)}, synchronize_session=False)
     if changed != 1:
@@ -528,7 +553,7 @@ def finish_still_retry(db, job_id, number, token, regenerated):
         return False
     db.commit()
     db.expire_all()
-    return True
+    return compatible
 
 
 def claim_video(db, job_id, number, fields, *, replace_token=None):
