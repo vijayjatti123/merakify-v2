@@ -27,3 +27,12 @@ test('actual review findings retained and deduplicated; silent clips have no spe
   const result=videoReviewWarnings({video_status:'done',video_url:'/video.mp4',video_warnings:['style mismatch','style mismatch']});
   assert.equal(result.length,1); assert.match(result[0], /visual style/);
 });
+test('speech mismatch and checker outage stay distinct from generic timing advice', () => {
+  for (const [status, expected] of [['mismatch', /does not match/], ['unverified', /couldn.t verify/]]) {
+    const notes = videoReviewWarnings({video_status:'done', video_url:'/v.mp4', experimental_audio_sync:true,
+      video_speech_check:{status}, video_warnings:['WARNING: Render compliance: not verified for speech; accepting video for user review.']});
+    assert.equal(notes.length, 1);
+    assert.match(notes[0], expected);
+    assert.doesNotMatch(notes[0], /timing may differ/);
+  }
+});

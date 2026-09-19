@@ -40,11 +40,12 @@ def approved_speech_text(result, shot, speaker):
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Approved dialogue text is missing. Restore it before generating this speaking video.")
     language = result.get("language") or "the language of the approved audio"
+    from app.services.speech_compliance_service import SPEECH_RULE
     # JSON quoting preserves native script, punctuation and embedded quotes.
     return ("\nApproved speech (transcript, not on-screen text): "
             + json.dumps({"speaker": speaker, "language": language, "dialogue": text}, ensure_ascii=False)
             + "\nSpeak these exact words in the specified language using the supplied audio's voice, pronunciation and timing. "
-              "Do not translate, paraphrase, read these labels aloud, or display the transcript as captions.")
+              "Do not translate, paraphrase, read these labels aloud, or display the transcript as captions. " + SPEECH_RULE)
 
 
 def validate_audio_result(media):

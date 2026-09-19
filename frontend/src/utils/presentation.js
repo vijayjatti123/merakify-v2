@@ -49,8 +49,12 @@ export function videoReviewWarnings(shot) {
   // A generic speech caution is shown once, beside the playable result only.
   if (!shot.video_url || shot.video_status !== 'done') return [];
   const result = [];
-  if (shot.experimental_audio_sync || (shot.video_warnings || []).some(w => /^Audio-guided generation is experimental\./.test(w))) result.push('Listen to the dialogue before approving: AI-generated speech may vary in pronunciation or mouth timing.');
+  const speechStatus = shot.video_speech_check?.status;
+  if (speechStatus === 'mismatch') result.push("The generated speech does not match your approved dialogue. Automatic correction did not resolve it; review the clip before using it.");
+  if (speechStatus === 'unverified') result.push("Your video is saved, but we couldn't verify its spoken words. Please listen before using it.");
+  if (!['mismatch', 'unverified'].includes(speechStatus) && (shot.experimental_audio_sync || (shot.video_warnings || []).some(w => /^Audio-guided generation is experimental\./.test(w)))) result.push('Listen to the dialogue before approving: AI-generated speech may vary in pronunciation or mouth timing.');
   for (const warning of shot.video_warnings || []) {
+    if (speechStatus && /Render compliance:.*speech/i.test(warning)) continue;
     if (/^Audio-guided generation is experimental\.|^Video duration is \d|^Provider bills \d/.test(warning)) continue;
     result.push(friendlyMessage(warning, 'Please review this video before approving it.', { warning: true }));
   }

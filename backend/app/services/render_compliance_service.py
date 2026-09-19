@@ -31,8 +31,14 @@ status (pass|mismatch|unverified), observed (short factual visual description), 
 
 def snapshot(db, job_id, shot):
     job = job_service.get_job(db, job_id)
-    return {"visual_style": job.visual_style, "camera_angle": shot.get("camera_angle"),
-            "shot_scale": shot.get("shot_scale"), "still_frame_url": shot.get("still_frame_url")}
+    from app.services.speech_mode import is_onscreen_speech, is_voiceover
+    expected = {"visual_style": job.visual_style, "camera_angle": shot.get("camera_angle"),
+                "shot_scale": shot.get("shot_scale"), "still_frame_url": shot.get("still_frame_url")}
+    generated_narration = job.video_model in {"h3_max_fal", "seedance_mini_evolink", "seedance_mini_fal", "automatic_omni_mini"}
+    if is_onscreen_speech(shot) or (is_voiceover(shot) and generated_narration):
+        expected["speech"] = {"dialogue_text": shot.get("dialogue_text", ""),
+                              "language": job.language, "speaker": shot.get("speaker_label")}
+    return expected
 
 
 def inline(image):
@@ -95,6 +101,40 @@ def inspect(media, expected):
             "sample_times_sec": [s[0] for s in samples], "checked_at": datetime.now(timezone.utc).isoformat()}
 
 
+
+def inspect_all(media, expected):
+    if not expected.get("speech"):
+        return inspect(media, expected)
+    from concurrent.futures import ThreadPoolExecutor
+    from app.services import speech_compliance_service as speech
+    # Decode first: the visual reader can then seek the same media independently.
+    try:
+        audio, duration = speech.extract_audio(media)
+        audio_error = None
+    except Exception as error:
+        audio_error = type(error).__name__
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        visual_future = pool.submit(inspect, media, expected)
+        speech_future = None if audio_error else pool.submit(speech.inspect_audio, audio, duration, expected["speech"])
+        try:
+            check = visual_future.result()
+        except Exception as error:
+            check = {"verdict": {k: {"status":"unverified","observed":"","reason":type(error).__name__}
+                                 for k in ("style","scale")}}
+        try:
+            if audio_error:
+                raise ValueError(audio_error)
+            speech_check = speech_future.result()
+        except Exception as error:
+            speech_check = {"verdict":{"status":"unverified","observed":"",
+                "reason":"Speech verification unavailable","error":type(error).__name__}}
+    check["speech_check"] = speech_check
+    check["verdict"]["speech"] = {**speech_check["verdict"],
+        "observed": speech_check["verdict"].get("transcript", ""),
+        "reason": "Approved dialogue does not match generated speech." if speech_check["verdict"]["status"] == "mismatch"
+                  else speech_check["verdict"]["reason"]}
+    return check
+
 def warning(db, job_id, number, task, data, message):
     message = "WARNING: Render compliance: " + message
     job_service.update_video(db, job_id, number, expected_task_id=task,
@@ -116,7 +156,7 @@ def accept(db, job_id, shot, media, *, check_cache=None):
                 expected = data.get("video_compliance_expected")
                 if not expected:
                     raise ValueError("No submission-time compliance snapshot (legacy task)")
-                check = inspect(media, expected)
+                check = inspect_all(media, expected)
             except Exception as error:
                 # Preserve existing outage/user-review policy, never spend on a rerender here.
                 check = {"error": type(error).__name__, "unverified": True}
@@ -130,13 +170,17 @@ def accept(db, job_id, shot, media, *, check_cache=None):
         warning(db, job_id, number, task, data, f"not verified ({check['error']}); accepting video for user review.")
         return True
     verdict = check["verdict"]
-    mismatches = [f"{key}: {verdict[key]['reason']}" for key in ("style", "scale") if verdict[key]["status"] == "mismatch"]
-    unknown = [key for key in ("style", "scale") if verdict[key]["status"] == "unverified"]
+    if "speech" in verdict:
+        job_service.update_video(db, job_id, number, expected_task_id=task,
+                                 video_speech_check=check["speech_check"]["verdict"])
+    dimensions = ("style", "scale", "speech") if "speech" in verdict else ("style", "scale")
+    mismatches = [f"{key}: {verdict[key]['reason']}" for key in dimensions if verdict[key]["status"] == "mismatch"]
+    unknown = [key for key in dimensions if verdict[key]["status"] == "unverified"]
     if not mismatches:
         if unknown:
             warning(db, job_id, number, task, data, "not verified for " + ", ".join(unknown) + "; accepting video for user review.")
         else:
-            job_service.append_event(db, job_id, "render_compliance", f"Shot {number}: sampled style and opening-frame scale passed.")
+            job_service.append_event(db, job_id, "render_compliance", f"Shot {number}: render compliance checks passed.")
         return True
     detail = "; ".join(mismatches)
     if data.get("video_retry_submission_unknown"):
@@ -149,6 +193,12 @@ def accept(db, job_id, shot, media, *, check_cache=None):
     if not request:
         warning(db, job_id, number, task, data, "mismatch; retry snapshot unavailable: " + detail + "; accepting video.")
         return True
+    if verdict.get("speech", {}).get("status") == "mismatch":
+        from app.services.speech_compliance_service import SPEECH_RULE
+        # Never feed the checker's garbled transcription back into generation.
+        import copy
+        request = copy.deepcopy(request)
+        request["prompt"] = request.get("prompt", "") + "\nSpeech correction: " + SPEECH_RULE
     # Do not replay a legacy paid request containing an uploaded Vault portrait.
     if data.get("video_provider") == "hedra" and data.get("video_reference_source") != "module_o_still":
         from app.services.hedra_video_service import MediaValidationError
@@ -156,7 +206,8 @@ def accept(db, job_id, shot, media, *, check_cache=None):
     claimed = job_service.video_check_state(db, job_id, number, task, claim_retry=True)
     if claimed is None:
         return False
-    job_service.append_event(db, job_id, "render_compliance", f"Shot {number}: rejected ({detail}); submitting the single full-generation retry with unchanged prompt/references.")
+    job_service.update_video(db, job_id, number, expected_task_id=task, video_retry_request=request)
+    job_service.append_event(db, job_id, "render_compliance", f"Shot {number}: rejected ({detail}); submitting the single full-generation retry with approved references preserved.")
     try:
         if data.get("video_provider") == "fal":
             from app.services import audio_video_service
