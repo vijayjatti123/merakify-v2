@@ -1,8 +1,9 @@
+import StudioSelect from "../components/StudioSelect";
 import ProductPicker from "../components/ProductPicker";
 import { VIDEO_MODELS, modelNote } from "../utils/videoModels";
-import { Sparkles, FileText, ChevronUp, ImagePlus, Loader2, Plus, X, Smartphone, Monitor, Clock3 } from "lucide-react";
+import { Sparkles, FileText, ChevronUp, ImagePlus, Loader2, Plus, X, Clapperboard, ArrowUpRight } from "lucide-react";
 import { useState, useEffect } from "react";
-import { Alert, Button, Card, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
+import { Alert, Button, Card, TextField, Typography } from "@mui/material";
 import ActionProgress from "../components/ActionProgress";
 import { friendlyMessage } from "../utils/presentation";
 
@@ -24,10 +25,7 @@ const COLORS = {
 };
 
 
-function SelectField({ label, note, value, onChange, children }) {
-  return <TextField select label={label} value={value} onChange={onChange} helperText={note}
-    slotProps={{ select: { native: true } }} sx={{ minWidth: 160, flex: "1 1 180px" }}>{children}</TextField>;
-}
+const SelectField = StudioSelect;
 
 export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "", savedJob = null }) {
   const [brief, setBrief] = useState("");
@@ -209,16 +207,16 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   }
 
   return (
-    <Card component="section" className={`intake-card ${collapsed ? "intake-card--collapsed" : ""}`} aria-label="Creative brief input" sx={{ p: { xs: 3, md: 5 } }}>
+    <Card component="section" className={`intake-card ${collapsed ? "intake-card--collapsed" : ""}`} aria-label="Creative brief input" sx={{ p: 0 }}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-8">
         <header className="intake-header">
           <div>
-            <p className="creator-eyebrow" style={{ color: COLORS.marigold }}><Sparkles size={16} aria-hidden="true" /> IDEA TO VIDEO</p>
+            <p className="creator-eyebrow" style={{ color: COLORS.marigold }}><Clapperboard size={16} aria-hidden="true" /> VIDEO STUDIO</p>
             <h1 className="text-3xl md:text-4xl mb-2" style={{ fontFamily: "inherit" }}>
-              {collapsed ? "Brief submitted" : <>Small idea.<br /><span className="hero-accent">Big screen energy.</span></>}
+              {collapsed ? "Brief submitted" : <>What will you <span className="hero-accent">create?</span></>}
             </h1>
             <p className="text-sm intake-summary" style={{ color: COLORS.muted }}>
-              {collapsed ? submittedBrief : "Tell your story. Set your style. We’ll bring the shots together."}
+              {collapsed ? submittedBrief : "Your story, directed. Start with an idea or a script."}
             </p>
             {collapsed && savedJob && <Typography variant="caption" color="text.secondary" data-testid="saved-video-model">
               Video model: {chosenModel?.label || savedJob.ai_model}
@@ -233,12 +231,13 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               onChange={event => setBrief(event.target.value)} placeholder="Paste your full script or scene breakdown here"
               minRows={3} autoFocus sx={{ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7 } }} /> :
               <BriefCharacterInput value={brief} onChange={setBrief} selections={characterSelections}
-                onSelections={setCharacterSelections} disabled={collapsed || submitting} />}
+                onSelections={setCharacterSelections} disabled={collapsed || submitting}
+                tools={<ProductPicker compact selected={products} onChange={setProducts} disabled={collapsed || submitting} />} />}
             {!collapsed && !submitting && refinementHint && <Typography variant="body2" color="text.secondary"
               role="status" aria-live="polite" data-testid="clarifier-activation-hint" sx={{ mt: -1.5 }}>
               {refinementHint}
             </Typography>}
-            <ProductPicker selected={products} onChange={setProducts} disabled={collapsed || submitting} />
+            {scriptMode && <ProductPicker selected={products} onChange={setProducts} disabled={collapsed || submitting} />}
             <ClarifierPanel brief={brief} inputMode={scriptMode ? "script" : "idea"} productIds={products.map(p => p.id)}
               prepareRefined={text => scriptMode ? text : preserveRefinedMentions(text, brief, characterSelections)}
               knownFields={knownFields} disabled={collapsed || submitting} onUse={(text, row) => {
@@ -261,21 +260,13 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               {scriptMode ? "Use an idea instead" : "Paste a script instead"}
             </Button>
 
-            <div className="creative-widgets">
-              <section className="format-widget"><h2><Monitor size={17} /> Make it fit</h2>
-                <ToggleButtonGroup exclusive value={aspectRatio} onChange={(_, value) => value && setAspectRatio(value)} aria-label="Aspect ratio">
-                  <ToggleButton value="9:16"><Smartphone size={27} /><span>Portrait<small>9:16 · Social & stories</small></span></ToggleButton>
-                  <ToggleButton value="16:9"><Monitor size={27} /><span>Landscape<small>16:9 · The big picture</small></span></ToggleButton>
-                </ToggleButtonGroup>
-              </section>
-              <section className="duration-widget"><h2><Clock3 size={17} /> Set the pace</h2>
-                <ToggleButtonGroup exclusive value={duration} onChange={(_, value) => value && setDuration(value)} aria-label="Duration">
-                  {[['15 seconds','15s'],['30 seconds','30s'],['60 seconds','60s'],['Custom','Custom']].map(([value,label]) => <ToggleButton key={value} value={value}>{label}</ToggleButton>)}
-                </ToggleButtonGroup>
-                <p>A quick moment or a little more story.</p>
-              </section>
-            </div>
             <div className="intake-options">
+              <SelectField label="Format" value={aspectRatio} onChange={event => setAspectRatio(event.target.value)}>
+                <option value="16:9">16:9 Landscape</option><option value="9:16">9:16 Portrait</option>
+              </SelectField>
+              <SelectField label="Duration" value={duration} onChange={event => setDuration(event.target.value)}>
+                <option>15 seconds</option><option>30 seconds</option><option>60 seconds</option><option>Custom</option>
+              </SelectField>
               <SelectField label="Content type" value={contentType} onChange={(event) => setContentType(event.target.value)}>
                 <option>Ad</option><option>Short story</option><option>Documentary</option><option>Product hero</option><option>UGC</option><option>Other</option>
               </SelectField>
@@ -305,8 +296,9 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               </Button>
             </div>
 
-            {duration === "Custom" && <input value={customDuration} onChange={(event) => setCustomDuration(event.target.value)} placeholder="Custom duration, e.g. 45 seconds" className="w-full max-w-xs rounded-md px-3 py-2 text-sm outline-none" style={{ background: COLORS.field, border: `1px solid ${COLORS.border}`, color: COLORS.text }} />}
-            {language === "Other" && <input value={customLanguage} onChange={(event) => setCustomLanguage(event.target.value)} placeholder="Enter a language" className="w-full max-w-xs rounded-md px-3 py-2 text-sm outline-none" style={{ background: COLORS.field, border: `1px solid ${COLORS.border}`, color: COLORS.text }} />}
+            {modelError && <Alert severity="warning">{modelError}</Alert>}
+            {duration === "Custom" && <input value={customDuration} onChange={(event) => setCustomDuration(event.target.value)} aria-label="Custom duration" placeholder="Custom duration, e.g. 45 seconds" className="w-full max-w-xs rounded-md px-3 py-2 text-sm outline-none" style={{ background: COLORS.field, border: `1px solid ${COLORS.border}`, color: COLORS.text }} />}
+            {language === "Other" && <input value={customLanguage} onChange={(event) => setCustomLanguage(event.target.value)} aria-label="Custom language" placeholder="Enter a language" className="w-full max-w-xs rounded-md px-3 py-2 text-sm outline-none" style={{ background: COLORS.field, border: `1px solid ${COLORS.border}`, color: COLORS.text }} />}
 
             {assetPanelOpen && (
               <section className="rounded-xl p-4 flex flex-col gap-4" style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}` }}>
@@ -359,9 +351,9 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
             {error && <Alert severity="error">{friendlyMessage(error, "We couldn't start your video. Please try again.")}</Alert>}
             {submitting && <ActionProgress label={scriptMode ? "Reading your script…" : "Starting your video plan…"} />}
             {uploading && <ActionProgress label="Uploading your reference image…" />}
-            <Button type="submit" disabled={!canSubmit} variant="contained" className="self-start" startIcon={!submitting ? <Sparkles size={18} /> : undefined}>
+            <Button type="submit" disabled={!canSubmit} variant="contained" className="studio-create-button" endIcon={!submitting ? <ArrowUpRight size={17} /> : undefined}>
               {submitting && <Loader2 size={15} className="animate-spin" />}
-              {submitting ? (scriptMode ? "Reading your script…" : "Starting...") : (scriptMode ? "Choose characters and places" : "Create shot list")}
+              {submitting ? (scriptMode ? "Reading your script…" : "Starting...") : (scriptMode ? "Choose characters and places" : "Create storyboard")}
             </Button>
           </fieldset>
         </div>

@@ -52,13 +52,13 @@ export default function App() {
       {screen === "vault" && <CharacterVault onBack={() => setScreen("director")} />}
       {screen === "history" && <JobHistory onResume={openJob} onNew={() => openJob(null)} />}
       <div hidden={screen !== "director"} style={screen !== "director" ? { display: "none" } : undefined} className={`phase-one-shell ${jobId ? "phase-one-shell--active" : ""}`}>
-        <NewJob key={jobId || "new"} savedJob={job} onSubmit={handleSubmit} collapsed={Boolean(jobId)} submittedBrief={job?.brief.split("\n\n")[0] || ""} />
+        <NewJob key={`brief-${jobId || "new"}`} savedJob={job?.id === jobId ? job : null} onSubmit={handleSubmit} collapsed={Boolean(jobId)} submittedBrief={job?.brief.split("\n\n")[0] || ""} />
         {jobId && !job && <Box sx={{ p: 3 }}>
           {lookupError ? <Alert severity="error" action={<Button color="inherit" onClick={() => setLookupAttempt((n) => n + 1)}>Retry</Button>}>
             Could not open this job. It may be unavailable, or the connection may have failed. You can also choose another job from Job history.
           </Alert> : <ActionProgress label="Loading your job…" />}
         </Box>}
-        {jobId && job?.id === jobId && <JobView key={jobId} jobId={jobId} initialJob={job} onReset={() => openJob(null)} onRetry={(retried) => openJob(retried.id)} />}
+        {jobId && job?.id === jobId && <JobView key={`job-${jobId}`} jobId={jobId} initialJob={job} onReset={() => openJob(null)} onRetry={(retried) => openJob(retried.id)} />}
       </div>
       </DashboardLayout>
     </>

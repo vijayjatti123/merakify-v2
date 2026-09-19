@@ -7,7 +7,7 @@ import { listCharacters, uploadCharacter, setCharacterVoice, approveCharacter } 
 import { activeMentions, mentionPattern, mentionToken, mentionsDiscovered, rememberMentions, resolveTypedMentions, mentionSegments, typedMentions } from "../utils/characterMentions";
 import VoicePreviewPicker from "./VoicePreviewPicker";
 
-export default function BriefCharacterInput({ value, onChange, selections, onSelections, disabled, scriptMode }) {
+export default function BriefCharacterInput({ value, onChange, selections, onSelections, disabled, scriptMode, tools }) {
   const input = useRef(null), popup = useRef(null), alive = useRef(true), loadingRef = useRef(false), insertion = useRef(null);
   const [characters, setCharacters] = useState([]), [loading, setLoading] = useState(false);
   const [error, setError] = useState(""), [query, setQuery] = useState(null), [index, setIndex] = useState(0);
@@ -102,7 +102,7 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
         }
         if (e.key === "Enter") { e.preventDefault(); if (!loading && filtered[index]) choose(filtered[index]); }
       }}
-      slotProps={{ htmlInput: { "data-testid": "brief-input", "aria-autocomplete": "list", onScroll: e => setScrollTop(e.currentTarget.scrollTop),
+      slotProps={{ inputLabel: { shrink: true }, htmlInput: { "data-testid": "brief-input", "aria-autocomplete": "list", onScroll: e => setScrollTop(e.currentTarget.scrollTop),
         "aria-controls": query !== null ? "character-options" : undefined,
         "aria-activedescendant": query !== null && filtered[index] ? `character-option-${index}` : undefined } }}
       sx={theme => ({ "& textarea": { fontSize: "1.1rem", lineHeight: 1.7, ...(highlighted ? { color: "transparent", WebkitTextFillColor: "transparent", caretColor: (theme.vars || theme).palette.text.primary } : {}) } })} />
@@ -131,15 +131,16 @@ export default function BriefCharacterInput({ value, onChange, selections, onSel
     </Paper>}
     </Box>
     <Stack spacing={1} sx={{ mt: 1.5 }}>
-      {tip && <Stack direction="row" alignItems="center" data-testid="mention-tip">
+      {tip && <Stack direction="row" sx={{ alignItems: "center" }} data-testid="mention-tip">
         <Typography variant="body2" color="text.secondary">Tip: type @ to bring in a saved character.</Typography>
         <IconButton type="button" size="small" aria-label="Dismiss character tip" onClick={discover}><X size={16} /></IconButton>
       </Stack>}
       <Stack direction="row" gap={1} sx={{ flexWrap: "wrap" }}>
         <Button type="button" variant="outlined" size="small" disabled={disabled}
-          data-testid="open-character-picker" aria-expanded={query !== null} aria-haspopup="listbox"
-          startIcon={<AtSign size={18} />} onMouseDown={e => e.preventDefault()} onClick={openPicker}>Choose character</Button>
-        <Button type="button" variant="outlined" size="small" disabled={disabled} startIcon={<Plus size={16} />} onClick={add}>Add character image</Button>
+          aria-label="Choose character" data-testid="open-character-picker" aria-expanded={query !== null} aria-haspopup="listbox"
+          startIcon={<AtSign size={18} />} onMouseDown={e => e.preventDefault()} onClick={openPicker}>Characters</Button>
+        <Button type="button" variant="outlined" size="small" disabled={disabled} startIcon={<Plus size={16} />} aria-label="Add character image" onClick={add}>Upload character</Button>
+        {tools}
       </Stack>
       {Object.keys(linked).length > 0 && <Stack direction="row" gap={1} sx={{ flexWrap: "wrap" }} aria-live="polite" data-testid="linked-characters">
         {Object.keys(linked).map(token => <Chip key={token} color="success" variant="outlined"

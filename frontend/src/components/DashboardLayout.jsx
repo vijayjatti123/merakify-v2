@@ -1,57 +1,63 @@
 import { useState } from "react";
-import { AppBar, Box, Button, Divider, Drawer, IconButton, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Tooltip, Typography } from "@mui/material";
-import { useColorScheme } from "@mui/material/styles";
-import { Clapperboard, Home, Users, History, Menu, Moon, Sun, Plus } from "lucide-react";
+import { Box, Button, Divider, Drawer, IconButton, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Stack, Tooltip, Typography } from "@mui/material";
+import { Clapperboard, Users, Grid2X2, Menu, Plus, PanelLeftClose, PanelLeftOpen, Video } from "lucide-react";
 
-// Structure adapted from MUI v9.4.0 Dashboard: SideMenu, MenuContent,
-// AppNavbar and SideMenuMobile. No unrelated dashboard/chart functionality.
-const drawerWidth = 240;
 const items = [
-  { key: "director", label: "Home / New Job", Icon: Home },
+  { key: "director", label: "Create", Icon: Video },
   { key: "vault", label: "Character Vault", Icon: Users },
-  { key: "history", label: "Job History", Icon: History },
+  { key: "history", label: "My projects", Icon: Grid2X2 },
 ];
-
-function ColorModeToggle() {
-  const { mode, setMode } = useColorScheme();
-  const dark = mode === "dark";
-  return <Tooltip title={dark ? "Switch to light mode" : "Switch to dark mode"}>
-    <IconButton aria-label={dark ? "Switch to light mode" : "Switch to dark mode"} onClick={() => setMode(dark ? "light" : "dark")}>
-      {dark ? <Sun size={20} /> : <Moon size={20} />}
-    </IconButton>
-  </Tooltip>;
-}
 
 export default function DashboardLayout({ screen, onNavigate, onNew, children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const navigation = <>
-    <Stack direction="row" spacing={1.5} sx={{ p: 3, alignItems: "center" }}>
-      <span className="brand-mark"><Clapperboard size={25} /></span><Box><Typography fontWeight={800} fontSize={22}>Merakify</Typography><Typography variant="caption" color="text.secondary">Your creative space</Typography></Box>
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("merakify-studio-rail") === "collapsed"; } catch { return false; }
+  });
+  const width = collapsed ? 68 : 236;
+  function toggleRail() {
+    setCollapsed(value => {
+      try { localStorage.setItem("merakify-studio-rail", value ? "expanded" : "collapsed"); } catch { /* Storage is optional. */ }
+      return !value;
+    });
+  }
+  const navigation = (compact = false, mobile = false) => <>
+    <Stack direction="row" sx={{ height: 68, px: 2, gap: 1.5, alignItems: "center", flexShrink: 0 }}>
+      <span className="studio-brand"><Clapperboard size={21} /></span>
+      {!compact && <Typography fontWeight={650} fontSize={19} letterSpacing="-.6px">merakify<span className="studio-brand-dot">.</span></Typography>}
     </Stack>
     <Divider />
-    <Box component="nav" aria-label="Workspace navigation" sx={{ p: 2, flex: 1 }}>
-      <List>{items.map(({ key, label, Icon }) => <ListItem key={key} disablePadding>
-        <ListItemButton selected={screen === key} onClick={() => { onNavigate(key); setMobileOpen(false); }}>
-          <ListItemIcon sx={{ minWidth: 36 }}><Icon size={20} /></ListItemIcon><ListItemText primary={label} />
-        </ListItemButton>
+    <Box component="nav" aria-label={mobile ? "Mobile workspace navigation" : "Workspace navigation"} sx={{ p: 1.25, pt: 2.5, flex: 1 }}>
+      <List disablePadding>{items.map(({ key, label, Icon }) => <ListItem key={key} disablePadding>
+        <Tooltip title={compact ? label : ""} placement="right">
+          <ListItemButton aria-label={label} aria-current={screen === key ? "page" : undefined} selected={screen === key}
+            onClick={() => { onNavigate(key); setMobileOpen(false); }} sx={{ px: compact ? 1.5 : 1.75, minHeight: 44 }}>
+            <ListItemIcon sx={{ minWidth: compact ? 20 : 34 }}><Icon size={18} /></ListItemIcon>
+            {!compact && <ListItemText primary={label} slotProps={{ primary: { sx: { fontSize: 13, fontWeight: 500 } } }} />}
+          </ListItemButton>
+        </Tooltip>
       </ListItem>)}</List>
     </Box>
-    <Divider /><Stack direction="row" sx={{ p: 2, alignItems: "center", justifyContent: "space-between" }}>
-      <Typography variant="body2" color="text.secondary">Appearance</Typography><ColorModeToggle />
-    </Stack>
+    {!mobile && <Box sx={{ p: 1.25, borderTop: 1, borderColor: "divider" }}>
+      <Tooltip title={collapsed ? "Expand navigation" : "Collapse navigation"} placement="right">
+        <Button fullWidth color="inherit" aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} onClick={toggleRail}
+          sx={{ justifyContent: compact ? "center" : "flex-start", minWidth: 0, gap: 1.5, color: "text.secondary" }}>
+          {collapsed ? <PanelLeftOpen size={18} /> : <><PanelLeftClose size={18} />Collapse</>}
+        </Button>
+      </Tooltip>
+    </Box>}
   </>;
-  return <Box sx={{ display: "flex", minHeight: "100vh" }}>
-    <Drawer variant="permanent" sx={{ width: drawerWidth, flexShrink: 0, display: { xs: "none", md: "block" }, "& .MuiDrawer-paper": { width: drawerWidth, boxSizing: "border-box", bgcolor: "background.paper" } }}>{navigation}</Drawer>
-    <AppBar position="fixed" color="inherit" elevation={0} sx={{ display: { xs: "block", md: "none" }, borderBottom: 1, borderColor: "divider" }}>
-      <Toolbar><IconButton aria-label="Open navigation" edge="start" onClick={() => setMobileOpen(true)}><Menu /></IconButton><Typography sx={{ flex: 1, ml: 1 }} fontWeight={700}>Merakify</Typography><ColorModeToggle /></Toolbar>
-    </AppBar>
-    <Drawer variant="temporary" open={mobileOpen} onClose={() => setMobileOpen(false)} sx={{ display: { xs: "block", md: "none" }, "& .MuiDrawer-paper": { width: drawerWidth } }}>{navigation}</Drawer>
-    <Box component="main" id="main-content" sx={{ flex: 1, minWidth: 0, bgcolor: "background.default", px: { xs: 2, md: 4 }, pb: 5, pt: { xs: 10, md: 3 } }}>
-      <Stack direction="row" sx={{ mb: 4, alignItems: "center", justifyContent: "space-between" }}>
-        <Typography color="text.secondary" variant="body2">Workspace / {screen === "vault" ? "Character Vault" : screen === "history" ? "Job History" : "Create"}</Typography>
-        <Button startIcon={<Plus size={16} />} onClick={onNew}>New job</Button>
+  return <Box className="studio-shell" sx={{ display: "flex", minHeight: "100vh", "--studio-rail-width": `${width}px` }}>
+    <a href="#main-content" className="studio-skip">Skip to content</a>
+    <Drawer variant="permanent" sx={{ width, flexShrink: 0, display: { xs: "none", md: "block" }, transition: "width .2s ease",
+      "& .MuiDrawer-paper": { width, transition: "width .2s ease", overflowX: "hidden", boxSizing: "border-box", bgcolor: "#0a0c0f" } }}>{navigation(collapsed)}</Drawer>
+    <Drawer variant="temporary" open={mobileOpen} onClose={() => setMobileOpen(false)} sx={{ display: { xs: "block", md: "none" }, "& .MuiDrawer-paper": { width: 236 } }}>{navigation(false, true)}</Drawer>
+    <Box sx={{ flex: 1, minWidth: 0 }}>
+      <Stack component="header" direction="row" className="studio-topbar" sx={{ height: 68, px: { xs: 2, md: 3.5 }, alignItems: "center", gap: 1.5, borderBottom: 1, borderColor: "divider" }}>
+        <IconButton aria-label="Open navigation" onClick={() => setMobileOpen(true)} sx={{ display: { md: "none" } }}><Menu size={20} /></IconButton>
+        <Typography component="h2" sx={{ flex: 1, fontSize: 15, fontWeight: 550 }}>{items.find(item => item.key === screen)?.label || "Create"}</Typography>
+        <Button startIcon={<Plus size={16} />} onClick={onNew} variant="outlined" color="inherit">New project</Button>
       </Stack>
-      <Box sx={{ maxWidth: 1440, mx: "auto" }}>{children}</Box>
+      <Box component="main" id="main-content" tabIndex={-1} sx={{ px: { xs: 2, md: 3.5 }, py: { xs: 3, md: 4 }, maxWidth: 1600, mx: "auto" }}>{children}</Box>
     </Box>
   </Box>;
 }

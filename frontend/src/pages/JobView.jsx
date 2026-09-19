@@ -1,7 +1,8 @@
+import PreviewLightbox from "../components/PreviewLightbox";
 import DirectorPlanEditor, { editablePlan } from "../components/DirectorPlanEditor";
 import { AlertTriangle, Check, Clapperboard, Clock3, Loader2, Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Alert, AlertTitle, Button, Card, Stepper, Step, StepLabel, Box, Stack, Typography, Chip, Dialog, DialogTitle, DialogContent } from "@mui/material";
+import { Alert, AlertTitle, Button, Card, Stepper, Step, StepLabel, Box, Stack, Typography, Chip } from "@mui/material";
 import StoryboardDraft from "../components/StoryboardDraft";
 import ActionProgress from "../components/ActionProgress";
 import ShotImageActions from "../components/ShotImageActions";
@@ -409,6 +410,13 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       <span className={`shot-status shot-status--${visualStatus}`}>{!approved ? (result.qa.issues?.some(issue => issue.shot_number === shot.shot_number) ? "Needs correction" : "Ready to review") : outputLabel}</span>
                     </div>
 
+                    {shot.still_frame_url ? (
+                      <figure className="my-3" aria-label={`Opening still for shot ${shot.shot_number}`}>
+                        <ShotPreviewImage shot={shot} onOpen={() => setExpandedPreview(shot)} />
+                        <figcaption className="mt-1 text-xs" style={{ color: COLORS.muted }}>Opening preview · click to enlarge</figcaption>
+                      </figure>
+                    ) : null}
+
                     {isEditing ? (
                       <><Alert severity="info" sx={{ mb: 2 }} data-testid="shot-plan-edit-impact">{approved || result.plan_edited_shots?.length ? "Saving reopens plan approval. This shot’s voice, preview and clip must be prepared again; other shots are kept. Nothing is generated until you approve." : "Save your changes, then approve the plan before creating previews."}</Alert><DirectorPlanEditor cast={(result.continuity?.characters || []).map(character => character.name)} speaking={shot.has_dialogue && shot.speech_mode !== "voiceover"} value={editValues} onChange={setEditValues} shotNumber={shot.shot_number} /></>
                     ) : (
@@ -424,12 +432,6 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       <span>{shot.direction_version === 1 ? "Characters in this clip" : "Characters present"}</span>
                       <p>{shot.characters_in_shot?.length ? shot.characters_in_shot.join(", ") : "None"}</p>
                     </div>
-                    {shot.still_frame_url ? (
-                      <figure className="my-3" aria-label={`Opening still for shot ${shot.shot_number}`}>
-                        <ShotPreviewImage shot={shot} onOpen={() => setExpandedPreview(shot)} />
-                        <figcaption className="mt-1 text-xs" style={{ color: COLORS.muted }}>Opening preview · click to enlarge</figcaption>
-                      </figure>
-                    ) : null}
                     {approved && (shot.still_frame_url || shot.preview_input || shot.compiled_prompt) && <ShotImageActions jobId={jobId} shot={shot} aspectRatio={result.aspect_ratio || final.aspect_ratio} disabled={previews.busy || videoBusy || editBlocksApproval} onRefresh={async () => setFinal(await getJob(jobId))} />}
                     {shot.still_frame_status === "generating" ? <ActionProgress label={shot.still_frame_candidate ? `Verifying the saved preview for shot ${shot.shot_number}…` : `Creating and checking the preview for shot ${shot.shot_number}…`} /> : previewState(shot).key === "failed" && <Alert severity="warning" sx={{ my: 2 }}>
                       <AlertTitle>{shot.still_frame_error_kind === "verification" ? "Your image is saved — verification is unavailable" : "This preview couldn't be created"}</AlertTitle>
@@ -510,12 +512,9 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
 
         {error && <Alert severity="error" sx={{ m: 2 }}>{friendlyMessage(error)}</Alert>}
       </Card>
-      <Dialog open={Boolean(expandedPreview)} onClose={() => setExpandedPreview(null)} maxWidth="lg" fullWidth>
-        <DialogTitle>Shot {expandedPreview?.shot_number} preview <Button onClick={() => setExpandedPreview(null)} sx={{ float: 'right' }}>Close preview</Button></DialogTitle>
-        <DialogContent><img src={expandedPreview?.still_frame_url} alt={expandedPreview?.description || 'Shot preview'} style={{ width: '100%', borderRadius: 16 }} /></DialogContent>
-      </Dialog>
+      <PreviewLightbox shot={expandedPreview} shots={shots} onSelect={setExpandedPreview} onClose={() => setExpandedPreview(null)} />
       {(!done && !approved) && <Box component="footer" className="storyboard-wait-footer" role="status">{errored ? 'Planning paused · your work is saved' : draft ? 'Checking your draft · no images or videos are being generated yet' : 'Directing your story · your progress is saved'}</Box>}
-      {(done || canResumePreviews) && shots.length > 0 && <Box component="footer" data-testid="job-primary-action" sx={{ position: "fixed", bottom: 0, left: { xs: 0, md: 240 }, right: 0, zIndex: 1100, bgcolor: "background.paper", borderTop: 1, borderColor: "divider", p: 2, display: "flex", flexWrap: "wrap", gap: 2, alignItems: "center", justifyContent: "space-between", boxShadow: "0 -6px 28px #0000000a" }}>
+      {(done || canResumePreviews) && shots.length > 0 && <Box component="footer" data-testid="job-primary-action" sx={{ position: "fixed", bottom: 0, left: { xs: 0, md: "var(--studio-rail-width, 236px)" }, right: 0, zIndex: 1100, bgcolor: "background.paper", borderTop: 1, borderColor: "divider", p: 2, display: "flex", flexWrap: "wrap", gap: 2, alignItems: "center", justifyContent: "space-between", boxShadow: "0 -6px 28px #0000000a" }}>
         <Box role="status">{editingShot !== null ? <>
           <Typography fontWeight={600}>Editing shot {editingShot}</Typography>
           <Typography id="shot-edit-approval-hint" variant="body2">{savingShot !== null ? "Saving and checking your edit…" : hasUnsavedEdit ? "Save your edit first" : "No unsaved changes"}</Typography>
