@@ -13,9 +13,14 @@ export const JARGON_REPLACEMENTS = [
   ["casting classification", "speaker age and gender"], ["deflicker", "smoothing brightness"],
 ];
 
-export function friendlyMessage(value, context = "This step could not finish. Please try again.") {
+export function friendlyMessage(value, context = "This step could not finish. Please try again.", { warning = false } = {}) {
   if (!value) return "";
   const text = String(value);
+  // Provider failures must never become speculative review advice because a
+  // generic provider message happens to mention duration/framing/style.
+  if (/invalid_parameters|invalid parameters/i.test(text)) return "The video service rejected this shot's inputs. No video was created. Retry video generation; your preview and approved speech are saved.";
+  if (/speech reference|speech file/i.test(text) && /couldn't|cannot|does not match|exceeds|incomplete|empty/i.test(text)) return "The voice recording could not be prepared for video generation. No video request was sent. Your preview is saved; please retry.";
+  if (!warning && /duration|pace|timing|calibrat/i.test(text)) return context;
   if (/compiler.*(deadline|timeout|timed out)/i.test(text)) return "This shot is taking longer than expected. Please retry planning.";
   if (/missing.*video|video.*missing|Generate.*shot\(s\)/i.test(text)) {
     const shots = text.match(/shot(?:\(s\)|s)?\s*[:#]?\s*([\d, ]+)/i)?.[1]?.trim();
@@ -25,7 +30,7 @@ export function friendlyMessage(value, context = "This step could not finish. Pl
   if (/aspect.ratio|dimensions|framing|composition/i.test(text)) return "The framing may differ from your request. Review this preview before continuing.";
   if (/style.*(mismatch|transfer|variant|fail)|photorealis|cel.shad/i.test(text)) return "The requested visual style may not match throughout. Please review the character and shot previews.";
   if (/dialogue.loss|protected|user.scripted/i.test(text)) return "Your script needs a closer review. Some consistency checks could not be resolved automatically.";
-  if (/duration|pace|timing|calibrat/i.test(text)) return "Speech timing may differ from the plan. Please listen to the result before approving.";
+  if (warning && /duration|pace|timing|calibrat/i.test(text)) return "Speech timing may differ from the plan. Please listen to the result before approving.";
   if (/reference.to.video|mode.intent|intent.classification/i.test(text)) return "The video may interpret your reference differently. Please review its framing and movement.";
   if (/S3|presign|expired|access.denied|403/i.test(text)) return "This media could not be loaded. Refresh to request a new link.";
   if (/429|rate.limit|capacity|overload/i.test(text)) return "The generation service is busy. Please try again shortly.";
@@ -37,6 +42,19 @@ export function friendlyMessage(value, context = "This step could not finish. Pl
   // remain in the stored trace; they never become customer-facing copy.
   if (/^(Add a character|Save your voice|Could not |Failed to load|Choose |Please |May affect |The live progress connection)/.test(text) && !/[{}]|https?:|Traceback|Error:|Module [A-Z]/.test(text)) return text;
   return context;
+}
+
+export function videoReviewWarnings(shot) {
+  // Technical request details and routine notices remain in the saved trace.
+  // A generic speech caution is shown once, beside the playable result only.
+  if (!shot.video_url || shot.video_status !== 'done') return [];
+  const result = [];
+  if (shot.experimental_audio_sync || (shot.video_warnings || []).some(w => /^Audio-guided generation is experimental\./.test(w))) result.push('Listen to the dialogue before approving: AI-generated speech may vary in pronunciation or mouth timing.');
+  for (const warning of shot.video_warnings || []) {
+    if (/^Audio-guided generation is experimental\.|^Video duration is \d|^Provider bills \d/.test(warning)) continue;
+    result.push(friendlyMessage(warning, 'Please review this video before approving it.', { warning: true }));
+  }
+  return [...new Set(result)];
 }
 
 export function progressMessage(event) {

@@ -7,7 +7,7 @@ import ActionProgress from "../components/ActionProgress";
 import ShotImageActions from "../components/ShotImageActions";
 import { AdDirectionPlan, ShotDirectionPlan } from "../components/AdDirectionPlan";
 import ShotPreviewImage from "../components/ShotPreviewImage";
-import { friendlyMessage, progressMessage } from "../utils/presentation";
+import { friendlyMessage, progressMessage, videoReviewWarnings } from "../utils/presentation";
 import { retryFailedJob, retryShotPreview, retryPreviewPreparation } from "../api/client";
 import { previewState, previewSummary } from "../utils/previewState";
 import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, assembleFinalVideo } from "../api/client";
@@ -348,7 +348,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
 
         {castingWarnings.map((warning) => (
           <div key={warning} role="alert" className="m-3 rounded-lg border-2 border-amber-500 bg-amber-100 p-3 text-sm font-semibold text-amber-950">
-            {friendlyMessage(warning, "Please review the selected voice before continuing.")}
+            {friendlyMessage(warning, "Please review the selected voice before continuing.", { warning: true })}
           </div>
         ))}
 
@@ -419,7 +419,6 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     )}
 
                     {!isEditing && <ShotDirectionPlan shot={shot} expanded={!approved} />}
-                    {shot.experimental_audio_sync && <p className="audio-warning">Speech timing is experimental</p>}
                     {visualStatus === "error" && shot.error_message && <Alert severity="error">{friendlyMessage(shot.error_message, "This shot could not be completed. Please try again.")}</Alert>}
                     <div className="shot-characters">
                       <span>{shot.direction_version === 1 ? "Characters in this clip" : "Characters present"}</span>
@@ -451,7 +450,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     {savingShot === shot.shot_number && <ActionProgress label="Saving your changes and checking the shot…" />}
                     {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
                     {shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
-                    {(shot.video_warnings || []).map((warning) => <p className="audio-warning" key={warning}>{friendlyMessage(warning, "Please review this video before approving it.")}</p>)}
+                    {videoReviewWarnings(shot).map((warning) => <Alert severity="info" key={warning} data-testid={`video-review-note-${shot.shot_number}`}>{warning}</Alert>)}
                     {approved && !errored && (shot.has_dialogue || result.video_model || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && shot.still_frame_url && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
                       <Button id={`generate-video-${shot.shot_number}`} type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
                         {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate speaking video" : `Generate video · ${Math.max(4, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}

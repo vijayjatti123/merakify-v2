@@ -276,6 +276,24 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
                            replace_token=expected_attempt if regenerate else None)
     for warning in translated["warnings"]:
         job_service.append_event(db, job_id, "video_generation", f"Shot {number}: {warning}")
+    # Validate/prepare the actual reference before charging for a video. The
+    # approved speech stays unchanged; compliance retries reuse this same copy.
+    try:
+        from app.services import seedance_audio_reference
+        audio_evidence = seedance_audio_reference.prepare(translated, shot, job_id)
+        if audio_evidence:
+            job_service.update_video(db, job_id, number,
+                video_audio_reference_validation=audio_evidence,
+                video_audio_reference_url=translated['request']['audio_urls'][0],
+                video_retry_request=translated['request'])
+            job_service.append_event(db, job_id, 'video_generation',
+                f"Shot {number}: audio reference checked; speech {audio_evidence['source_duration_sec']:.6f}s, "
+                f"reference {audio_evidence['reference_duration_sec']:.6f}s, "
+                f"trailing silence {audio_evidence['trailing_silence_sec']:.6f}s. Approved speech unchanged.")
+    except Exception as error:
+        db.rollback()
+        job_service.update_video(db, job_id, number, video_status='failed', video_error=str(error))
+        raise
     try:
         if voice_setup:
             key, sample = voice_setup

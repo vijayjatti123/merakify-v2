@@ -17,6 +17,9 @@ from app.services import job_service as jobs, render_compliance_service as gate,
 
 class AudioVideoTests(unittest.TestCase):
     def setUp(self):
+        # Media preflight has real WAV/MP3 and submission tests in its own suite.
+        self.audio_preflight = patch('app.services.seedance_audio_reference.prepare', return_value=None)
+        self.audio_preflight.start(); self.addCleanup(self.audio_preflight.stop)
         self.engine = create_engine('sqlite://'); Base.metadata.create_all(self.engine)
         self.db = Session(self.engine)
         self.shot = dict(shot_number=1, has_dialogue=True, speech_mode='onscreen', speaker_label='Meera',
