@@ -153,11 +153,11 @@ export async function retryJob(jobId, changeRequest) {
   return res.json();
 }
 
-export async function reviseJob(jobId, shots) {
+export async function reviseJob(jobId, shots, expectedPlanRevision) {
   const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/revise`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ shots }),
+    body: JSON.stringify({ shots, expected_plan_revision: expectedPlanRevision }),
   });
   if (!res.ok) throw new Error("Failed to revise job");
   return res.json();

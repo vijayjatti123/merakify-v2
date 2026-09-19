@@ -137,6 +137,7 @@ class JobRevise(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     shots: list[ShotEdit]
+    expected_plan_revision: int | None = Field(default=None, ge=0)
 
 
 class JobRetry(BaseModel):

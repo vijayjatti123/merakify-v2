@@ -435,9 +435,11 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
     started = time.monotonic()
     result["video_prompts_pending"] = True
     result.pop("video_prompt_error", None)
-    # Never expose prompts from an earlier preparation while replacements run.
+    # Only edited shots lose their approved instructions; siblings remain reusable.
+    edited = set(result.get("plan_edited_shots", []))
     for shot in result["shots"]:
-        shot.pop("compiled_prompt", None)
+        if not edited or shot["shot_number"] in edited:
+            shot.pop("compiled_prompt", None)
     job_service.set_result(db, job_id, result)
 
     def worker(kind, snapshot):
@@ -446,10 +448,12 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
             "elapsed_sec": round(time.monotonic() - started, 3)}))
         try:
             if kind == "previews":
-                snapshot["shots"] = generate_still_frames(snapshot, job_id=job_id, emit=notify,
+                snapshot["shots"] = generate_still_frames(snapshot, job_id=job_id, emit=notify, shot_numbers=edited or None,
                     on_progress=lambda current: messages.put(("preview_progress", copy.deepcopy(current))))
                 messages.put(("preview_progress", snapshot))
             else:
+                if edited:
+                    snapshot["shots"] = [s for s in snapshot["shots"] if s["shot_number"] in edited]
                 shots = compile_shot_prompts(snapshot, brief=brief, emit=notify, call_agent=call_agent,
                     on_checkpoint=lambda checkpoint: messages.put(("compiler_checkpoint", copy.deepcopy(checkpoint))))
                 expected = {s["shot_number"] for s in snapshot["shots"]}
@@ -492,7 +496,8 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
             result.pop("video_prompt_checkpoint", None)
             compiled = {s["shot_number"]: s["compiled_prompt"] for s in message[1]}
             for shot in result["shots"]:
-                shot["compiled_prompt"] = compiled[shot["shot_number"]]
+                if shot["shot_number"] in compiled:
+                    shot["compiled_prompt"] = compiled[shot["shot_number"]]
             result["video_prompts_pending"] = False
             job_service.set_result(db, job_id, result)
         elif action == "failed":
@@ -512,6 +517,9 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
             remaining.remove(message[1])
             emit("media_preparation_timing", json.dumps({"branch": message[1], "phase": "finished",
                 "elapsed_sec": round(message[2], 3)}))
+    if not result.get("video_prompt_error") and all(s.get("still_frame_url") for s in result["shots"]):
+        result.pop("plan_edited_shots", None)
+        job_service.set_result(db, job_id, result)
 
 
 @checkpointed_planning

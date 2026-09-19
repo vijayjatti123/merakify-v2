@@ -444,8 +444,12 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
     if not result:
         raise HTTPException(status_code=409, detail="completed job has no stored result")
 
-    if result.get("generation_approved"):
-        raise HTTPException(status_code=409, detail="This plan is already approved. Use the shot regeneration controls to change existing media.")
+    original_json = job.result_json
+    revision = result.get("plan_revision", 0)
+    if (result.get("generation_approved") or revision) and payload.expected_plan_revision != revision:
+        raise HTTPException(status_code=409, detail="Your plan changed. Refresh before editing it.")
+    if payload.expected_plan_revision is not None and payload.expected_plan_revision != revision:
+        raise HTTPException(status_code=409, detail="Your plan changed. Refresh before editing it.")
 
     edits_by_number = {edit.shot_number: edit for edit in payload.shots}
     if len(edits_by_number) != len(payload.shots):
@@ -456,12 +460,16 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
     if unknown_numbers:
         raise HTTPException(status_code=400, detail="edited shot_number was not found in this job")
 
+    changed_numbers = set()
     merged_shots = []
     for shot in result["shots"]:
         merged = dict(shot)
         edit = edits_by_number.get(shot["shot_number"])
         if edit:
-            merged.update(edit.model_dump(exclude_unset=True, exclude_none=True))
+            fields = edit.model_dump(exclude_unset=True, exclude_none=True)
+            if any(shot.get(k) != v for k, v in fields.items()):
+                changed_numbers.add(shot["shot_number"])
+            merged.update(fields)
             # All direction fields are shown together for explicit human review.
             # Invalidate the previous approval stamp, never silently rewrite them.
             merged.pop("direction_source", None)
@@ -469,6 +477,8 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
                 merged["has_dialogue"] = edit.speech_mode != "none"
         merged_shots.append(merged)
 
+    if not changed_numbers:
+        return _job_out(job, result)
     continuity = result["continuity"]
     target_duration_sec = result["format"]["duration_target_sec"]
     validated = validate_and_correct(
@@ -485,8 +495,9 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
     validated_shots = _attach_voice_refs(
         validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")
     )
-    for shot in validated_shots:
-        shot["status"] = SHOT_STATUS_PENDING
+    originals = {shot["shot_number"]: shot for shot in result["shots"]}
+    validated_shots = [shot if shot["shot_number"] in changed_numbers else originals[shot["shot_number"]]
+                       for shot in validated_shots]
 
     updated_result = dict(result)
     updated_result.update(
@@ -495,7 +506,10 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
         qa=validated["qa"],
         assembly=validated["assembly"],
     )
-    job_service.set_result(db, job_id, updated_result)
+    try:
+        updated_result = job_service.save_plan_revision(db, job_id, original_json, updated_result, changed_numbers)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     db.refresh(job)
     return _job_out(job, updated_result)
 
@@ -525,6 +539,7 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
     updated_result["generation_approved"] = True
     updated_result["preview_preparation_pending"] = True
     updated_result["audio_assembly_pending"] = any(shot.get("has_dialogue") for shot in result.get("shots", []))
+    edited = set(result.get("plan_edited_shots", []))
     updated_result["shots"] = [
         {
             **shot,
@@ -532,7 +547,7 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
             "error_message": None,
             "dialogue_audio_url": None,
             "dialogue_audio_provider": None,
-        }
+        } if not edited or shot["shot_number"] in edited else shot
         for shot in result.get("shots", [])
     ]
     job_service.set_result(db, job_id, updated_result)

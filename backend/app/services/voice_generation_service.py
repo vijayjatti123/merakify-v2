@@ -367,6 +367,8 @@ async def generate_job_dialogue_audio(
     job_service.set_result(db, job_id, result)
     moods = {scene["scene_number"]:scene.get("mood", "") for scene in result.get("script", {}).get("scenes", [])}
 
+    if shot_numbers is None and result.get("plan_edited_shots"):
+        shot_numbers = set(result["plan_edited_shots"])
     selected = [
         shot
         for shot in result.get("shots", [])

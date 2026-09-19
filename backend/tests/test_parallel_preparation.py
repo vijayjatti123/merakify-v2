@@ -79,3 +79,24 @@ class ParallelPreparationTests(unittest.TestCase):
 
     def test_preview_failure_preserves_compiled_prompt(self):
         self.run_case("compiler", "previews")
+
+    def test_revision_compiles_and_prepares_only_changed_shot(self):
+        result = {"plan_edited_shots": [2], "shots": [
+            {"shot_number": 1, "review_mode": "user", "compiled_prompt": "keep", "still_frame_url": "keep-image", "dialogue_audio_url": "keep-audio"},
+            {"shot_number": 2, "review_mode": "user", "description": "changed"}]}
+        def previews(snapshot, *, shot_numbers, **kwargs):
+            self.assertEqual(shot_numbers, {2})
+            snapshot["shots"][1]["still_frame_url"] = "new-image"
+            return snapshot["shots"]
+        def compiler(snapshot, **kwargs):
+            self.assertEqual([s["shot_number"] for s in snapshot["shots"]], [2])
+            return [{**snapshot["shots"][0], "compiled_prompt": "new"}]
+        with patch.object(director.job_service, "set_result"), \
+             patch.object(director, "generate_still_frames", side_effect=previews), \
+             patch.object(director, "compile_shot_prompts", side_effect=compiler):
+            director._prepare_media_parallel(Mock(), "audit", result, brief="test", emit=Mock())
+        self.assertEqual(result["shots"][0]["compiled_prompt"], "keep")
+        self.assertEqual(result["shots"][0]["still_frame_url"], "keep-image")
+        self.assertEqual(result["shots"][0]["dialogue_audio_url"], "keep-audio")
+        self.assertEqual(result["shots"][1]["compiled_prompt"], "new")
+        self.assertNotIn("plan_edited_shots", result)

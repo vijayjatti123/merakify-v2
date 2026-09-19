@@ -455,7 +455,7 @@ def claim_preview_preparation(db, job_id):
         raise ValueError("Create previews from the completed plan first")
     if result.get("audio_assembly_pending") or result.get("preview_preparation_pending") or any(s.get("still_frame_status") == "generating" for s in shots):
         raise ValueError("Preview preparation is already running")
-    if any(s.get("video_url") for s in shots) or (any(s.get("still_frame_url") for s in shots) and not result.get("video_prompt_error")):
+    if not result.get("plan_edited_shots") and (any(s.get("video_url") for s in shots) or (any(s.get("still_frame_url") for s in shots) and not result.get("video_prompt_error"))):
         raise ValueError("Use the individual shot's Retry preview action to preserve existing output")
     if any(s.get("has_dialogue") and (s.get("status") != "done" or not s.get("dialogue_audio_url")) for s in shots):
         raise ValueError("Speech preparation must finish before previews can be retried")
@@ -557,6 +557,8 @@ def finish_still_retry(db, job_id, number, token, regenerated):
 
 
 def claim_video(db, job_id, number, fields, *, replace_token=None):
+    if fields.get("video_source_hash"):
+        lock_plan_for_media(db, job_id, fields["video_source_hash"], number)
     # One current task per shot; retain old attempts in job-scoped history.
     # Compare-and-swap protects against double clicks, stale tabs and SQLite's
     # lack of SELECT FOR UPDATE. Uncertain submissions require reconciliation.
@@ -701,6 +703,7 @@ def final_assembly_expired(data):
 
 def claim_final_assembly(db, job_id, plan):
     from datetime import datetime, timezone
+    lock_plan_for_media(db, job_id)
     from uuid import uuid4
     from sqlalchemy.exc import IntegrityError
     token = str(uuid4())
@@ -903,3 +906,89 @@ def claim_kling_video_submission(db, job_id, number, task, request):
     db.commit()
     db.expire_all()
     return changed == 1
+
+
+def save_plan_revision(db, job_id, expected_json, result, changed_numbers):
+    """Reopen a stopped plan atomically; archive old output and keep sibling media."""
+    import copy
+    job = db.query(Job).filter_by(id=job_id).populate_existing().one()
+    # Acquire the same job-row fence as media submission. Stale tabs cannot overwrite.
+    locked = db.query(Job).filter(Job.id == job_id, Job.result_json == expected_json,
+                                  Job.status == "done").update({Job.result_json: expected_json}, synchronize_session=False)
+    if locked != 1:
+        db.rollback()
+        raise ValueError("Your plan changed. Refresh before saving.")
+    old = json.loads(expected_json)
+    videos = db.query(VideoTask).filter_by(job_id=job_id).populate_existing().all()
+    enhancements = db.query(FaceEnhancement).filter_by(job_id=job_id).populate_existing().all()
+    assembly = db.query(FinalAssembly).filter_by(job_id=job_id).populate_existing().one_or_none()
+    busy = (old.get("audio_assembly_pending") or old.get("preview_preparation_pending")
+            or any(v.status in {"submitting", "processing", "submission_unknown"} for v in videos)
+            or any(v.status in {"queued", "running"} for v in enhancements)
+            or (assembly and assembly.status == "running")
+            or any(s.get("still_frame_status") == "generating" or
+                   s.get("preview_replacement", {}).get("status") == "working" for s in old.get("shots", [])))
+    if busy:
+        db.rollback()
+        raise ValueError("Wait for active generation or image replacement to finish before editing the plan.")
+    revised = copy.deepcopy(result)
+    had_media = bool(old.get("generation_approved") or old.get("plan_edited_shots") or videos
+                     or any(s.get("still_frame_url") or s.get("dialogue_audio_url") for s in old.get("shots", [])))
+    if had_media:
+        revised["plan_edited_shots"] = sorted(set(old.get("plan_edited_shots", [])) | set(changed_numbers))
+    archived = {"revision":old.get("plan_revision", 0),
+                "shots":[s for s in old.get("shots", []) if s["shot_number"] in changed_numbers],
+                "videos":[json.loads(v.data_json) for v in videos if v.shot_number in changed_numbers],
+                "final_video":json.loads(assembly.data_json) if assembly else old.get("final_video")}
+    revised["plan_revision_history"] = old.get("plan_revision_history", []) + [archived]
+    revised["plan_revision"] = old.get("plan_revision", 0) + 1
+    for shot in revised["shots"]:
+        if shot["shot_number"] not in changed_numbers:
+            continue
+        for key in list(shot):
+            if key.startswith(("video_", "still_frame_", "still_retry_", "dialogue_audio_", "dialogue_timing")) or key in {
+                    "compiled_prompt", "preview_input", "preview_dependencies", "preview_replacement",
+                    "face_enhancement", "error_message", "previous_still_frame_key"}:
+                shot.pop(key, None)
+        shot["status"] = "pending"
+    revised["generation_approved"] = False
+    revised["assembly"]["provisional"] = True
+    for key in ("final_video", "video_prompt_checkpoint", "video_prompt_error"):
+        revised.pop(key, None)
+    revised["audio_assembly_pending"] = False
+    revised["preview_preparation_pending"] = False
+    revised["video_prompts_pending"] = False
+    for key, ref in list(revised.get("entity_references", {}).items()):
+        if ref.get("shot_number") in changed_numbers:
+            revised["entity_references"].pop(key)
+    for row in videos + enhancements:
+        if row.shot_number in changed_numbers:
+            db.delete(row)
+    if assembly:
+        db.delete(assembly)
+    from app.services.still_frame_service import invalidate_changed_stills
+    invalidate_changed_stills(revised)
+    job.result_json = json.dumps(revised)
+    db.commit()
+    db.expire_all()
+    return revised
+
+
+def lock_plan_for_media(db, job_id, source_hash=None, number=None):
+    """Serialize media submissions against plan edits without holding a provider call."""
+    job = db.query(Job).filter_by(id=job_id).populate_existing().one()
+    old = job.result_json
+    if db.query(Job).filter(Job.id == job_id, Job.result_json == old).update(
+            {Job.result_json: old}, synchronize_session=False) != 1:
+        db.rollback()
+        raise ValueError("Your plan changed. Refresh before generating.")
+    result = json.loads(old or "{}")
+    if result.get("plan_revision") and not result.get("generation_approved"):
+        db.rollback()
+        raise ValueError("Approve your edited plan before generating media.")
+    if source_hash:
+        from app.services.video_generation_service import source_fingerprint
+        shot = next((s for s in result.get("shots", []) if s["shot_number"] == number), None)
+        if not shot or source_fingerprint(shot) != source_hash:
+            db.rollback()
+            raise ValueError("Your shot changed. Refresh before generating.")
