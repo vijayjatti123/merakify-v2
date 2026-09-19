@@ -54,6 +54,19 @@ class StillFramesTests(unittest.TestCase):
         self.assertNotIn('Parachute deploys', text)
         self.assertIn('High angle', text)
 
+    def test_changed_candidate_source_generates_and_saves_current_evidence(self):
+        shot = self.result['shots'][0]
+        shot['still_frame_candidate'] = {'key': 'old', 'source': 'stale', 'attempt': 0}
+        verdict = self.checked_verdict()
+        with patch.object(service, 'generate_still', return_value=self.image) as generate, \
+             patch.object(service, 'check_still', return_value=verdict), \
+             patch.object(service.storage_service, 'upload_bytes', return_value={'key':'approved','url':'https://approved'}):
+            self.run_stills()
+        generate.assert_called_once()
+        self.assertEqual(shot['still_frame_status'], 'ready')
+        self.assertEqual(shot['still_frame_verification'], verdict)
+        self.assertNotIn('still_frame_candidate', shot)
+
     def test_checker_requests_text_model_and_schema(self):
         with patch.object(service.settings, 'google_ai_api_key', 'test'), \
              patch.object(service, 'urlopen') as opened:
@@ -63,7 +76,35 @@ class StillFramesTests(unittest.TestCase):
         self.assertIn(service.settings.gemini_preview_check_model, request.full_url)
         config = json.loads(request.data)['generationConfig']
         self.assertEqual(config['responseModalities'], ['TEXT'])
-        self.assertEqual(config['responseSchema']['required'], ['approved','reason','visible_entities','spatially_grounded'])
+        self.assertEqual(config['responseSchema']['required'], ['approved','reason','visible_entities','spatially_grounded','visual_checks'])
+        self.assertEqual(config['responseSchema']['properties']['visual_checks']['required'], list(service.VISUAL_CHECKS))
+
+    def checked_verdict(self):
+        return {'approved': True, 'reason': 'Matches', 'spatially_grounded': True,
+                'visible_entities': [], 'visual_checks': {key: {
+                    'status': 'pass', 'requirement': 'Supplied opening requirement',
+                    'evidence': 'Visible evidence in candidate'} for key in service.VISUAL_CHECKS}}
+
+    def test_uncertain_placement_overrides_approval_and_collects_other_failures(self):
+        verdict = self.checked_verdict()
+        verdict['visual_checks']['placement_support'].update(status='uncertain', evidence='Cabin floor and threshold are obscured')
+        verdict['visual_checks']['opening_state'].update(status='fail', evidence='Main canopy already open')
+        response = {'candidates': [{'content': {'parts': [{'text': json.dumps(verdict)}]}}]}
+        with patch.object(service, '_google', return_value=response):
+            result = service.check_still('Inside helicopter, canopy packed', [], self.image)
+        self.assertFalse(result['approved'])
+        self.assertFalse(result['spatially_grounded'])
+        self.assertIn('Cabin floor', result['reason'])
+        self.assertIn('Main canopy', result['reason'])
+
+    def test_missing_checklist_is_verification_outage_not_image_rejection(self):
+        verdict = self.checked_verdict()
+        del verdict['visual_checks']['placement_support']
+        response = {'candidates': [{'content': {'parts': [{'text': json.dumps(verdict)}]}}]}
+        with patch.object(service, '_google', return_value=response) as call:
+            with self.assertRaises(service.VerificationUnavailable):
+                service.check_still('Inside helicopter', [], self.image)
+        self.assertEqual(call.call_count, 2)
 
     def test_helicopter_opening_requires_interior_spatial_grounding(self):
         from app.services.preview_plan import preview_visual
@@ -192,7 +233,7 @@ class StillFramesTests(unittest.TestCase):
 
     @patch.object(service, "_google")
     def test_real_provider_approval_with_null_reason(self, google):
-        google.return_value = {"candidates": [{"content": {"parts": [{"text": json.dumps({"approved": True, "reason": None, "spatially_grounded": True})}]}}]}
+        google.return_value = {"candidates": [{"content": {"parts": [{"text": json.dumps({**self.checked_verdict(), "reason": None})}]}}]}
         self.assertTrue(service.check_still("A cup", [], self.image)["approved"])
         google.return_value["candidates"][0]["content"]["parts"][0]["text"] = '{"approved":false,"reason":null}'
         with self.assertRaises(service.StillFrameError):

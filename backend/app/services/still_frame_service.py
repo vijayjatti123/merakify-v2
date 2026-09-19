@@ -139,6 +139,10 @@ def _inline(image):
                            "data": base64.b64encode(image.data).decode("ascii")}}
 
 
+VISUAL_CHECKS = ("identity_wardrobe", "placement_support", "props_contact",
+                 "opening_state", "framing", "lighting_style")
+
+
 def _google(parts, *, aspect_ratio=None, verification=False):
     if sum("inlineData" in part for part in parts) > MAX_REQUEST_IMAGES:
         raise StillFrameError("Internal still-frame image budget exceeded")
@@ -155,8 +159,14 @@ def _google(parts, *, aspect_ratio=None, verification=False):
         config["responseSchema"] = {"type": "OBJECT", "properties": {
             "approved": {"type": "BOOLEAN"}, "reason": {"type": "STRING"},
             "visible_entities": {"type": "ARRAY", "items": {"type": "STRING"}},
-            "spatially_grounded": {"type": "BOOLEAN"}},
-            "required": ["approved", "reason", "visible_entities", "spatially_grounded"]}
+            "spatially_grounded": {"type": "BOOLEAN"},
+            "visual_checks": {"type": "OBJECT", "properties": {key: {
+                "type": "OBJECT", "properties": {
+                    "status": {"type": "STRING", "enum": ["pass", "fail", "uncertain", "not_applicable"]},
+                    "requirement": {"type": "STRING"}, "evidence": {"type": "STRING"}},
+                "required": ["status", "requirement", "evidence"]} for key in VISUAL_CHECKS},
+                "required": list(VISUAL_CHECKS)}},
+            "required": ["approved", "reason", "visible_entities", "spatially_grounded", "visual_checks"]}
     request = Request(
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{quote(model.strip(), safe='')}:generateContent",
@@ -272,9 +282,19 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
         + ("collages, invented captions, changed product branding/shape/packaging, or a later completed action. Existing text/logos on approved product packaging are required and must NOT be rejected as readable text. " if product_reference
            else "collages, readable text, or a later completed action instead of the described opening. ") +
         "Ignore motion/audio requirements that cannot be depicted in a still. Treat explicit "
-        "spatial requirements as hard acceptance criteria: reject a person visibly outside a named "
-        "interior/container or floating beside it. Do not demand new details absent from the "
-        "description. Return JSON only with approved, reason, visible_entities and spatially_grounded.\n"
+        "spatial requirements as hard acceptance criteria. Compare inside/outside placement and "
+        "support against the specified opening, respecting intentionally airborne/fantastical subjects. "
+        "Do not demand new details absent from the description. Return visual_checks with exactly "
+        + ", ".join(VISUAL_CHECKS) + ". For EACH category quote its requirement from the supplied "
+        "opening description/reference label and describe actual visible evidence, not expected content. "
+        "Check identity/clothing, containment and support, relative placement and prop ownership/contact, "
+        "opening action (no later deployment/reveal), framing, and lighting/style respectively. "
+        "Use status pass, fail, uncertain or not_applicable. If a required relationship cannot be seen "
+        "because of occlusion/cropping/ambiguity, use uncertain, NEVER assume it passes. Do not require "
+        "feet in every close-up: appropriate visible cabin/seat/threshold geometry can establish position. "
+        "Use not_applicable only when no requirement/reference exists for that category; explain why. "
+        "Report ALL failures together with specific corrective evidence. Approve only when every applicable "
+        "check passes. Set spatially_grounded false for failed/uncertain placement_support.\n"
         + visual
     )}]
     if entities:
@@ -298,6 +318,24 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
                 raise ValueError("Missing spatial verification")
             if not isinstance(verdict.get("approved"), bool) or not isinstance(verdict.get("reason"), str):
                 raise ValueError("Invalid verification verdict")
+            checks = verdict.get("visual_checks")
+            if not isinstance(checks, dict) or set(checks) != set(VISUAL_CHECKS):
+                raise ValueError("Missing visual checklist")
+            failures = []
+            for key in VISUAL_CHECKS:
+                row = checks[key]
+                if (not isinstance(row, dict) or row.get("status") not in
+                        ("pass", "fail", "uncertain", "not_applicable") or
+                        any(not isinstance(row.get(k), str) or not row[k].strip()
+                            for k in ("requirement", "evidence"))):
+                    raise ValueError("Invalid visual checklist evidence")
+                if row["status"] in ("fail", "uncertain"):
+                    failures.append(f"{key} ({row['status']}): {row['requirement']} — {row['evidence']}")
+            if failures:
+                verdict["approved"] = False
+                verdict["reason"] = "; ".join(failures)
+            if checks["placement_support"]["status"] in ("fail", "uncertain"):
+                verdict["spatially_grounded"] = False
             if verdict.get("approved") and not verdict.get("spatially_grounded"):
                 verdict["approved"] = False
                 verdict["reason"] = "Spatial relationships do not match the opening state. " + verdict["reason"]
@@ -547,6 +585,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                     raise VerificationUnavailable("Image created, but verification is unavailable") from error
                 shot.pop("still_frame_candidate", None)
                 candidate = None
+                shot["still_frame_verification"] = verdict
                 emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_completed", "attempt": attempt + 1,
                     "elapsed_sec": round(time.monotonic() - started, 3), "approved": verdict["approved"]}))
                 if verdict["approved"]:

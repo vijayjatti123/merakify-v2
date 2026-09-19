@@ -234,6 +234,15 @@ The locked style bible remains authoritative and is attached downstream by code.
 through shot-specific lighting/composition, rather than recopying identity/style paragraphs.
 Use a concise rendering cue where it affects lighting (e.g. cel-shadow bands); never change rendering.
 Describe action and spatial staging, not new identities, wardrobe, product claims or histories.
+In state_at_shot_start, specify each visible subject's location relative to the set boundary
+(inside/outside where relevant), support/contact (floor, seat, ground, or intentionally airborne),
+relative position and who holds/touches each story-critical prop. Describe ONLY the opening instant;
+put later handoffs, jumps, reveals and deployments in action_beats/state_at_shot_end.
+Choose camera_angle so essential spatial relationships can actually be seen: use a sill, floor,
+seat or other appropriate set landmark when containment matters. Do not require full bodies in
+every close-up: choose visible evidence appropriate to framing, or a wider frame when necessary
+to establish a story-critical relationship. Keep this staging in the existing 500-character opening
+state budget. Respect fantastical action explicitly requested; do not invent supports or props.
 
 TIMING AND PHYSICAL CONTINUITY
 Propose durations near the supplied total with adequate time for each complete action and spoken
