@@ -1,9 +1,11 @@
 from app.services.speech_mode import is_voiceover
 import asyncio
 import base64
+import copy
 import uuid
 import io
 import json
+import time
 import wave
 from dataclasses import dataclass
 
@@ -52,6 +54,51 @@ class GeneratedAudio:
     content_type: str
     extension: str
     provider: str
+
+
+def _prepare_preview_snapshot(result: dict, job_id: str, shot_numbers: set[int] | None = None) -> dict:
+    """Render opening frames without touching the owner thread's DB session.
+
+    Opening-frame inputs deliberately exclude dialogue audio and measured timing,
+    so this paid work can safely overlap TTS. Events stay on the private snapshot
+    until the owning task merges it after audio writes finish.
+    """
+    from app.services.still_frame_service import generate_still_frames
+
+    snapshot = copy.deepcopy(result)
+    events: list[tuple[str, str]] = []
+    started = time.monotonic()
+    snapshot["shots"] = generate_still_frames(
+        snapshot,
+        job_id=job_id,
+        emit=lambda key, note: events.append((key, note)),
+        shot_numbers=shot_numbers,
+    )
+    return {
+        "result": snapshot,
+        "events": events,
+        "elapsed_sec": round(time.monotonic() - started, 3),
+    }
+
+
+def _merge_preview_snapshot(result: dict, preview_result: dict) -> dict:
+    """Merge only preview-owned fields, preserving concurrent audio updates."""
+    rendered_by_number = {
+        shot["shot_number"]: shot for shot in preview_result.get("shots", [])
+    }
+    for shot in result.get("shots", []):
+        rendered = rendered_by_number.get(shot.get("shot_number"))
+        if not rendered:
+            continue
+        for key in list(shot):
+            if key.startswith("still_frame_") or key in {"preview_input", "preview_dependencies"}:
+                shot.pop(key)
+        shot.update({
+            key: value for key, value in rendered.items()
+            if key.startswith("still_frame_") or key in {"preview_input", "preview_dependencies"}
+        })
+    result["entity_references"] = preview_result.get("entity_references", {})
+    return result
 
 
 def decoded_audio_duration(data: bytes) -> float:
@@ -369,6 +416,36 @@ async def generate_job_dialogue_audio(
 
     if shot_numbers is None and result.get("plan_edited_shots"):
         shot_numbers = set(result["plan_edited_shots"])
+
+    # Opening-frame contracts exclude dialogue, measured audio duration and
+    # signed audio URLs. Start previews now instead of making every image wait
+    # for TTS. The worker owns a deep copy and never touches the SQLAlchemy
+    # session; its fields are merged by this owner after audio writes finish.
+    preview_task = None
+    if (
+        result.get("generation_approved") is True
+        and result.get("preview_preparation_pending")
+        and any(
+            not shot.get("still_frame_url")
+            for shot in result.get("shots", [])
+            if shot_numbers is None or shot.get("shot_number") in shot_numbers
+        )
+    ):
+        job_service.append_event(
+            db,
+            job_id,
+            "media_preparation_timing",
+            json.dumps({"branch": "previews", "phase": "started_with_audio", "elapsed_sec": 0.0}),
+        )
+        preview_task = asyncio.create_task(
+            asyncio.to_thread(
+                _prepare_preview_snapshot,
+                result,
+                job_id,
+                shot_numbers,
+            )
+        )
+
     selected = [
         shot
         for shot in result.get("shots", [])
@@ -404,6 +481,33 @@ async def generate_job_dialogue_audio(
         "voice_generation",
         f"Voice generation finished for {len(dialogue_shots)} dialogue shot(s).",
     )
+    if preview_task is not None:
+        try:
+            preview_work = await preview_task
+            current_job = job_service.get_job(db, job_id)
+            current = job_service.job_result(current_job) if current_job else None
+            if current:
+                _merge_preview_snapshot(current, preview_work["result"])
+                job_service.set_result(db, job_id, current)
+            for key, note in preview_work["events"]:
+                job_service.append_event(db, job_id, key, note)
+            job_service.append_event(
+                db,
+                job_id,
+                "media_preparation_timing",
+                json.dumps({
+                    "branch": "previews",
+                    "phase": "finished_with_audio",
+                    "elapsed_sec": preview_work["elapsed_sec"],
+                }),
+            )
+        except Exception as error:  # noqa: BLE001 - normal preparation can retry this branch
+            job_service.append_event(
+                db,
+                job_id,
+                "still_frame",
+                f"Early preview preparation unavailable ({type(error).__name__}); continuing with normal recovery.",
+            )
     if has_dialogue or any(not s.get("compiled_prompt") for s in result.get("shots", [])):
         await asyncio.to_thread(finalize_audio_assembly, db, job_id)
 

@@ -1,5 +1,6 @@
 import asyncio
 import io
+import threading
 import wave
 import unittest
 from types import SimpleNamespace
@@ -40,6 +41,42 @@ class VoiceAssignmentTests(unittest.TestCase):
         self.assertEqual(continuity["narrator_voice_ref"], "shubh")
         for character in continuity["characters"]:
             self.assertEqual(character["voice_sample_ref"], character["voice_id"])
+
+
+class PreviewAudioOverlapTests(unittest.TestCase):
+    def test_preview_merge_preserves_audio_and_compiler_fields(self) -> None:
+        current = {
+            "shots": [{
+                "shot_number": 1,
+                "dialogue_audio_url": "https://audio.test/one.wav",
+                "duration_sec": 6,
+                "compiled_prompt": "Keep this final video instruction",
+                "still_frame_status": "pending",
+            }],
+            "entity_references": {"old": {"shot_number": 9}},
+        }
+        preview = {
+            "shots": [{
+                "shot_number": 1,
+                "duration_sec": 5,
+                "compiled_prompt": "stale snapshot prompt",
+                "still_frame_status": "ready",
+                "still_frame_url": "https://images.test/one.jpg",
+                "preview_input": {"description": "opening instant"},
+                "preview_dependencies": {},
+            }],
+            "entity_references": {"Kabir": {"shot_number": 1}},
+        }
+
+        merged = voice_generation_service._merge_preview_snapshot(current, preview)
+
+        shot = merged["shots"][0]
+        self.assertEqual(shot["dialogue_audio_url"], "https://audio.test/one.wav")
+        self.assertEqual(shot["duration_sec"], 6)
+        self.assertEqual(shot["compiled_prompt"], "Keep this final video instruction")
+        self.assertEqual(shot["still_frame_status"], "ready")
+        self.assertEqual(shot["still_frame_url"], "https://images.test/one.jpg")
+        self.assertEqual(merged["entity_references"], {"Kabir": {"shot_number": 1}})
 
 
 class ProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
@@ -87,6 +124,53 @@ class ProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
 
 
 class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_preview_work_starts_while_dialogue_audio_is_still_running(self) -> None:
+        preview_started = threading.Event()
+        result = {
+            "generation_approved": True,
+            "preview_preparation_pending": True,
+            "continuity": {"characters": [], "narrator_voice_ref": "shubh"},
+            "script": {"scenes": [{"scene_number": 1, "mood": "warm"}]},
+            "shots": [{
+                "shot_number": 1,
+                "scene_number": 1,
+                "has_dialogue": True,
+                "dialogue_text": "A line",
+                "duration_sec": 5,
+                "voice_refs": {"Narrator": "shubh"},
+            }],
+        }
+        job = SimpleNamespace(language="English")
+
+        def previews(snapshot, _job_id, _shot_numbers):
+            preview_started.set()
+            rendered = {**snapshot}
+            rendered["shots"] = [{
+                **snapshot["shots"][0],
+                "still_frame_status": "ready",
+                "still_frame_url": "https://images.test/one.jpg",
+            }]
+            return {"result": rendered, "events": [], "elapsed_sec": 0.01}
+
+        async def dialogue(*_args, **_kwargs):
+            started_in_time = await asyncio.to_thread(preview_started.wait, 0.5)
+            self.assertTrue(started_in_time)
+
+        with (
+            patch("app.services.voice_generation_service.job_service.get_job", return_value=job),
+            patch("app.services.voice_generation_service.job_service.job_result", return_value=result),
+            patch("app.services.voice_generation_service.job_service.set_result"),
+            patch("app.services.voice_generation_service.job_service.append_event"),
+            patch("app.services.voice_timing.select_calibrated_voices", return_value=[]),
+            patch("app.agents.director._attach_voice_refs", side_effect=lambda shots, *_args: shots),
+            patch("app.agents.director.finalize_audio_assembly"),
+            patch("app.services.voice_generation_service._generate_dialogue_shot", side_effect=dialogue),
+            patch("app.services.voice_generation_service._prepare_preview_snapshot", side_effect=previews),
+        ):
+            await voice_generation_service.generate_job_dialogue_audio(Mock(), "job-overlap")
+
+        self.assertTrue(preview_started.is_set())
+
     async def test_dialogue_shots_start_concurrently_and_persist_real_results(self) -> None:
         shots = [
             {
