@@ -411,16 +411,19 @@ def validate_and_correct(
         if ad_direction_plan and tokens < 8192:
             options['truncation_retry_tokens'] = 8192
         return options
+    planning_fields = ('shot_number', 'scene_number', 'description', 'dialogue_text', 'has_dialogue',
+        'speech_mode', 'speaker_name', 'characters_in_shot', 'opening_characters', 'shot_direction',
+        'direction_version', 'camera_angle', 'camera_direction', 'camera_movement', 'lens',
+        'lighting', 'composition_note', 'duration_sec', 'dialogue_audio_duration_sec',
+        'state_at_shot_start', 'state_at_shot_end')
+    def planning_view(shot):
+        """Remove signed URLs and generated media state from planning calls."""
+        return {key: shot[key] for key in planning_fields if key in shot}
     def review_content(reviewed_shots):
         if ad_direction_plan:
             # QA needs the whole story and decisions, not signed URLs, previous
             # generated prompts, images, playback metadata or reference hashes.
-            fields = ('shot_number', 'scene_number', 'description', 'dialogue_text', 'has_dialogue',
-                      'speech_mode', 'characters_in_shot', 'opening_characters', 'shot_direction',
-                      'direction_version', 'camera_angle', 'camera_direction', 'camera_movement',
-                      'lighting', 'composition_note', 'duration_sec',
-                      'dialogue_audio_duration_sec', 'state_at_shot_start', 'state_at_shot_end')
-            reviewed_shots = [{k:s[k] for k in fields if k in s} for s in reviewed_shots]
+            reviewed_shots = [planning_view(shot) for shot in reviewed_shots]
             refs = creative_references(characters)
             return json.dumps({'shots': reviewed_shots, 'characters': refs,
                 'ad_direction': ad_direction_plan, 'approved_story': story_outline,
@@ -437,6 +440,7 @@ def validate_and_correct(
     def mechanical_review(verdict, reviewed_shots):
         if ad_direction_plan:
             verdict = story_requirements.check_review(verdict, reviewed_shots, approved_story)
+            verdict = story_requirements.derive_scene_coverage(verdict, approved_story)
             verdict = ad_direction.check_coverage(verdict, reviewed_shots, approved_story)
         findings = code_review(reviewed_shots).get('issues', [])
         issues = list(verdict.get('issues', []))
@@ -444,7 +448,66 @@ def validate_and_correct(
             old.get('shot_number') == i['shot_number'] and old.get('code') == i.get('code') for old in issues))
         return {**verdict, 'approved': bool(verdict.get('approved')) and not issues, 'issues': issues}
 
-    # Continuity QA Agent, with one autonomous self-correction pass.
+    # Repair code-detectable defects BEFORE semantic QA. The old order paid for
+    # a complete story review, discovered a camera enum afterward, repaired one
+    # field, then paid for the same complete review again. Semantic QA now sees
+    # one mechanically valid plan while retaining its independent judgment.
+    protected = protected_dialogue(current_shots, source_script_text)
+    preflight_issues = code_review(current_shots).get('issues', [])
+    if preflight_issues:
+        notify('cinematography', f"Correcting {len(preflight_issues)} technical planning issue(s) before continuity review...")
+        permissions = patch_permissions(current_shots, preflight_issues)
+        if permissions:
+            targets = set(permissions)
+            by_number = {shot['shot_number']: shot for shot in current_shots}
+            ordered = [shot['shot_number'] for shot in current_shots]
+            neighbors = set()
+            for number in targets:
+                index = ordered.index(number)
+                neighbors.update(ordered[max(0, index - 1):index])
+                neighbors.update(ordered[index + 1:index + 2])
+            compact = {
+                'target_shots': [planning_view(by_number[number]) for number in ordered if number in targets],
+                'readonly_neighbors': [{key: by_number[number].get(key) for key in
+                    ('shot_number', 'scene_number', 'description', 'camera_angle',
+                     'state_at_shot_start', 'state_at_shot_end')}
+                    for number in ordered if number in neighbors],
+                'required_fixes': preflight_issues,
+                'allowed_fields': permissions,
+                'camera_options': camera_options(),
+                'ad_direction': ad_direction_plan,
+            }
+            patch_response = call_agent(prompts.CINEMATOGRAPHY_PATCH,
+                json.dumps(compact, ensure_ascii=False),
+                max_tokens=min(4096, 1536 + 256 * len(permissions)))
+            current_shots = apply_patch_response(current_shots, patch_response, permissions)
+        else:
+            # Rare cross-field failures (for example an invalid speaker/cast
+            # relationship) need the existing complete-plan correction, still
+            # before QA and still protected by dialogue/unflagged-shot guards.
+            cine = call_agent(prompts.CINEMATOGRAPHY_FIX,
+                f"Current shots: {json.dumps(current_shots)}\nRequired mechanical fixes: {json.dumps(preflight_issues)}"
+                f"\ncamera_options: {json.dumps(camera_options())}" + direction_context,
+                max_tokens=cinematography_token_budget([{}] * ((len(current_shots) + 1) // 2), target_duration_sec))
+            if ad_direction_plan:
+                protect_unflagged(current_shots, cine['shots'], preflight_issues)
+            repaired, violations = restore_protected(current_shots, cine['shots'], protected, notify)
+            if violations:
+                raise ValueError('Technical correction could not preserve approved dialogue. Retry planning.')
+            current_shots = repaired
+            if any(shot.get('direction_version') == 1 for shot in shots):
+                for shot in current_shots:
+                    shot['direction_version'] = 1
+                    if all(key in shot for key in ad_direction.DIRECTION_FIELDS):
+                        shot['direction_source'] = ad_direction.source_key(shot)
+        current_shots = render_camera_summaries(_attach_voice_refs(
+            current_shots, characters, narrator_voice_ref, emit=emit))
+        remaining_mechanics = code_review(current_shots).get('issues', [])
+        if remaining_mechanics:
+            raise ValueError('Technical planning correction remained invalid. Your story is saved; retry planning.')
+        notify('cinematography', 'Technical plan validated; starting one independent continuity review.')
+
+    # Continuity QA Agent, with one autonomous semantic self-correction pass.
     notify("qa", "Checking the shot list for continuity and film-grammar violations...")
     qa = call_agent(
         prompts.QA_AGENT,
@@ -453,7 +516,6 @@ def validate_and_correct(
     )
 
     qa = mechanical_review(qa, current_shots)
-    protected = protected_dialogue(current_shots, source_script_text)
     def screen_review_issues(verdict):
         findings = verdict.get('issues', [])
         # An insertion's shot_number identifies a boundary, not a request to
@@ -929,7 +991,6 @@ def run_pipeline(db: Session, job_id: str) -> None:
         cinematography_input += "\nApproved story and format: " + json.dumps({'logline': script['logline'], 'format': fmt['format']})
 
         def record_cinematography_usage(metadata: dict) -> None:
-            emit("cinematography_usage", json.dumps(metadata))
             if metadata["will_retry"]:
                 emit("cinematography", "Shot planning reached its response limit; retrying once with more room.")
 

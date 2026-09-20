@@ -270,7 +270,9 @@ def append_event(db: Session, job_id: str, agent_key: str, note: str) -> AgentEv
     event = AgentEvent(job_id=job_id, agent_key=agent_key, note=note)
     db.add(event)
     db.commit()
-    db.refresh(event)
+    # The event is already durable and visible to the SSE reader after commit.
+    # Refreshing it added a second database round trip to every progress note;
+    # callers do not consume server-generated fields from the returned row.
     return event
 
 

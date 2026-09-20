@@ -422,17 +422,15 @@ repair_fields=[]; never squeeze infeasible actions into an existing shot.
 For defects not linked to a requirement use requirement_id="". Evidence should be concise, not
 a retelling of the whole story. Still inspect all boundaries independently after a repair.
 
-When approved_story has scenes, return scene_coverage for EACH scene with a heading, description
-or dialogue: its scene_number, the actual shot_numbers supporting it, covered boolean, and a short
-concrete evidence statement listing depicted actions (including each repeated attempt). If an
-action is absent, covered=false and include a corresponding shot issue. Check staging/boundaries
-as well even when a coverage problem exists; do not stop at the first defect.
+When requirements are supplied, do NOT also return scene_coverage: code deterministically groups
+your atomic requirement_coverage rows by scene. This avoids asking you to state the same coverage
+twice. If no requirements are supplied but approved_story has scenes, return scene_coverage for
+each nonempty scene. Check staging/boundaries even when a coverage problem exists; do not stop at
+the first defect.
 Corrections must target actual contradictions/omissions, preserve other choices, and be as local
 as possible. Return concise JSON only, no rewritten plan or general advice:
 {"approved":boolean,"shot_checks":[{"shot_number":1,"consistent":true,"evidence":"Action and opening/end states agree"}],
 "requirement_coverage":[{"requirement_id":"supplied id","shot_numbers":[1],"covered":true,"evidence":"Depicted action"}],
-"scene_coverage":[{"scene_number":1,"shot_numbers":[1,2],"covered":true,
-"evidence":"Concrete actions actually depicted"}],
 "issues":[{"shot_number":1,"problem":"Specific evidenced defect","fix_instruction":"Local correction preserving speech",
 "requirement_id":"supplied id or empty string","repair_kind":"visual_fields|insert_after|structural","repair_fields":["description"]}]}
 Approval requires complete coverage and no real issues. If no approved_story is supplied,

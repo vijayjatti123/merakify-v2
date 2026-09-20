@@ -63,6 +63,10 @@ class OutputContractTests(unittest.TestCase):
         self.assertEqual(name, 'qa-v2')
         with self.assertRaises(ValueError):
             contracts.validate({'approved': True, 'scene_coverage': [], 'issues': []}, schema)
+        valid = {'approved': True, 'requirement_coverage': [], 'shot_checks': [], 'issues': []}
+        contracts.validate(valid, schema)
+        with self.assertRaises(ValueError):
+            contracts.validate({**valid, 'scene_coverage': []}, schema)
 
     def test_patch_contract_forbids_dialogue_and_unknown_fields(self):
         schema = contracts.contracts()['patch-v1']

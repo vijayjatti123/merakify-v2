@@ -115,7 +115,7 @@ def execute(call, system, content, kwargs, scope):
                     break
                 except queue.Empty:
                     drain()
-                    if time.monotonic() - last_heartbeat >= 10:
+                    if time.monotonic() - last_heartbeat >= 20:
                         emit("pipeline_timing", json.dumps({"stage": stage, "phase": "waiting",
                              "attempt": attempt, "elapsed_sec": round(time.monotonic() - started, 3)}))
                         last_heartbeat = time.monotonic()
@@ -142,13 +142,14 @@ def execute(call, system, content, kwargs, scope):
                     review = None  # Legacy review text has no coverage contract.
                 if isinstance(review, dict) and review.get('ad_direction'):
                     from app.services.ad_direction import check_coverage
-                    from app.services.story_requirements import check_review
+                    from app.services.story_requirements import check_review, derive_scene_coverage
                     # Invalid evidence must not become a checkpoint that every
                     # Retry reuses forever. Persist genuine semantic rejections;
                     # the Director still owns their normal correction loop.
-                    check_coverage(value, review.get('shots', []), review.get('approved_story'))
                     if review.get('requirements'):
                         check_review(value, review.get('shots', []), review.get('approved_story'))
+                        value = derive_scene_coverage(value, review.get('approved_story'))
+                    check_coverage(value, review.get('shots', []), review.get('approved_story'))
             job_service.save_agent_checkpoint(db, job_id, key, value)
             emit("pipeline_timing", json.dumps({"stage": stage, "phase": "completed", "attempt": attempt,
                  "elapsed_sec": round(time.monotonic() - started, 3)}))

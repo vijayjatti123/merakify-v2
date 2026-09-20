@@ -22,6 +22,35 @@ def review_context(story):
             'source_context': (story or {}).get('production_context', {})}
 
 
+def derive_scene_coverage(verdict, story):
+    """Project already-required atomic evidence into scene-level evidence.
+
+    Asking QA to emit both matrices made it restate the same story coverage.
+    The atomic rows remain model-judged; this grouping is deterministic.
+    """
+    if verdict.get('scene_coverage') is not None:
+        return verdict  # Backward-compatible saved/test verdicts.
+    expected = requirements(story)
+    rows = verdict.get('requirement_coverage')
+    if not expected or not isinstance(rows, list):
+        return verdict
+    by_id = {row.get('requirement_id'): row for row in rows if isinstance(row, dict)}
+    scenes = []
+    for scene in (story or {}).get('scenes', []):
+        required = [item for item in expected if item['scene_number'] == scene['scene_number']]
+        if not required:
+            continue
+        evidence = [by_id.get(item['id']) for item in required]
+        complete = all(row and row.get('covered') is True for row in evidence)
+        numbers = sorted({number for row in evidence if row for number in row.get('shot_numbers', [])
+                          if isinstance(number, int) and not isinstance(number, bool)})
+        scenes.append({'scene_number': scene['scene_number'], 'shot_numbers': numbers,
+            'covered': complete,
+            'evidence': (f"{len(required)} source requirement(s) covered by atomic review."
+                         if complete else "One or more source requirements are uncovered; see linked issue evidence.")})
+    return {**verdict, 'scene_coverage': scenes}
+
+
 def check_review(verdict, shots, story):
     expected = {r['id']: r for r in requirements(story)}
     if not expected:

@@ -36,6 +36,53 @@ class StoryRequirementsTests(unittest.TestCase):
         verdict['issues'] = [{'shot_number': 2, 'requirement_id': rows[2]['requirement_id']}]
         self.assertFalse(req.check_review(verdict, self.shots, self.story)['approved'])
 
+    def test_scene_coverage_is_derived_from_atomic_evidence(self):
+        verdict = req.derive_scene_coverage({'approved': True,
+            'requirement_coverage': self.rows, 'issues': []}, self.story)
+        self.assertEqual(verdict['scene_coverage'], [{'scene_number': 1,
+            'shot_numbers': [1, 2], 'covered': True,
+            'evidence': '4 source requirement(s) covered by atomic review.'}])
+        missing = copy.deepcopy(self.rows)
+        missing[1].update(covered=False, shot_numbers=[])
+        verdict = req.derive_scene_coverage({'approved': False,
+            'requirement_coverage': missing, 'issues': []}, self.story)
+        self.assertFalse(verdict['scene_coverage'][0]['covered'])
+        self.assertEqual(verdict['scene_coverage'][0]['shot_numbers'], [1, 2])
+
+    def test_mechanical_camera_repair_happens_before_one_semantic_review(self):
+        from app.agents import director, prompts
+        from test_ad_direction import directed
+        plan = directed()
+        shots = plan['shots']
+        shots[0]['camera_direction'] = {'movement': 'zoom', 'direction': 'in',
+            'speed': 'slow', 'stabilization': 'locked'}
+        story = {'scenes': [{'scene_number': shots[0]['scene_number'], 'heading': 'Cup'}]}
+        requirements = req.requirements(story)
+        calls = []
+        def provider(system, content, **kwargs):
+            calls.append(system)
+            payload = json.loads(content)
+            if system == prompts.CINEMATOGRAPHY_PATCH:
+                self.assertEqual([s['shot_number'] for s in payload['target_shots']], [1])
+                self.assertNotIn('still_frame_url', payload['target_shots'][0])
+                self.assertEqual(kwargs['max_tokens'], 1792)
+                return {'patches': [{'shot_number': 1, 'changes': {'camera_direction': {
+                    'movement': 'zoom', 'direction': 'in', 'speed': 'slow',
+                    'stabilization': 'smooth'}}}]}
+            self.assertEqual(system, prompts.QA_AGENT)
+            self.assertEqual(payload['mechanical_findings'], [])
+            return {'approved': True,
+                'shot_checks': [{'shot_number': 1, 'consistent': True, 'evidence': 'States agree'}],
+                'requirement_coverage': [{'requirement_id': r['id'], 'shot_numbers': [1],
+                    'covered': True, 'evidence': 'Cup shown'} for r in requirements], 'issues': []}
+        with patch.object(director, 'call_agent', side_effect=provider):
+            result = director.validate_and_correct(shots, [], 5,
+                ad_direction_plan=plan['ad_direction'], approved_story=story)
+        self.assertEqual(calls, [prompts.CINEMATOGRAPHY_PATCH, prompts.QA_AGENT])
+        self.assertTrue(result['qa']['approved'])
+        self.assertTrue(result['qa']['scene_coverage'][0]['covered'])
+        self.assertEqual(result['shots'][0]['camera_direction']['stabilization'], 'smooth')
+
     def test_narrow_visual_patch_preserves_speech_and_neighbors(self):
         issue = {'shot_number': 2, 'repair_kind': 'visual_fields', 'repair_fields': ['lighting']}
         permissions = patch_permissions(self.shots, [issue])
@@ -104,6 +151,21 @@ class StoryRequirementsTests(unittest.TestCase):
                 execution.execute(lambda *a, **kw: invalid, prompts.QA_AGENT, json.dumps(review), {},
                                   (object(), 'isolated', lambda *a: None, 0))
             save.assert_not_called()
+
+    def test_atomic_evidence_is_checkpointed_without_duplicate_scene_matrix(self):
+        from app.agents import execution, prompts
+        from app.services import job_service
+        review = {'ad_direction': {'takeaway': 'test'}, 'approved_story': self.story,
+                  'requirements': req.requirements(self.story), 'shots': self.shots}
+        response = {'approved': True, 'issues': [], 'requirement_coverage': self.rows,
+                    'shot_checks': self.checks}
+        with patch.object(job_service, 'get_agent_checkpoint', return_value=None), \
+             patch.object(job_service, 'save_agent_checkpoint') as save:
+            result = execution.execute(lambda *a, **kw: response, prompts.QA_AGENT,
+                json.dumps(review), {}, (object(), 'isolated', lambda *a: None, 0))
+        self.assertTrue(result['approved'])
+        self.assertTrue(result['scene_coverage'][0]['covered'])
+        save.assert_called_once()
 
     def test_insert_preserves_existing_content_and_speech_correspondence(self):
         shot = dict(scene_number=1, camera_angle='wide', lens='35mm', lighting='warm',
