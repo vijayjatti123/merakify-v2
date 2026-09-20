@@ -21,6 +21,12 @@ def wav_tone(seconds=.4, frequency=440, rate=24000):
 
 
 class ApprovedAudioLockTests(unittest.TestCase):
+    def test_task_scoped_approved_audio_fields_are_supported(self):
+        with patch.object(approved_audio_lock.storage_service, 'asset_url', return_value='https://example.test/approved.wav') as url:
+            self.assertEqual(approved_audio_lock._audio_url({'video_approved_audio_key':'approved.wav'}),
+                             'https://example.test/approved.wav')
+            url.assert_called_once_with('approved.wav')
+
     def test_generated_soundtrack_is_replaced_by_approved_line_and_silence(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder) / 'source.mp4'

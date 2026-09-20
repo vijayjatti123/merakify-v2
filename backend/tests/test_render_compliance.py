@@ -52,7 +52,9 @@ class ComplianceTests(unittest.TestCase):
     def test_mismatch_one_retry_then_stops_for_review(self):
         with patch.object(gate,'inspect',return_value=verdict('mismatch')),patch.object(video,'provider',return_value={'id':'second'}) as api:
             self.assertFalse(self.check());self.assertFalse(self.check())
-            self.assertEqual(api.call_count,1);self.assertEqual(api.call_args.args[2],{'prompt':'unchanged'})
+            self.assertEqual(api.call_count,1)
+            self.assertIn('Automatic corrective retry',api.call_args.args[2]['prompt'])
+            self.assertIn('Cartoon / Anime',api.call_args.args[2]['prompt'])
             self.shot['video_task_id']='second'
             self.assertFalse(self.check());self.assertEqual(api.call_count,1)
             self.assertEqual(self.data()['video_status'], 'review_required')

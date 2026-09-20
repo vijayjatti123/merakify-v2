@@ -4,6 +4,8 @@ import io
 import json
 import math
 import time
+import re
+import unicodedata
 import wave
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
@@ -40,6 +42,22 @@ SCHEMA = {"type":"OBJECT","properties":{
     "confidence":{"type":"NUMBER"},"transcript":{"type":"STRING"},"reason":{"type":"STRING"},
     "issues":{"type":"ARRAY","items":ITEM}},
     "required":["status","confidence","transcript","reason","issues"]}
+
+CONTRACTIONS = {
+    "i'm":"i am", "you're":"you are", "we're":"we are", "they're":"they are",
+    "i've":"i have", "you've":"you have", "we've":"we have", "they've":"they have",
+    "i'll":"i will", "you'll":"you will", "we'll":"we will", "they'll":"they will",
+    "can't":"cannot", "won't":"will not", "don't":"do not", "doesn't":"does not",
+    "didn't":"did not", "isn't":"is not", "aren't":"are not", "wasn't":"was not",
+    "weren't":"were not", "it's":"it is", "that's":"that is", "what's":"what is",
+}
+
+
+def normalized_words(value):
+    text = unicodedata.normalize("NFKC", value or "").replace("’", "'").lower()
+    for contraction, expanded in CONTRACTIONS.items():
+        text = re.sub(rf"\b{re.escape(contraction)}\b", expanded, text)
+    return re.findall(r"\w+", text, flags=re.UNICODE)
 
 
 def extract_audio(media):
@@ -111,5 +129,12 @@ def inspect_audio(audio, duration, expected):
     started = time.monotonic()
     with urlopen(request, timeout=60) as response:
         verdict = parse(json.load(response), duration)
+    # A checker must not turn an equivalent contraction into a costly retry.
+    # Extra/repeated speech still changes the token sequence and remains caught.
+    if (verdict["status"] == "mismatch"
+            and all(issue["kind"] == "wrong_words" for issue in verdict["issues"])
+            and normalized_words(verdict["transcript"]) == normalized_words(expected["dialogue_text"])):
+        verdict.update(status="pass", confidence=1.0, issues=[],
+            reason="Spoken wording matches after normalizing an equivalent contraction.")
     return {"verdict":verdict,"model":model,"duration_sec":duration,
             "elapsed_sec":round(time.monotonic()-started,3),"checked_at":datetime.now(timezone.utc).isoformat()}

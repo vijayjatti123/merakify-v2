@@ -34,10 +34,12 @@ def _duration(path):
 
 
 def _audio_url(shot):
-    if shot.get("dialogue_audio_key"):
-        return storage_service.asset_url(shot["dialogue_audio_key"])
+    key = shot.get("video_approved_audio_key") or shot.get("dialogue_audio_key")
+    if key:
+        return storage_service.asset_url(key)
     from app.services.video_generation_service import fresh_url
-    return fresh_url(shot.get("dialogue_audio_url") or "")
+    return fresh_url(shot.get("video_approved_audio_url") or shot.get("dialogue_audio_url")
+                     or shot.get("video_audio_reference_url") or "")
 
 
 def apply(media, shot):

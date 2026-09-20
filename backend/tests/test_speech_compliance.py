@@ -19,6 +19,25 @@ def raw(v):
 
 
 class SpeechParseTests(unittest.TestCase):
+    def test_equivalent_contractions_normalize_without_hiding_extra_speech(self):
+        self.assertEqual(speech.normalized_words("You've got this."),
+                         speech.normalized_words("You have got this"))
+        self.assertNotEqual(speech.normalized_words("You've got this."),
+                            speech.normalized_words("Well, you have got this"))
+
+    def test_checker_contraction_false_positive_is_accepted(self):
+        result = finding()
+        result.update(transcript='Drink this, Kabir. You have got this.',
+                      reason='The contraction was expanded.',
+                      issues=[{'kind':'wrong_words','start_sec':1,'end_sec':2,'evidence':'have'}])
+        response = io.BytesIO(json.dumps(raw(result)).encode())
+        with patch.object(speech, 'urlopen', return_value=response), \
+             patch.object(speech.settings, 'google_ai_api_key', 'test'):
+            checked = speech.inspect_audio(b'wav', 6, {
+                'dialogue_text': "Drink this, Kabir. You've got this.", 'language':'English'})
+        self.assertEqual(checked['verdict']['status'], 'pass')
+        self.assertEqual(checked['verdict']['issues'], [])
+
     def test_evidence_required_and_low_confidence_never_retries(self):
         self.assertEqual(speech.parse(raw(finding()),6)["status"],"mismatch")
         v=finding();v["confidence"]=.6

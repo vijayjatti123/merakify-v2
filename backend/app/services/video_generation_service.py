@@ -274,6 +274,9 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
                            "video_provider": provider_name, "video_model": translated.get("model", MODEL),
                            "video_audio_model": translated.get("audio_model"),
                            "video_audio_reference_url": shot.get("dialogue_audio_url") if is_onscreen_speech(shot) else None,
+                           "video_onscreen_speech": is_onscreen_speech(shot),
+                           "video_approved_audio_url": shot.get("dialogue_audio_url") if is_onscreen_speech(shot) else None,
+                           "video_approved_audio_key": shot.get("dialogue_audio_key") if is_onscreen_speech(shot) else None,
                            "video_source_hash": source_fingerprint(shot), "video_submitted_at": datetime.now(timezone.utc).isoformat(),
                            "video_warnings": translated["warnings"], "video_mode": translated.get("mode", "reference_to_video"),
                            "video_compliance_expected": render_compliance_service.snapshot(db, job_id, shot),
@@ -435,8 +438,11 @@ def _finish_completed(db, job_id, shot, response, cache):
                         raise ValueError("Video exceeds 512MB download bound")
                     digest.update(chunk); video.write(chunk)
             cache.size, cache.digest, cache.downloaded = size, digest.hexdigest(), True
-        from app.services.speech_mode import is_onscreen_speech
-        if is_onscreen_speech(shot) and shot.get('dialogue_audio_url') and not cache.audio_locked:
+        has_locked_source = (shot.get('video_onscreen_speech')
+            or bool((shot.get('video_compliance_expected') or {}).get('speech')))
+        has_locked_source = has_locked_source and any(shot.get(key) for key in (
+            'video_approved_audio_key', 'video_approved_audio_url', 'video_audio_reference_url'))
+        if has_locked_source and not cache.audio_locked:
             from app.services import approved_audio_lock
             locked = approved_audio_lock.apply(video, shot)
             cache.size, cache.digest, cache.audio_locked = locked['bytes'], locked['sha256'], True

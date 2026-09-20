@@ -118,6 +118,8 @@ class AudioVideoTests(unittest.TestCase):
             data=self.saved();self.assertEqual(data['video_audio_model'],'kling_avatar_fal')
             self.assertEqual(data['video_fal_status_url'],'https://queue.fal.run/status')
             self.assertEqual(data['video_retry_request']['audio_url'],self.shot['dialogue_audio_url'])
+            self.assertTrue(data['video_onscreen_speech'])
+            self.assertEqual(data['video_approved_audio_url'],self.shot['dialogue_audio_url'])
 
     def test_fal_queue_failure_and_completed_media(self):
         shot={'video_fal_status_url':'https://queue.fal.run/status','video_fal_response_url':'https://queue.fal.run/result','video_model':'test'}
@@ -157,8 +159,13 @@ class AudioVideoTests(unittest.TestCase):
         mismatch={'verdict':{k:{'status':'mismatch' if k=='scale' else 'pass','observed':'wide','reason':'too wide'} for k in ('style','scale')}}
         with patch.object(gate,'inspect',return_value=mismatch), patch.object(audio,'submit',return_value={**response,'id':'two'}) as call, patch.object(hedra,'api') as old:
             self.assertFalse(gate.accept(self.db,self.job.id,self.saved(),io.BytesIO()))
-            self.assertEqual(call.call_args.args,('bytedance/seedance-2.0/reference-to-video',request))
+            sent=call.call_args.args[1]
+            self.assertEqual(call.call_args.args[0],'bytedance/seedance-2.0/reference-to-video')
+            self.assertEqual(sent['audio_urls'],request['audio_urls'])
+            self.assertEqual(sent['image_urls'],request['image_urls'])
+            self.assertIn('Automatic corrective retry',sent['prompt'])
             old.assert_not_called();self.assertEqual(self.saved()['video_task_id'],'two')
+            self.assertEqual(self.saved()['video_phase'],'correcting')
             self.assertFalse(gate.accept(self.db,self.job.id,self.saved(),io.BytesIO()))
             self.assertEqual(self.saved()['video_status'], 'review_required')
             self.assertEqual(call.call_count,1)
@@ -167,8 +174,9 @@ class AudioVideoTests(unittest.TestCase):
         with patch.object(audio,'submit',return_value={'id':'one','status_url':'https://queue.fal.run/status','response_url':'https://queue.fal.run/result'}):
             video.start(self.db,self.job.id,1,audio_model='seedance_fal')
         download=MagicMock();download.__enter__.return_value.iter_bytes.return_value=[b'\0\0\0\x20ftypisom'+b'0'*40]
-        with patch.object(audio,'poll',return_value={'status':'completed','model':self.saved()['video_model'],'results':['https://example.com/video.mp4']}), patch.object(video.httpx,'stream',return_value=download), patch.object(audio,'validate_audio_result'), patch.object(gate,'accept',return_value=True), patch.object(video.storage_service,'upload_file',return_value={'url':'https://example.com/stored.mp4'}):
+        with patch.object(audio,'poll',return_value={'status':'completed','model':self.saved()['video_model'],'results':['https://example.com/video.mp4']}), patch.object(video.httpx,'stream',return_value=download), patch.object(audio,'validate_audio_result'), patch('app.services.approved_audio_lock.apply',return_value={'bytes':52,'sha256':'locked','policy':'approved-dialogue-plus-silence-v1'}) as lock, patch.object(gate,'accept',return_value=True), patch.object(video.storage_service,'upload_file',return_value={'url':'https://example.com/stored.mp4'}):
             video.poll(self.db,self.job.id,self.saved())
+        lock.assert_called_once()
         self.assertEqual(self.saved()['video_status'],'done')
         self.assertEqual(self.saved()['video_url'],'https://example.com/stored.mp4')
 

@@ -246,11 +246,26 @@ def accept(db, job_id, shot, media, *, check_cache=None):
     if not request:
         warning(db, job_id, number, task, data, "mismatch; retry snapshot unavailable: " + detail + "; accepting video.")
         return True
+    import copy
+    request = copy.deepcopy(request)
+    visual_mismatches = [key for key in ("style", "scale", "staging")
+                         if verdict.get(key, {}).get("status") == "mismatch"]
+    if visual_mismatches and data.get("video_provider") != "hedra":
+        expected = data.get("video_compliance_expected") or {}
+        requirements = {}
+        if "style" in visual_mismatches:
+            requirements["visual_style"] = expected.get("visual_style")
+        if "scale" in visual_mismatches:
+            requirements["opening_frame"] = {
+                "camera_angle": expected.get("camera_angle"), "shot_scale": expected.get("shot_scale")}
+        if "staging" in visual_mismatches:
+            requirements["physical_staging"] = expected.get("staging")
+        request["prompt"] = request.get("prompt", "") + (
+            "\nAutomatic corrective retry: satisfy these approved visual requirements exactly: "
+            + json.dumps(requirements, ensure_ascii=False) + ".")
     if verdict.get("speech", {}).get("status") == "mismatch":
         from app.services.speech_compliance_service import SPEECH_RULE
         # Never feed the checker's garbled transcription back into generation.
-        import copy
-        request = copy.deepcopy(request)
         request["prompt"] = request.get("prompt", "") + "\nSpeech correction: " + SPEECH_RULE
     # Do not replay a legacy paid request containing an uploaded Vault portrait.
     if data.get("video_provider") == "hedra" and data.get("video_reference_source") != "module_o_still":
@@ -284,7 +299,8 @@ def accept(db, job_id, shot, media, *, check_cache=None):
         warning(db, job_id, number, task, claimed, f"retry submission uncertain ({type(error).__name__}); no further retry; accepting original. Reconcile provider account. " + detail)
         return True
     job_service.update_video(db, job_id, number, expected_task_id=task,
-        video_task_id=new_task, video_status="processing", video_mode="reference_to_video" if data.get("video_provider") != "hedra" else "hedra",
+        video_task_id=new_task, video_status="processing", video_phase="correcting",
+        video_mode="reference_to_video" if data.get("video_provider") != "hedra" else "hedra",
         video_usage=response.get("usage"), video_error=None,
         video_fal_status_url=response.get("status_url"), video_fal_response_url=response.get("response_url"))
     job_service.append_event(db, job_id, "render_compliance", f"Shot {number}: automatic retry task {new_task} saved; acceptance deferred until its check.")
