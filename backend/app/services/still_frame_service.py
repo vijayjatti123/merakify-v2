@@ -298,7 +298,7 @@ def generate_still(visual, references, aspect_ratio, feedback="", *, continuatio
         + ("\n\nPreserve existing product packaging text and logos exactly as shown in approved product references."
            if product_reference else "")
         + "\n\nAUTHORITATIVE MACHINE-READABLE CONTRACT:\n" + contract_text(contract)
-        + ("\nCorrect the previous visual check: " + feedback if feedback else "")
+        + ("\n\nADDITIONAL CORRECTION FOR THIS REPLACEMENT:\n" + feedback if feedback else "")
     )})
     try:
         response = _google(parts, aspect_ratio=aspect_ratio)
@@ -332,7 +332,7 @@ def _fal_generate_still(contract, references, aspect_ratio, feedback="", *, cont
     from app.services.preview_plan import contract_text, generation_prompt
     prompt = ("Create this approved commercial opening frame exactly.\n\n" + generation_prompt(contract)
               + "\n\nAUTHORITATIVE MACHINE-READABLE CONTRACT:\n" + contract_text(contract)
-              + ("\nCorrect the prior visual note: " + feedback if feedback else ""))
+              + ("\n\nADDITIONAL CORRECTION FOR THIS REPLACEMENT:\n" + feedback if feedback else ""))
     images = []
     labels = []
     for reference in references:
@@ -634,8 +634,9 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
             from app.services.preview_plan import preview_visual
             facts = shot.get("preview_input")
             visual = preview_visual(facts) if facts else visual_description(shot["compiled_prompt"])
-            if (feedback_by_shot or {}).get(number):
-                visual += "\nRequested image adjustment (preserve locked identity and style): " + feedback_by_shot[number]
+            requested_adjustment = str((feedback_by_shot or {}).get(number) or "").strip()
+            if requested_adjustment:
+                visual += "\nRequested image adjustment (preserve locked identity and style): " + requested_adjustment
             entities = match_entities(result, shot, visual)
             references = []
             if products:
@@ -696,7 +697,12 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                      f"subject to reference budget (image SHA256 {hashlib.sha256(continuation[1].data).hexdigest()}).")
             # A manual recovery must improve the prior rejected request rather
             # than buying the same two candidates forever.
-            feedback = str(shot.get("still_frame_retry_feedback") or "").strip()
+            corrections = []
+            if shot.get("still_frame_retry_feedback"):
+                corrections.append("Automatic visual-review correction: " + str(shot["still_frame_retry_feedback"]).strip())
+            if requested_adjustment:
+                corrections.append("User-requested change: " + requested_adjustment)
+            feedback = "\n".join(corrections)
             aspect_ratio = result.get("aspect_ratio") or "16:9"
             verification_source = hashlib.sha256(json.dumps([request_contract, aspect_ratio,
                 [hashlib.sha256(r[1].data).hexdigest() for r in references],

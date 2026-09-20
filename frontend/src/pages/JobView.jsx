@@ -266,14 +266,14 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
     }
   }
 
-  async function handleRegenerate(shotNumber, editVideo = false) {
-    const hint = editVideo ? (videoHints[shotNumber] || "").trim() : "";
-    if (editVideo && !hint) return;
+  async function handleRegenerate(shotNumber) {
+    const hint = (videoHints[shotNumber] || "").trim();
     setRegeneratingShot(shotNumber);
     setError("");
     try {
       const shot = shots.find((item) => item.shot_number === shotNumber);
       await regenerateShotVideo(jobId, shot, hint);
+      setVideoHints((current) => ({ ...current, [shotNumber]: "" }));
       setFinal(await getJob(jobId));
     } catch (regenerateError) {
       setError(regenerateError.message);
@@ -464,12 +464,12 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       <span><Clock3 size={12} /> {Number(shot.duration_sec.toFixed(1))}s · {shot.lighting}</span>
                     </div>
 
-                    {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && result.video_model !== "h3_max_fal" && shot.video_provider !== "hedra" && shot.video_url && (
+                    {(shot.video_url || ["error", "failed"].includes(shot.video_status)) && (
                       <div className="my-3 text-xs">
-                        <label className="block">What should change? (required for Edit Shot)
-                          <textarea required aria-label={`Edit hint for shot ${shot.shot_number}`} maxLength={700} value={videoHints[shot.shot_number] || ""} onChange={(event) => setVideoHints((current) => ({ ...current, [shot.shot_number]: event.target.value }))} className="block w-full rounded-md p-2 mt-1" style={{ background: COLORS.field, color: COLORS.text }} placeholder="For example: make the lighting warmer" />
+                        <label className="block">What would you like to change? (optional)
+                          <textarea aria-label={`Regeneration change for shot ${shot.shot_number}`} maxLength={1000} value={videoHints[shot.shot_number] || ""} onChange={(event) => setVideoHints((current) => ({ ...current, [shot.shot_number]: event.target.value }))} className="block w-full rounded-md p-2 mt-1" style={{ background: COLORS.field, color: COLORS.text }} placeholder="For example: keep both people inside the cabin and make the lighting warmer" />
                         </label>
-                        <p className="mt-2" style={{ color: COLORS.muted }}>May affect framing and composition beyond the requested change.</p>
+                        <p className="mt-2" style={{ color: COLORS.muted }}>Regenerate video will apply this request to this shot while preserving its approved image, characters, product and speech.</p>
                       </div>
                     )}
 
@@ -487,11 +487,6 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                           {(shot.video_url || ["error", "failed"].includes(shot.video_status)) && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={editBlocksApproval || shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate video
                           </Button>}
-                          {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && result.video_model !== "h3_max_fal" && shot.video_provider !== "hedra" && shot.video_url && (
-                            <Button type="button" onClick={() => handleRegenerate(shot.shot_number, true)} disabled={!(videoHints[shot.shot_number] || "").trim() || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt} className="card-action" style={{ background: "transparent", border: `1px solid ${COLORS.border}`, fontSize: "0.62rem", padding: "0.3rem 0.45rem" }} aria-label={`Edit shot video ${shot.shot_number}`}>
-                              Edit Shot
-                            </Button>
-                          )}
                         </>
                       )}
                     </div>

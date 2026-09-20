@@ -107,6 +107,19 @@ class StillFramesTests(unittest.TestCase):
         self.assertEqual(shot['still_frame_status'], 'ready')
         self.assertNotIn('still_frame_retry_feedback', shot)
 
+    def test_user_requested_image_change_reaches_provider_with_frozen_contract(self):
+        shot = self.result['shots'][0]
+        shot['preview_input'] = {'description': 'A blue cup on a table.', 'characters': [],
+                                 'visual_style': {}, 'aspect_ratio': '9:16'}
+        shot['still_frame_contract'] = {'opening_frame': {'description': 'A blue cup on a table.'}}
+        verdict = self.checked_verdict()
+        with patch.object(service, 'generate_still', return_value=self.image) as generated, \
+             patch.object(service, 'check_still', return_value=verdict), \
+             patch.object(service.storage_service, 'upload_bytes', return_value={'key':'ready','url':'https://ready'}):
+            service.generate_still_frames(self.result, job_id='audit', emit=self.emit,
+                feedback_by_shot={1: 'Change the cup to matte black'})
+        self.assertIn('User-requested change: Change the cup to matte black', generated.call_args.args[3])
+
     def test_changed_candidate_source_generates_and_saves_current_evidence(self):
         shot = self.result['shots'][0]
         shot['still_frame_candidate'] = {'key': 'old', 'source': 'stale', 'attempt': 0}

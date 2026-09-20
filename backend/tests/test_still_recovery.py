@@ -78,6 +78,24 @@ class StillRecoveryTests(unittest.TestCase):
         self.assertEqual(response['status'], 'generating_still')
         start.assert_not_called()
 
+    def test_video_regeneration_hint_reaches_missing_preview_recovery(self):
+        captured = {}
+        def generate(result, **kwargs):
+            captured.update(kwargs)
+            shot = result['shots'][0]
+            shot.update(still_frame_status='ready', still_frame_key='new-still',
+                        still_frame_url='https://audit/new-still',
+                        still_frame_verification={'approved': True, 'reason': 'Matches'})
+        task = BackgroundTasks()
+        with patch.object(routes, 'SessionLocal', self.sessions), \
+             patch.object(still, 'generate_still_frames', side_effect=generate), \
+             patch.object(video, 'start'):
+            response = routes.regenerate_video(self.job.id, 1,
+                routes.VideoRegenerateRequest(expected_attempt='none', hint='Keep both people inside'), task, self.db)
+            self.assertEqual(response['status'], 'generating_still')
+            asyncio.run(task())
+        self.assertEqual(captured['feedback_by_shot'], {1: 'Keep both people inside'})
+
     def test_duplicate_claim_is_rejected(self):
         jobs.claim_still_retry(self.db,self.job.id,1,'none')
         with self.assertRaisesRegex(ValueError,'already regenerating'):

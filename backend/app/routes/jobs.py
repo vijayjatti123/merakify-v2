@@ -170,7 +170,8 @@ def _recover_missing_still(job_id, number, token, expected_attempt, hint, genera
             if shot.get("still_retry_token") != token:
                 return
             emit = lambda agent, message: events.append((agent, message))
-            still_frame_service.generate_still_frames(result, job_id=job_id, emit=emit, shot_numbers={number})
+            still_frame_service.generate_still_frames(result, job_id=job_id, emit=emit, shot_numbers={number},
+                feedback_by_shot={number: hint} if hint.strip() else None)
             if not job_service.finish_still_retry(db, job_id, number, token, result):
                 return
             if (shot.get("still_frame_url") and generate_video
