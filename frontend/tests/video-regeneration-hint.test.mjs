@@ -7,7 +7,8 @@ test("the visible change field feeds the primary regenerate-video action", async
   assert.match(source, /const hint = \(videoHints\[shotNumber\] \|\| ""\)\.trim\(\)/);
   assert.match(source, /await regenerateShotVideo\(jobId, shot, hint\)/);
   assert.doesNotMatch(source, /handleRegenerate\(shot\.shot_number, true\)/);
-  assert.match(source, /What would you like to change\? \(optional\)/);
+  assert.match(source, /Anything else you’d like to change\? \(optional\)/);
+  assert.match(source, /Regenerate corrected video/);
   assert.match(source, /shot\.video_status === "review_required" && !lockedAudioReview\(shot\)/);
   assert.match(source, /videoReviewGuidance\(shot\)/);
   assert.doesNotMatch(source, /!\["error", "done"\]\.includes\(shot\.video_status\)/);

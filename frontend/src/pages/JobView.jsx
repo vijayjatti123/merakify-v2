@@ -477,10 +477,10 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
 
                     {(shot.video_url || ["error", "failed"].includes(shot.video_status) || (shot.video_status === "review_required" && !lockedAudioReview(shot))) && (
                       <div className="my-3 text-xs">
-                        <label className="block">What would you like to change? (optional)
+                        <label className="block">{shot.video_status === "review_required" ? "Anything else you’d like to change? (optional)" : "What would you like to change? (optional)"}
                           <textarea aria-label={`Regeneration change for shot ${shot.shot_number}`} maxLength={1000} value={videoHints[shot.shot_number] || ""} onChange={(event) => setVideoHints((current) => ({ ...current, [shot.shot_number]: event.target.value }))} className="block w-full rounded-md p-2 mt-1" style={{ background: COLORS.field, color: COLORS.text }} placeholder="For example: keep both people inside the cabin and make the lighting warmer" />
                         </label>
-                        <p className="mt-2" style={{ color: COLORS.muted }}>Regenerate video will apply this request to this shot while preserving its approved image, characters, product and speech.</p>
+                        <p className="mt-2" style={{ color: COLORS.muted }}>{shot.video_status === "review_required" ? "We’ll automatically correct the failed requirement. Add another preference only if you want one." : "Regenerate video will apply this request to this shot while preserving its approved image, characters, product and speech."}</p>
                       </div>
                     )}
 
@@ -496,7 +496,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         <>
                           <Button type="button" disabled={previews.busy || videoBusy || editBlocksApproval || shots.some(s => s.video_status === "submission_unknown" || s.preview_replacement?.status === "working")} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot plan ${shot.shot_number}`}><Pencil size={13} /> Edit shot plan</Button>
                           {(shot.video_url || ["error", "failed"].includes(shot.video_status) || (shot.video_status === "review_required" && !lockedAudioReview(shot))) && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={editBlocksApproval || shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
-                            {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate video
+                            {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {shot.video_status === "review_required" ? "Regenerate corrected video" : "Regenerate video"}
                           </Button>}
                         </>
                       )}

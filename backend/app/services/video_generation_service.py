@@ -218,7 +218,29 @@ def provider(method, path, body=None):
         raise RuntimeError(f"EvoLink HTTP {error.code}: inspect provider task/account before retrying") from error
 
 
+def automatic_review_correction(shot):
+    if shot.get("video_status") != "review_required":
+        return ""
+    expected = shot.get("video_compliance_expected") or {}
+    error = shot.get("video_error") or ""
+    requirements = {}
+    if "staging:" in error and expected.get("staging"):
+        requirements["physical_staging"] = expected["staging"]
+    if "style:" in error and expected.get("visual_style"):
+        requirements["visual_style"] = expected["visual_style"]
+    if "scale:" in error:
+        requirements["opening_frame"] = {
+            "camera_angle": expected.get("camera_angle"), "shot_scale": expected.get("shot_scale")}
+    if not requirements:
+        return ""
+    return ("Automatically correct the previous objective review failure. "
+            "Satisfy these approved requirements exactly: "
+            + json.dumps(requirements, ensure_ascii=False) + ".")
+
+
 def regenerate_translation(result, shot, hint="", *, audio_model=None):
+    corrections = [value for value in (automatic_review_correction(shot), hint.strip()) if value]
+    hint = "\n".join(corrections)
     translated = translate(result, shot, audio_model=audio_model)
     if is_onscreen_speech(shot) or result.get("video_model") in {AUTOMATIC, "h3_max_fal"}:
         if hint:

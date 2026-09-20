@@ -24,6 +24,13 @@ class RegenerateTests(unittest.TestCase):
             self.assertEqual(edit['request']['video_urls'],['https://example.com/old.mp4']);self.assertIn('warmer lighting',edit['request']['prompt'])
             full=video.regenerate_translation(self.result,self.shot,'warmer lighting');self.assertNotIn('video_urls',full['request']);self.assertIn('A glass',full['request']['prompt'])
             self.assertNotIn('video_urls',video.regenerate_translation(self.result,{**self.shot,'video_key':'old.mp4'})['request'])
+    def test_review_regeneration_applies_saved_failure_without_user_prompting(self):
+        reviewed={**self.shot,'video_status':'review_required',
+            'video_error':'staging: hand lost contact',
+            'video_compliance_expected':{'staging':{'support_and_contact':["Kabir's left hand grips doorframe"]}}}
+        request=video.regenerate_translation(self.result,reviewed)['request']
+        self.assertIn('Automatically correct the previous objective review failure',request['prompt'])
+        self.assertIn("Kabir's left hand grips doorframe",request['prompt'])
     def test_one_shot_duplicate_archive_and_late_poll(self):
         self.seed();before=self.db.get(type(self.job),self.job.id).result_json
         with patch.object(video.storage_service,'asset_url',return_value='https://example.com/old.mp4'),patch.object(video,'provider',return_value={'id':'new','model':video.MODEL}) as call:
