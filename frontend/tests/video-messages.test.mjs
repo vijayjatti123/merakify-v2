@@ -40,7 +40,8 @@ test('stopped clips explain the cause and the user action in plain language', ()
   const speech = videoReviewGuidance({video_error:'speech: Approved dialogue does not match generated speech.'});
   assert.match(speech.message, /saved voice recording/);
   assert.match(speech.action, /automatically/);
-  const staging = videoReviewGuidance({video_error:'staging: character is outside the approved location'});
+  const staging = videoReviewGuidance({video_error:'staging: contradicts required support "Kabir left hand grips doorframe" during bottle receipt; speech: mismatch'});
   assert.match(staging.message, /positioned/);
+  assert.equal(staging.detail, 'Required detail not maintained: Kabir left hand grips doorframe.');
   assert.match(staging.action, /Describe the placement/);
 });

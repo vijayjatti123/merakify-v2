@@ -63,16 +63,22 @@ export function videoReviewWarnings(shot) {
 
 export function videoReviewGuidance(shot) {
   const error = String(shot?.video_error || '');
-  if (/speech|dialogue|spoken/i.test(error)) return {
+  const hasVisualFinding = /staging|position|placement|inside|outside|style|appearance|identity|scale|framing|composition/i.test(error);
+  if (/speech|dialogue|spoken/i.test(error) && !hasVisualFinding) return {
     title: 'Your approved dialogue is safe',
     message: 'The automatic listener could not confirm the words. The saved voice recording is applied directly, so you do not need to rewrite or control the speech.',
     action: 'The saved clip will be finished automatically without generating another video.',
   };
-  if (/staging|position|placement|inside|outside/i.test(error)) return {
-    title: 'The action or placement did not match',
-    message: 'A person or object was not positioned as described in the approved shot.',
-    action: 'Describe the placement you want below, then regenerate this shot.',
-  };
+  if (/staging|position|placement|inside|outside/i.test(error)) {
+    const stagingReason = error.match(/staging:\s*([^;]+)/i)?.[1]?.trim();
+    const requiredDetail = stagingReason?.match(/required support\s+["“]([^"”]+)["”]/i)?.[1];
+    return {
+      title: 'The action or placement did not match',
+      message: 'A person or object was not positioned as described in the approved shot.',
+      detail: requiredDetail ? `Required detail not maintained: ${requiredDetail}.` : stagingReason,
+      action: `${/speech|dialogue|spoken/i.test(error) ? 'Your approved voice recording remains saved. ' : ''}Describe the placement you want below, then regenerate this shot.`,
+    };
+  }
   if (/style|appearance|identity/i.test(error)) return {
     title: 'The visual result did not match',
     message: 'The clip did not preserve the approved character appearance or visual style closely enough.',

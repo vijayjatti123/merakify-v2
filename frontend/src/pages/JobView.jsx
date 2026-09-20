@@ -460,6 +460,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       return <Alert severity="warning" data-testid={`video-review-required-${shot.shot_number}`}>
                         <AlertTitle>{guidance.title}</AlertTitle>
                         <p style={{ margin: 0 }}>{guidance.message}</p>
+                        {guidance.detail && <p style={{ margin: '6px 0 0', fontWeight: 600 }}>{guidance.detail}</p>}
                         <p style={{ margin: '6px 0 0' }}>{guidance.action}</p>
                       </Alert>;
                     })() : shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
