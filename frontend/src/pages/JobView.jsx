@@ -433,7 +433,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       <span>{shot.direction_version === 1 ? "Characters in this clip" : "Characters present"}</span>
                       <p>{shot.characters_in_shot?.length ? shot.characters_in_shot.join(", ") : "None"}</p>
                     </div>
-                    {approved && (shot.still_frame_url || shot.preview_input || shot.compiled_prompt) && <ShotImageActions jobId={jobId} shot={shot} aspectRatio={result.aspect_ratio || final.aspect_ratio} disabled={previews.busy || videoBusy || editBlocksApproval} onRefresh={async () => setFinal(await getJob(jobId))} />}
+                    {approved && (shot.still_frame_url || shot.preview_input || shot.compiled_prompt) && <ShotImageActions jobId={jobId} shot={shot} aspectRatio={result.aspect_ratio || final.aspect_ratio} disabled={previews.busy || editBlocksApproval || result.final_video?.status === "running" || ["submitting", "processing", "submission_unknown"].includes(shot.video_status)} onRefresh={async () => setFinal(await getJob(jobId))} />}
                     {shot.still_frame_status === "generating" ? <ActionProgress label={shot.still_frame_candidate ? `Verifying the saved preview for shot ${shot.shot_number}…` : `Creating and checking the preview for shot ${shot.shot_number}…`} /> : previewState(shot).key === "failed" && <Alert severity="warning" sx={{ my: 2 }}>
                       <AlertTitle>{shot.still_frame_error_kind === "verification" ? "Your image is saved — verification is unavailable" : "This preview couldn't be created"}</AlertTitle>
                       {shot.still_frame_error_kind === "verification" ? "Retry verification to check the saved image without generating another one." : shot.video_url ? "Your existing video is still available below." : "Try this preview again. Video generation is a separate step."}
@@ -463,13 +463,6 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       <span><Clapperboard size={12} /> {shot.camera_angle} · {shot.camera_movement}</span>
                       <span><Clock3 size={12} /> {Number(shot.duration_sec.toFixed(1))}s · {shot.lighting}</span>
                     </div>
-
-                    {shot.compiled_prompt?.trim() && (
-                      <details className="my-3 text-xs">
-                        <summary className="cursor-pointer" style={{ color: COLORS.muted }}>Advanced details · technical prompt</summary>
-                        <p className="mt-2 whitespace-pre-wrap break-words leading-relaxed" style={{ overflowWrap: "anywhere" }}>{shot.compiled_prompt}</p>
-                      </details>
-                    )}
 
                     {!shot.has_dialogue && !(result.video_model || "").startsWith("kling_") && result.video_model !== "h3_max_fal" && shot.video_provider !== "hedra" && shot.video_url && (
                       <div className="my-3 text-xs">

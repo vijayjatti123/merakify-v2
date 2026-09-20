@@ -135,6 +135,28 @@ class LatencyPipelineTests(unittest.TestCase):
         still.invalidate_changed_stills(self.result)
         self.assertIsNone(shot["still_frame_url"])
 
+    def test_new_preview_projection_field_does_not_invalidate_historical_image(self):
+        from app.services.preview_plan import preview_input
+        shot = self.result["shots"][0]
+        historical = preview_input(self.result, shot)
+        historical.pop("ad_type", None)  # Simulate an image accepted before this field shipped.
+        shot["preview_input"] = historical
+        shot.update(still_frame_url="old", still_frame_key="old",
+                    still_frame_source_hash=still.shot_fingerprint(shot))
+        still.invalidate_changed_stills(self.result)
+        self.assertEqual(shot["still_frame_url"], "old")
+        self.assertEqual(shot["preview_input"], historical)
+
+    def test_existing_preview_fact_change_still_invalidates_historical_image(self):
+        from app.services.preview_plan import preview_input
+        shot = self.result["shots"][0]
+        shot["preview_input"] = preview_input(self.result, shot)
+        shot.update(still_frame_url="old", still_frame_key="old",
+                    still_frame_source_hash=still.shot_fingerprint(shot))
+        shot["description"] = "A changed approved action"
+        still.invalidate_changed_stills(self.result)
+        self.assertIsNone(shot["still_frame_url"])
+
     def test_durable_dispatch_single_claim(self):
         job_service.queue_pipeline_task(self.db, "test", "plan")
         with self.assertRaisesRegex(ValueError, "already running"):

@@ -143,7 +143,10 @@ def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequ
     from app.services import video_generation_service as video
     try:
         _, shot = job_service.video_source(db, job_id, shot_number)
-        if not shot.get("still_frame_url") and not shot.get("video_url"):
+        # A previous clip is never a valid source for a new clip. If the
+        # accepted opening image is missing, recover that image first even when
+        # an older video remains available for comparison.
+        if not shot.get("still_frame_url"):
             token = job_service.claim_still_retry(db, job_id, shot_number, payload.expected_attempt)
             background_tasks.add_task(_recover_missing_still, job_id, shot_number, token, payload.expected_attempt, payload.hint, True, payload.audio_model)
             return {"shot_number": shot_number, "status": "generating_still"}

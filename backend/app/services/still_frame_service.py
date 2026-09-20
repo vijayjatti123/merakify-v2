@@ -107,9 +107,20 @@ def shot_fingerprint(shot):
 def invalidate_changed_stills(result):
     from app.services.preview_plan import preview_input
     for shot in result.get("shots", []):
-        if shot.get("preview_input"):
-            shot["preview_input"] = preview_input(result, shot)
-        if shot.get("still_frame_source_hash") and shot["still_frame_source_hash"] != shot_fingerprint(shot):
+        stored_input = shot.get("preview_input")
+        source_changed = bool(shot.get("still_frame_source_hash") and
+                              shot["still_frame_source_hash"] != shot_fingerprint(shot))
+        if stored_input:
+            # preview_input is the immutable contract that produced the accepted
+            # pixels. A newly deployed projection may add fields; that schema
+            # evolution must not make every historical image look stale. Compare
+            # only facts that existed when this image was generated. Actual plan
+            # edits still change those stored facts and invalidate the image.
+            current_input = preview_input(result, shot) or {}
+            source_changed = source_changed or any(
+                current_input.get(key) != value for key, value in stored_input.items()
+            )
+        if source_changed:
             shot["still_frame_url"] = None
             shot.pop("still_frame_key", None)
             shot["still_frame_warning"] = "Still preview is out of date after shot edits; awaiting final shot planning."

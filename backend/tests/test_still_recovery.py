@@ -67,6 +67,16 @@ class StillRecoveryTests(unittest.TestCase):
         self.assertEqual(result['shots_needing_attention'], [])
         self.assertEqual(result['shots'][1], self.result['shots'][1])
 
+    def test_old_video_never_bypasses_missing_preview_recovery(self):
+        self.result['shots'][0]['video_url'] = 'https://audit/old-video.mp4'
+        jobs.set_result(self.db, self.job.id, self.result)
+        task = BackgroundTasks()
+        with patch.object(video, 'start') as start:
+            response = routes.regenerate_video(
+                self.job.id, 1, routes.VideoRegenerateRequest(expected_attempt='none'), task, self.db)
+        self.assertEqual(response['status'], 'generating_still')
+        start.assert_not_called()
+
     def test_duplicate_claim_is_rejected(self):
         jobs.claim_still_retry(self.db,self.job.id,1,'none')
         with self.assertRaisesRegex(ValueError,'already regenerating'):

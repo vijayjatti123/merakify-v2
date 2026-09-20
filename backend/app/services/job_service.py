@@ -492,7 +492,10 @@ def claim_still_retry(db, job_id, number, expected_attempt):
     result, shot = video_source(db, job_id, number)
     if not result.get("generation_approved") or not (shot.get("compiled_prompt") or shot.get("preview_input")):
         raise ValueError("Approve the completed shot plan before regenerating")
-    if shot.get("still_frame_url") or shot.get("video_url"):
+    # An older clip may remain visible while its accepted opening image is
+    # missing. Recovering the image is valid and is required before that clip
+    # can be regenerated from the current plan.
+    if shot.get("still_frame_url"):
         raise ValueError("Shot output changed; refresh before regenerating")
     if shot.get("video_status") in {"submitting", "processing", "submission_unknown"}:
         raise ValueError("Video is busy or needs reconciliation; refresh first")
