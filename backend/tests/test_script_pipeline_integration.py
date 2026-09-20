@@ -120,6 +120,9 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
             language="English",
             ai_model="Seedance 2.5",
             video_model=None,
+            ad_type="character",
+            ad_brief_json="{}",
+            result_json=None,
             creative_direction_json=json.dumps({"production_brief": "Show the lamp adjustment clearly; no invented claims."}),
             script_text=source_script,
             resolutions_json=json.dumps(resolutions) if resolutions else None,
@@ -151,6 +154,7 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
                         "shot_number": 1,
                         "scene_number": 1,
                         "camera_angle": "wide",
+                        "camera_direction": {"movement": "hold", "direction": "none", "speed": "none", "stabilization": "locked"},
                         "camera_movement": "static",
                         "lens": "35mm",
                         "lighting": "soft daylight",
@@ -161,9 +165,18 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
                         "state_at_shot_end": "Ravi stands inside the cafe",
                         "opening_characters": ["Ravi"],
                         "shot_direction": {"purpose": "Introduce Ravi", "performance": "Ravi steps inside calmly",
-                                           "product_props": "No product featured", "edit_intent": "Hold on arrival"},
+                                           "product_props": "No product featured", "edit_intent": "Hold on arrival",
+                                           "blocking": "Ravi begins in the cafe doorway and faces into the room.",
+                                           "action_beats": ["Ravi crosses the doorway threshold.", "Ravi stops on the cafe floor."],
+                                           "critical_outcome": "Ravi is visibly inside the cafe.",
+                                           "entry_exit_paths": ["Ravi: doorway threshold -> cafe floor."],
+                                           "support_and_contact": "Ravi's feet remain supported by the threshold and cafe floor.",
+                                           "spatial_invariants": ["Ravi moves from the doorway into the cafe interior."],
+                                           "forbidden_geometry": ["Ravi must not float outside the doorway."]},
                         "characters_in_shot": ["Ravi"],
                         "has_dialogue": False,
+                        "speech_mode": "none",
+                        "speaker_name": "",
                         "dialogue_text": "",
                     }]
                 }
@@ -173,7 +186,12 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
                 self.assertNotIn('shots', draft_result)
                 self.assertNotIn('generation_approved', draft_result)
                 self.assertNotIn('voice_refs', draft_result['planning_draft']['shots'][0])
-                return {"approved": True, "issues": [], "scene_coverage": [{"scene_number":1,"shot_numbers":[1],"covered":True,"evidence":"Ravi enters"}]}
+                return {"approved": True, "issues": [],
+                    "requirement_coverage": [
+                        {"requirement_id":"s1:heading:1","shot_numbers":[1],"covered":True,"evidence":"Cafe shown"},
+                        {"requirement_id":"s1:description:1","shot_numbers":[1],"covered":True,"evidence":"Ravi enters"}],
+                    "shot_checks": [{"shot_number":1,"consistent":True,"evidence":"Path and support are explicit"}],
+                    "scene_coverage": [{"scene_number":1,"shot_numbers":[1],"covered":True,"evidence":"Ravi enters"}]}
             if system_prompt == prompts.SHOT_ASSEMBLER:
                 return {"total_duration_sec": 5, "transitions": []}
             raise AssertionError("unexpected prompt")

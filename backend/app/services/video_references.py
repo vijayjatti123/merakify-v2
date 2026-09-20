@@ -11,7 +11,18 @@ def identity(url):
 def shot_text(shot):
     # Never match entities against global style prose or the compiled appendix.
     fields = ("description", "state_at_shot_start", "state_at_shot_end", "composition_note")
-    return " ".join(str(shot.get(k) or "") for k in fields) + " " + str((shot.get("shot_direction") or {}).get("product_props") or "")
+    direction = shot.get("shot_direction") or {}
+    directed = []
+    for key in ("product_props", "blocking", "critical_outcome", "support_and_contact"):
+        directed.append(str(direction.get(key) or ""))
+    for key in ("action_beats", "entry_exit_paths", "spatial_invariants", "forbidden_geometry"):
+        directed.extend(str(value) for value in direction.get(key) or [])
+    return " ".join([*(str(shot.get(k) or "") for k in fields), *directed])
+
+
+def uses_product(shot, product):
+    """Bind a product reference only when this shot names that exact product."""
+    return bool(product.get("name") and mentions(shot_text(shot), product["name"]))
 
 
 def mentions(text, name):
@@ -54,7 +65,7 @@ def build(result, shot, *, limit, tag_style, refresh):
     for product in shot.get("approved_product_references", []):
         if not all(product.get(k) for k in ("name", "product_id", "object_key")):
             raise ValueError("Approved product reference is incomplete; refresh the job before rendering")
-        if mentions(text, product["name"]):
+        if uses_product(shot, product):
             from app.services import storage_service
             required.append(("product", product["product_id"],
                 f"{product['name']} packaging identity only: preserve geometry, colors and existing lettering/logos; use only at the directed time and position",

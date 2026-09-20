@@ -528,7 +528,14 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                         raise StillFrameError("Locked character has no reference image")
                     references.append((name, reference(character["image_url"], number),
                                        character["image_url"], 0, 0))
-            for product in products:
+            from app.services.video_references import mentions, uses_product
+            # Fresh directed jobs bind through explicit shot facts. Historical
+            # compiled-only jobs have no such fields, so retain their narrow
+            # exact-name match against the legacy visual prompt.
+            legacy_compiled_only = not shot.get("direction_version") and not shot.get("description") and not shot.get("shot_direction")
+            used_products = [product for product in products if uses_product(shot, product)
+                             or legacy_compiled_only and mentions(visual, product.get("name", ""))]
+            for product in used_products:
                 key = product["object_key"]
                 product_image = reference(storage_service.asset_url(key), number)
                 references.append(("Product " + product["name"] + "; preserve packaging, geometry, color, logo and printed text. Use only when this shot calls for the product; never copy the reference layout or unrelated props",
@@ -542,7 +549,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                     references.append(("Alternate " + view["angle"] + " view of the SAME " + product["name"] + "; identity only, no duplicate product or white background",
                         reference(storage_service.asset_url(view_key), number), "product:" + view_key, 1, 0))
                 emit("still_frame", f"Shot {number}: approved product reference {product['product_id']} attached for generation and QA.")
-            if products:
+            if used_products:
                 visual += "\nApproved product images lock product identity, NOT this scene's framing. Do not insert a product into a shot that does not call for it."
                 if len(references) > MAX_REFERENCE_IMAGES:
                     raise StillFrameError("Too many locked character/product references for this shot; reduce the selected references.")

@@ -168,7 +168,9 @@ clear staging and reaction timing; documentary favors motivated observation; nar
 follow their approved dramatic arc and locked rendering. More camera motion is not more cinematic.
 Every shot must earn its place: shot_direction.purpose states its viewer-facing story/product beat;
 performance describes observable behavior/expression, or object motion for a faceless shot;
-product_props identifies only supplied relevant objects, their placement/contact and product role
+product_props identifies only supplied relevant objects, their placement/contact and product role.
+When a selected product is visible, use its exact supplied product name in product_props and the
+corresponding action beat; never use only a generic noun such as product, package, bottle or can
 (say "No product featured" if absent); edit_intent explains the outgoing visual/rhythmic connection.
 Keep these four fields concise, using observable direction, not adjectives alone.
 For every new shot also supply shot_direction.blocking, action_beats and critical_outcome.

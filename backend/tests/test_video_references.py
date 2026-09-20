@@ -40,6 +40,17 @@ class ReferenceTests(unittest.TestCase):
             self.assertEqual(len(self.build()['images']),5);url.assert_not_called()
             self.shot['description']+=' Fevicol bucket on table.'
             r=self.build();self.assertEqual(r['manifest'][3]['roles'][0]['kind'],'product')
+
+    def test_product_in_directed_action_is_bound_without_compiled_prompt_guessing(self):
+        self.shot['approved_product_references']=[dict(name='Fevicol',product_id='p',object_key='p.png')]
+        self.shot['shot_direction']={'product_props':'No product featured',
+            'action_beats':['Kabir reaches toward the Fevicol bucket.'],
+            'critical_outcome':'Fevicol is visibly held.', 'blocking':'Kabir screen left.',
+            'support_and_contact':'Both feet on floor.', 'entry_exit_paths':['No crossing.'],
+            'spatial_invariants':['Kabir stays inside.'], 'forbidden_geometry':['No duplicate Kabir.']}
+        with patch('app.services.storage_service.asset_url',return_value='https://example.com/p.png'):
+            built=self.build()
+        self.assertTrue(any(role['kind']=='product' for entry in built['manifest'] for role in entry['roles']))
     def test_unbound_tags_and_length_rejected(self):
         r=self.build()
         for prompt in ('Use <IMAGE_REF_8>', 'Use @Image1', 'x'*20001):

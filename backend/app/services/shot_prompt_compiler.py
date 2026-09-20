@@ -734,13 +734,28 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=No
     prepare_boundaries(result, brief=brief, emit=emit, call_agent=call_agent)
     started = time.monotonic()
     payload = compiler_input(result, brief=brief, emit=emit, camera_contract=True)
-    if result.get("shots") and all(s.get("review_mode") == "user" for s in result["shots"]):
-        # The user already reviewed detailed direction. Serialize it, do not ask
-        # another model to reinterpret or repeatedly self-audit the same story.
+    if result.get("shots") and all(s.get("direction_version") == 1 for s in result["shots"]):
+        # A directed plan already passed the semantic continuity review (or the
+        # same deterministic contract after a user edit). Serialize those facts;
+        # a second creative model rewrite can only add latency or drift.
         outputs = []
         for source in payload["shots"]:
             from app.services.ad_direction import execution_sections
             direction = source.get("shot_direction") or {}
+            number = source["shot_number"]
+            incoming = next((b for b in payload["boundaries"] if b["between"].endswith(f"-{number}")), None)
+            outgoing = next((b for b in payload["boundaries"] if b["between"].startswith(f"{number}-")), None)
+            boundary_sections = []
+            if incoming:
+                incoming_text = "; ".join(str(incoming[key]) for key in
+                    ("temporal_relation", "shared_physical_state", "reason") if incoming.get(key))
+                if incoming_text:
+                    boundary_sections.append(("Incoming continuity", incoming_text))
+            if outgoing:
+                outgoing_text = "; ".join(str(outgoing[key]) for key in
+                    ("type", "temporal_relation", "shared_physical_state", "reason") if outgoing.get(key))
+                if outgoing_text:
+                    boundary_sections.append(("Outgoing transition", outgoing_text))
             sections = [("Locked style", "; ".join(f"{k}: {v}" for k, v in payload.get("style_bible", {}).items() if k != "rendering" and isinstance(v, str) and v)),
                 # Structured action beats are the approved execution sequence.
                 # The card synopsis can predate an edit and must not introduce a
@@ -751,11 +766,11 @@ def compile_shot_prompts(result, *, brief="", emit, call_agent, on_checkpoint=No
                 ("Composition", source.get("composition_note")), ("Opening", source.get("state_at_shot_start")),
                 *execution_sections(source),
                 ("Performance", direction.get("performance")), ("Product and props", direction.get("product_props")),
-                ("Ending", source.get("state_at_shot_end"))]
+                ("Ending", source.get("state_at_shot_end")), *boundary_sections]
             visual = " ".join(f"{label}: {text.strip().rstrip('.')}." for label, text in sections if isinstance(text, str) and text.strip())
             outputs.append({"shot_number": source["shot_number"], "compiled_prompt": visual})
         rendered = insert_dialogue({"shots": outputs}, payload)["shots"]
-        emit("shot_prompt_compiler", "Serialized the approved Director plan with fixed style, camera, references and verbatim dialogue; no creative model rewrite.")
+        emit("shot_prompt_compiler", "Serialized the reviewed Director plan with fixed style, spatial facts, boundaries, camera, references and verbatim dialogue; no second creative rewrite.")
         return [{**shot, "compiled_prompt": output["compiled_prompt"]} for shot, output in zip(result["shots"], rendered)]
     groups = list(shot_batches(payload))
     deadline = started + _compiler_time_budget(groups)

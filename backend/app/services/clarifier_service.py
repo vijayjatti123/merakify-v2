@@ -30,10 +30,46 @@ QUESTION_OPTIONS = {
     "differentiator": ["The product benefit", "The emotional story", "A memorable visual moment", "Let the Director decide"],
     "constraints": ["No additional requirements", "Keep supplied dialogue exactly", "Preserve product and character identity", "Let the Director decide"],
 }
-MAX_QUESTIONS = 3
+MAX_QUESTIONS = 5
 DIRECTION_FIELDS = {"audience": "Audience", "takeaway": "Intended takeaway", "product_role": "Product role",
     "execution": "Visual execution", "must_haves": "Must-haves", "exclusions": "Avoid", "open_questions": "Open questions"}
 WARNING = "Creative reasoning was unavailable or invalid. Using deterministic fallback; no model answer was assumed."
+
+
+def _execution_question(raw_brief):
+    """Return one bounded production question for physically ambiguous action.
+
+    The reasoning model may identify script_clarity as missing, but it does not
+    get to invent user-facing wording.  These deterministic patterns cover the
+    high-risk cases that otherwise become impossible geometry downstream.
+    """
+    text = str(raw_brief or "")
+    if (re.search(r"\b(?:helicopter|aircraft|plane|open\s+door|doorway|vehicle|train|car)\b", text, re.I)
+            and re.search(r"\b(?:enter|exit|arrive|approach|cross|step|jump|fall|drop|leap|climb|hang|door)\w*\b", text, re.I)):
+        return (
+            "For the movement around the vehicle or doorway, where is each person at the start, "
+            "which safe route do they take, and what physically supports them?",
+            ["Keep everyone inside until the stated exit", "Show a clear, safe route", "Let the Director choose a safe route"],
+        )
+    if re.search(r"\b(?:jump|fall|drop|leap|parachut|climb|hang)\w*\b", text, re.I):
+        return (
+            "For the jump, fall, or climb, where does the person start, what path do they take, "
+            "and where must they end with safe clearance?",
+            ["Show the full safe path", "Show only the start and result", "Let the Director choose a safe path"],
+        )
+    if re.search(r"\b(?:hand(?:s|ed|ing)?\s+\w+(?:\s+\w+){0,4}\s+to|pass(?:es|ed|ing)?|give[sn]?|offer(?:s|ed|ing)?|receive[sd]?)\b", text, re.I):
+        return (
+            "For the handoff, where are both people and the object at the start, who holds it, "
+            "and where should it end?",
+            ["Show the complete handoff", "Start after the handoff", "Let the Director choose the clearest staging"],
+        )
+    if re.search(r"\b(?:enter|exit|arrive|appear|approach|cross|step\s+(?:in|out|through))\w*\b", text, re.I):
+        return (
+            "For the entrance or exit, where does the person begin, what visible route do they take, "
+            "and where do they finish?",
+            ["Show the full movement", "Begin after the movement", "Let the Director choose the clearest route"],
+        )
+    return None
 
 
 def _source_text(value):
@@ -74,7 +110,7 @@ def snapshot(row):
     result["turns"] = copy.deepcopy(result["turns"] or [])
     if result["turns"] and result["turns"][-1].get("answer") is None:
         pending_topic = result["turns"][-1].get("topic")
-        if pending_topic in QUESTIONS:
+        if pending_topic in QUESTIONS and result["turns"][-1].get("source") != "deterministic_execution":
             result["turns"][-1]["question"] = QUESTIONS[pending_topic]
             result["turns"][-1]["options"] = QUESTION_OPTIONS[pending_topic]
     result["max_questions"] = MAX_QUESTIONS
@@ -178,10 +214,11 @@ def advance(state):
             state["status"] = "ready"
             return
         topic = candidates[0]
+        targeted = _execution_question(state["raw_brief"]) if topic == "script_clarity" else None
         # The reasoning model selects the genuine gap. The application owns
         # user-facing wording so it cannot introduce a leading claim, propose
         # a rewrite, or turn one topic into a compound questionnaire.
-        question = QUESTIONS[topic]
+        question = targeted[0] if targeted else QUESTIONS[topic]
     except Exception as error:
         safe_reasons = {"Already using fallback", "Invalid confidence", "Incomplete brief assessment", "Invalid coverage",
             "Invalid assessment update", "Ungrounded coverage claim", "Ad essentials cannot be skipped", "Missing script understanding", "Invalid targeted question"}
@@ -194,8 +231,10 @@ def advance(state):
             return
         topic = available[0]
         question = QUESTIONS[topic]
-    turns.append({"topic": topic, "question": question, "options": QUESTION_OPTIONS[topic], "answer": None,
-                  "source": "fallback" if state["status"] == "degraded" else coverage[topic].get("question_source", "model"),
+    targeted = _execution_question(state["raw_brief"]) if topic == "script_clarity" and state["status"] != "degraded" else None
+    turns.append({"topic": topic, "question": question,
+                  "options": targeted[1] if targeted and question == targeted[0] else QUESTION_OPTIONS[topic], "answer": None,
+                  "source": "fallback" if state["status"] == "degraded" else "deterministic_execution" if targeted and question == targeted[0] else coverage[topic].get("question_source", "model"),
                   "warning": WARNING if state["status"] == "degraded" else None})
 
 
@@ -241,7 +280,10 @@ def planning_direction(direction):
     """Keep the audit record in storage; do not resend duplicate source/history."""
     if not direction:
         return None
-    return {"production_brief": direction["production_brief"], "answers": direction.get("answers", []),
+    return {"production_brief": direction["production_brief"], "original_input": direction.get("original_input"),
+        "understanding": direction.get("assessment", {}).get("understanding"),
+        "confidence": direction.get("confidence"), "degraded": direction.get("degraded", False),
+        "answers": direction.get("answers", []),
         "known_fields": direction.get("known_fields", {}), "context": direction.get("context", {}),
         "unresolved": direction.get("assessment", {}).get("unresolved", [])}
 

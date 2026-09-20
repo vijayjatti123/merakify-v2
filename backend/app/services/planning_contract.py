@@ -51,6 +51,18 @@ def check_mechanics(qa, shots, characters, minimum_shot_seconds=None):
             problems.append("spoken shots require the complete source utterance")
         if not shot.get("has_dialogue") and shot.get("dialogue_text"):
             problems.append("silent shots must not carry spoken text")
+        if shot.get("direction_version") == 1:
+            mode = shot.get("speech_mode")
+            if mode not in {"none", "onscreen", "voiceover"}:
+                problems.append("speech_mode must be none, onscreen or voiceover")
+            elif shot.get("has_dialogue") and mode == "none":
+                problems.append("spoken shots must identify onscreen speech or voiceover")
+            elif not shot.get("has_dialogue") and mode != "none":
+                problems.append("silent shots must use speech_mode none")
+            if shot.get("has_dialogue") and mode == "onscreen":
+                speaker = shot.get("speaker_name")
+                if not isinstance(speaker, str) or not speaker.strip() or speaker not in cast:
+                    problems.append("onscreen speech requires one exact speaker_name from characters_in_shot")
         if problems:
             issues.append({"shot_number": shot["shot_number"], "problem": "; ".join(problems),
                 **({"code": "duration_bounds"} if duration_only and len(problems) == 1 else {}),

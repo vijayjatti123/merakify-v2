@@ -115,7 +115,7 @@ function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, pr
       </Alert>}
       {!!session?.assessment?.unverified?.length && <Alert severity="info" data-testid="clarifier-unverified">Some details couldn't be confirmed from your input. We'll ask rather than assume.</Alert>}
       {!session && <Stack spacing={2} data-testid="clarifier-initial">
-        <Typography color="text.secondary">We'll read your {inputMode === "script" ? "script" : "idea"} and ask only about missing production decisions. Up to three questions; skip whenever you like.</Typography>
+        <Typography color="text.secondary">We'll read your {inputMode === "script" ? "script" : "idea"} and ask only about missing production decisions. Up to five questions; skip whenever you like.</Typography>
         <Stack direction="row" spacing={1}><Button type="button" variant="contained" startIcon={<Sparkles size={18} />} data-testid="clarifier-start" disabled={busy}
           onClick={() => { onStart(); return run(() => clarifierRequest("/start", { raw_brief: brief, input_mode: inputMode, product_ids: productIds, ad_type: adType, ad_brief: adBrief, known_fields: Object.fromEntries(Object.entries(knownFields).filter(([,v]) => v?.trim())) })); }}>Refine with AI</Button>
           <Button type="button" data-testid="clarifier-skip" onClick={leave}>Skip</Button></Stack>
@@ -127,7 +127,7 @@ function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, pr
         </Box>)}
       </Stack>}
       {pending && <Stack spacing={2} data-testid="clarifier-question">
-        <Typography variant="overline" aria-live="polite">Question {session.turns.length} of up to {session.max_questions || 3}</Typography>
+        <Typography variant="overline" aria-live="polite">Question {session.turns.length} of up to {session.max_questions || 5}</Typography>
         {!degraded && pending.source === "fallback" && <Chip size="small" label="General question" sx={{ alignSelf: "flex-start" }} />}
         <Typography fontWeight={600} data-testid="clarifier-question-text">{pending.question}</Typography>
         {Array.isArray(pending.options) && <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 1 }} data-testid="clarifier-options">
@@ -151,7 +151,7 @@ function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, pr
       {session?.refined_prompt && <Stack spacing={2} data-testid="clarifier-refined">
         {highConfidence ? <Alert severity="success" data-testid="clarifier-ready-high">Your idea has a clear direction. Review your brief before using it.</Alert>
           : <Alert severity="warning" data-testid="clarifier-ready-low"><strong>More detail would help.</strong> This is our best attempt — feel free to add more detail yourself.
-            {session.turns.length >= (session.max_questions || 3) && " We've reached the question limit, but some details are still uncertain."}</Alert>}
+            {session.turns.length >= (session.max_questions || 5) && " We've reached the question limit, but some details are still uncertain."}</Alert>}
         {!!session.assessment?.unresolved?.length && <Typography variant="body2" color="text.secondary" data-testid="clarifier-unresolved">
           Still open: {session.assessment.unresolved.map(topic => topicLabels[topic] || "Creative detail").join(", ")}. You can add these details to the draft below.
         </Typography>}

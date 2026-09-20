@@ -100,11 +100,36 @@ class ClarifierTests(unittest.TestCase):
                 {},
                 context={"input_mode": "idea", "ad_type": "character", "products": []},
             )
-        self.assertEqual(service.MAX_QUESTIONS, 3)
+        self.assertEqual(service.MAX_QUESTIONS, 5)
         self.assertEqual(row.turns[0]["topic"], "product")
         self.assertEqual(row.turns[0]["question"], service.QUESTIONS["product"])
         self.assertEqual(row.turns[0]["options"], service.QUESTION_OPTIONS["product"])
         self.assertNotIn("avoid", row.turns[0]["question"].lower())
+
+    def test_physical_execution_gap_gets_specific_safe_question_and_survives_refresh(self):
+        result = assessment(["script_clarity"], .6)
+        result["coverage"]["script_clarity"]["evidence"] = ""
+        for topic, item in result["coverage"].items():
+            if topic != "script_clarity":
+                item["evidence"] = "Tara"
+        with patch.object(service, "call_agent", return_value=result):
+            row = service.start(self.db,
+                "Tara enters through the open helicopter door and Kabir jumps.", {})
+        self.assertEqual(row.turns[0]["topic"], "script_clarity")
+        self.assertEqual(row.turns[0]["source"], "deterministic_execution")
+        self.assertIn("safe route", row.turns[0]["question"])
+        self.assertIn("physically supports", row.turns[0]["question"])
+        refreshed = service.snapshot(storage.get_clarifier_session(self.db, row.session_id))
+        self.assertEqual(refreshed["turns"][0]["question"], row.turns[0]["question"])
+
+    def test_planning_handoff_keeps_original_story_and_assessment(self):
+        direction = {"production_brief": "Polished", "original_input": "Original event order",
+            "answers": [], "known_fields": {}, "context": {}, "confidence": .72, "degraded": False,
+            "assessment": {"understanding": "Two ordered actions", "unresolved": ["tone"]}}
+        handoff = service.planning_direction(direction)
+        self.assertEqual(handoff["original_input"], "Original event order")
+        self.assertEqual(handoff["understanding"], "Two ordered actions")
+        self.assertEqual(handoff["unresolved"], ["tone"])
 
     def test_existing_pending_model_question_is_neutralized_on_reload_and_answer(self):
         row = storage.create_clarifier_session(self.db, "Kabir drinks Coca-Cola.", {})

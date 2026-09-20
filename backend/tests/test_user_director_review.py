@@ -38,6 +38,16 @@ class UserReviewTests(unittest.TestCase):
         self.assertTrue(director_review.review([shot], cast)["approved"])
         self.assertEqual(director._attach_voice_refs([shot], cast)[0]["voice_refs"], {"B":"b"})
 
+    def test_semantic_mechanics_reject_ambiguous_onscreen_speaker(self):
+        from app.services.planning_contract import check_mechanics
+        shot = directed()["shots"][0]
+        shot.update(has_dialogue=True, speech_mode="onscreen", speaker_name="",
+                    characters_in_shot=["A", "B"], opening_characters=["A", "B"])
+        verdict = check_mechanics({"approved": True, "issues": []}, [shot],
+            [{"name": "A"}, {"name": "B"}], 5)
+        self.assertFalse(verdict["approved"])
+        self.assertIn("exact speaker_name", verdict["issues"][0]["problem"])
+
     def test_approved_plan_serializes_without_model_call_and_preserves_speech(self):
         result = directed()
         result.update(director.validate_and_correct(result["shots"], [], 5))
@@ -71,6 +81,23 @@ class UserReviewTests(unittest.TestCase):
         self.assertIn("Hand over the bottle silently", prompt)
         self.assertIn("Speak the approved line only after drinking", prompt)
         self.assertEqual(out[0]["description"], shot["description"])
+
+    def test_semantically_reviewed_direction_serializes_boundaries_without_second_model(self):
+        result = directed()
+        result["shots"][0].pop("review_mode", None)
+        second = {**copy.deepcopy(result["shots"][0]), "shot_number": 2,
+            "scene_number": 2,
+            "state_at_shot_start": "Blue cup held above table.",
+            "state_at_shot_end": "Blue cup rests on saucer."}
+        second.pop("review_mode", None)
+        result["shots"].append(second)
+        result["assembly"] = {"provisional": False, "total_duration_sec": 10, "transitions": [{
+            "between": "1-2", "type": "cut", "reason": "Continue the same cup movement"}]}
+        out = compile_shot_prompts(result, emit=lambda *a: None,
+            call_agent=lambda *a, **k: (_ for _ in ()).throw(AssertionError("No compiler model")))
+        self.assertIn("Incoming continuity:", out[1]["compiled_prompt"])
+        self.assertIn("Continue the same cup movement", out[1]["compiled_prompt"])
+        self.assertIn("Outgoing transition:", out[0]["compiled_prompt"])
 
 class ReviewApiTests(unittest.TestCase):
     def setUp(self):
