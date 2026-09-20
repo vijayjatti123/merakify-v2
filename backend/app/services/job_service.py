@@ -1003,7 +1003,7 @@ def save_plan_revision(db, job_id, expected_json, result, changed_numbers):
     if assembly:
         db.delete(assembly)
     from app.services.still_frame_service import invalidate_changed_stills
-    invalidate_changed_stills(revised)
+    invalidate_changed_stills(revised, changed_numbers)
     job.result_json = json.dumps(revised)
     db.commit()
     db.expire_all()

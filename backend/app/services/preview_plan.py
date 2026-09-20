@@ -200,13 +200,37 @@ def contract_text(contract):
     return json.dumps(contract, ensure_ascii=False, sort_keys=True)
 
 
-def attach_visual_contracts(result):
-    """Freeze testable opening-frame requirements when the user approves the plan."""
+def _validate_contract(contract, shot_number):
+    """Fail before provider work when an approved shot cannot form one image."""
+    if not isinstance(contract, dict) or contract.get("contract_version") != STILL_CONTRACT_VERSION:
+        raise ValueError(f"Shot {shot_number}: image instructions use an unsupported contract")
+    checks = contract.get("checks")
+    if not isinstance(checks, dict) or set(checks) != set(STILL_CHECKS):
+        raise ValueError(f"Shot {shot_number}: image instructions are incomplete")
+    if any(not isinstance(checks[key], str) or not checks[key].strip() for key in STILL_CHECKS):
+        raise ValueError(f"Shot {shot_number}: image instructions contain an empty requirement")
+    prompt = generation_prompt(contract)
+    if not prompt.strip() or len(prompt) > 16000:
+        raise ValueError(f"Shot {shot_number}: image instructions are not provider-safe")
+    return contract
+
+
+def attach_visual_contracts(result, shot_numbers=None):
+    """Freeze scrutinized image requirements before any image provider is called.
+
+    On an edited plan only the explicitly changed shots are rebuilt. Sibling
+    contracts and accepted media remain byte-for-byte untouched.
+    """
+    targets = set(shot_numbers) if shot_numbers is not None else None
     for shot in result.get("shots", []):
+        if targets is not None and shot.get("shot_number") not in targets:
+            continue
         facts = preview_input(result, shot)
         if not facts:
             continue
         visual = preview_visual(facts)
         shot["preview_input"] = facts
-        shot["still_frame_contract"] = visual_contract(facts, visual)
+        shot["still_frame_contract"] = _validate_contract(
+            visual_contract(facts, visual), shot.get("shot_number")
+        )
     return result

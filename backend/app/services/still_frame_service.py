@@ -108,9 +108,12 @@ def shot_fingerprint(shot):
     return hashlib.sha256(json.dumps({k: shot.get(k) for k in fields}, sort_keys=True).encode()).hexdigest()
 
 
-def invalidate_changed_stills(result):
+def invalidate_changed_stills(result, shot_numbers=None):
     from app.services.preview_plan import preview_input
+    targets = set(shot_numbers) if shot_numbers is not None else None
     for shot in result.get("shots", []):
+        if targets is not None and shot.get("shot_number") not in targets:
+            continue
         stored_input = shot.get("preview_input")
         source_changed = bool(shot.get("still_frame_source_hash") and
                               shot["still_frame_source_hash"] != shot_fingerprint(shot))
@@ -528,7 +531,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
         if on_progress:
             on_progress(result)
         try:
-            from app.services.preview_plan import preview_visual, visual_contract
+            from app.services.preview_plan import preview_visual
             facts = shot.get("preview_input")
             visual = preview_visual(facts) if facts else visual_description(shot["compiled_prompt"])
             if (feedback_by_shot or {}).get(number):
@@ -581,12 +584,12 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                            "garment construction, object geometry/material/color or location surfaces. Keep those "
                            "facts identical; follow THIS shot's camera, pose and action. Do not copy the old "
                            "composition or add other subjects from the reference. Matched entities: " + json.dumps(entities))
-            request_contract = visual_contract(facts, visual) if facts else visual
-            if facts:
-                shot["still_frame_contract"] = request_contract
-                # The contract is now durable before the provider receives it.
-                if on_progress:
-                    on_progress(result)
+            # Fresh approved jobs must arrive with one scrutinized, persisted
+            # image contract. The image worker executes it verbatim and cannot
+            # reinterpret or rewrite the Director's requirements.
+            request_contract = shot.get("still_frame_contract") if facts else visual
+            if facts and not request_contract:
+                raise StillFrameError("Image instructions were not prepared before generation")
             emit("still_frame", f"Shot {number}: considering {len(references)} locked image reference(s) before budget selection.")
             if continuation:
                 emit("still_frame", f"Shot {number}: considering previous-shot action anchor from shot {continuation[0]} "
@@ -651,13 +654,12 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                 try:
                     verdict = check_still(request_contract, references, image, emit=emit, entities=entities, continuation=continuation)
                 except Exception as error:
-                    if not candidate:
-                        ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[image.content_type]
-                        key = f"jobs/{job_id}/preview-candidates/{number}-{uuid.uuid4().hex}.{ext}"
-                        storage_service.upload_bytes(key=key, body=image.data, content_type=image.content_type,
-                                                    cache_control="private, max-age=300")
-                        shot["still_frame_candidate"] = {"key": key, "source": verification_source, "attempt": attempt}
-                    raise VerificationUnavailable("Image created, but verification is unavailable") from error
+                    # Verification is a separate quality annotation. Once the
+                    # provider returned valid pixels, preserve and display them;
+                    # never turn a checker outage into another paid generation.
+                    verdict = {"approved": None, "reason": "Verification unavailable"}
+                    emit("preview_verification_error", json.dumps({"shot_number": number,
+                        "error": type(error).__name__, "message": "Generated image preserved; verification unavailable."}))
                 shot.pop("still_frame_candidate", None)
                 candidate = None
                 shot["still_frame_verification"] = verdict
@@ -670,13 +672,16 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                              "not proof of an unseen event. A missing stream does not establish that a pour concluded; "
                              "review the visible state against the explicit planned boundary.")
                     break
-                feedback = verdict["reason"]
-                shot["still_frame_retry_feedback"] = feedback
-                emit("still_frame", f"Shot {number}: visual check rejected candidate {attempt + 1}; "
-                     + ("retrying once." if attempt == 0 else "no still accepted; regeneration needed.")
-                     + f" Reason: {feedback}")
+                if verdict["approved"] is False:
+                    feedback = verdict["reason"]
+                    shot["still_frame_retry_feedback"] = feedback
+                    shot["still_frame_warning"] = "Preview ready. Review it before creating video; you can regenerate this shot if needed."
+                    emit("still_frame", f"Shot {number}: generated image preserved with a visual-review note. Reason: {feedback}")
+                else:
+                    shot["still_frame_warning"] = "Preview ready. Automatic verification was unavailable; review it before creating video."
+                break
             else:
-                raise VisualMismatch("Still-frame visual check rejected both candidates")
+                raise StillFrameError("Image provider did not return a usable image within the bounded technical retry")
             ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[image.content_type]
             key = f"jobs/{job_id}/stills/{number}-{uuid.uuid4().hex}.{ext}"
             started = time.monotonic()
@@ -743,10 +748,12 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
     ordered = sorted(result.get("shots", []), key=lambda s: s["shot_number"])
     targets = {s["shot_number"] for s in ordered if shot_numbers is None or s["shot_number"] in shot_numbers}
     for shot in ordered:
+        if shot["shot_number"] not in targets:
+            continue
         facts = preview_input(result, shot)
-        if facts:
+        if facts and not shot.get("preview_input"):
             shot["preview_input"] = facts
-    invalidate_changed_stills(result)
+    invalidate_changed_stills(result, targets)
     references = result.setdefault("entity_references", {})
     def dependency_graph():
         deps, previous_entities = {}, {}

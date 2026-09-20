@@ -29,6 +29,15 @@ class UserReviewTests(unittest.TestCase):
         self.assertEqual(checked["shots"][0]["description"], original[0]["description"])
         self.assertEqual(checked["shots"][0]["lighting"], "")
 
+    def test_edited_shot_review_ignores_unchanged_sibling_findings(self):
+        result = directed()
+        sibling = {**copy.deepcopy(result['shots'][0]), 'shot_number': 2, 'lighting': ''}
+        checked = director.validate_and_correct(
+            [result['shots'][0], sibling], [], 10,
+            semantic_review=False, review_shot_numbers={1})
+        self.assertTrue(checked['qa']['approved'])
+        self.assertEqual(checked['shots'][1]['lighting'], '')
+
     def test_multi_character_speaker_must_be_explicit_and_voice_matches(self):
         shot = directed()["shots"][0]
         shot.update(characters_in_shot=["A", "B"], speech_mode="onscreen", opening_characters=["A"], direction_source=None)

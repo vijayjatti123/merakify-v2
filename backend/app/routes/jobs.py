@@ -173,7 +173,8 @@ def _recover_missing_still(job_id, number, token, expected_attempt, hint, genera
             still_frame_service.generate_still_frames(result, job_id=job_id, emit=emit, shot_numbers={number})
             if not job_service.finish_still_retry(db, job_id, number, token, result):
                 return
-            if shot.get("still_frame_url") and generate_video:
+            if (shot.get("still_frame_url") and generate_video
+                    and shot.get("still_frame_verification", {}).get("approved") is True):
                 # Reuse Module S/R, including existing dialogue audio. No replanning/TTS.
                 video_generation_service.start(db, job_id, number, regenerate=True,
                     expected_attempt=expected_attempt, hint=hint, audio_model=audio_model)
@@ -503,6 +504,7 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
         approved_story=result.get("script"),
         minimum_shot_seconds=result.get("planning_constraints", {}).get("minimum_shot_seconds"),
         semantic_review=False,
+        review_shot_numbers=changed_numbers,
         emit=lambda key, note: job_service.append_event(db, job_id, key, note),
     )
     validated_shots = _attach_voice_refs(
@@ -544,7 +546,8 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
     from app.services.director_review import review
     technical = review(result.get("shots", []), result.get("continuity", {}).get("characters", []),
                        result.get("planning_constraints", {}).get("minimum_shot_seconds"),
-                       {"ad_type": job.ad_type, "ad_brief": json.loads(job.ad_brief_json or "{}")})
+                       {"ad_type": job.ad_type, "ad_brief": json.loads(job.ad_brief_json or "{}")},
+                       shot_numbers=set(result.get("plan_edited_shots", [])) or None)
     if not technical["approved"]:
         raise HTTPException(status_code=422, detail="Correct the plan details before approval: " + "; ".join(
             f"Shot {i['shot_number']}: {i['problem']}" for i in technical["issues"]))
@@ -567,7 +570,7 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
     # Persist the exact visual checklist before any image provider is called.
     # Generation and verification consume this same contract.
     from app.services.preview_plan import attach_visual_contracts
-    attach_visual_contracts(updated_result)
+    attach_visual_contracts(updated_result, edited or None)
     job_service.set_result(db, job_id, updated_result)
     job_service.append_event(db, job_id, "voice_generation", "Approved; starting real dialogue voice generation.")
     for shot in updated_result["shots"]:

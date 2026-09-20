@@ -118,8 +118,11 @@ def check_plan(qa, shots):
     return {**qa, "approved": False, "issues": [*qa.get("issues", []), *issues]} if issues else qa
 
 
-def accept_shots(shots):
+def accept_shots(shots, shot_numbers=None):
+    targets = set(shot_numbers) if shot_numbers is not None else None
     for shot in shots:
+        if targets is not None and shot.get('shot_number') not in targets:
+            continue
         if shot.get("direction_version") == 1:
             errors = problems(shot)
             if errors:

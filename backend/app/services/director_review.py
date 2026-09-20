@@ -5,24 +5,30 @@ from app.services.camera_direction import check_plan as check_camera
 from app.services import ad_direction
 
 
-def review(shots, characters, minimum=None, commercial=None):
+def review(shots, characters, minimum=None, commercial=None, shot_numbers=None):
     verdict = check_mechanics(check_camera({"approved": True, "issues": []}, shots), shots, characters, minimum)
-    issues = list(verdict["issues"])
+    targets = set(shot_numbers) if shot_numbers is not None else None
+    issues = [finding for finding in verdict["issues"]
+              if targets is None or finding.get("shot_number") in targets]
     def issue(number, text):
         issues.append({"shot_number": number, "problem": text, "code": "technical_plan"})
     if not shots:
         issue(0, "Add at least one shot.")
     audio_mode = (commercial or {}).get("ad_brief", {}).get("audio_mode", "auto")
     for shot in shots:
+        if targets is not None and shot.get("shot_number") not in targets:
+            continue
         if not shot.get("has_dialogue"):
             continue
         mode = shot.get("speech_mode", "onscreen")
         if audio_mode == "silent" or audio_mode in ("onscreen", "voiceover") and mode != audio_mode:
             issue(shot.get("shot_number", 0), f"Speech conflicts with your selected {audio_mode} treatment. Edit this shot's speech setting before approval.")
     numbers = [s.get("shot_number") for s in shots]
-    if len(set(numbers)) != len(numbers):
+    if targets is None and len(set(numbers)) != len(numbers):
         issue(0, "Shot numbers must be unique.")
     for s in shots:
+        if targets is not None and s.get("shot_number") not in targets:
+            continue
         n = s.get("shot_number", 0)
         for field in ("description", "camera_angle", "lens", "lighting"):
             if not isinstance(s.get(field), str) or not s[field].strip():

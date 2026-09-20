@@ -25,24 +25,17 @@ class StillFramesTests(unittest.TestCase):
         self.image = GeneratedCharacterImage(buffer.getvalue(), "image/png")
         self.emit = Mock()
 
-    def test_verification_outage_reuses_saved_candidate_without_generation(self):
+    def test_verification_outage_preserves_and_displays_generated_image(self):
         with patch.object(service, 'generate_still', return_value=self.image) as generate, \
              patch.object(service, 'check_still', side_effect=service.VerificationUnavailable('offline')), \
              patch.object(service.storage_service, 'upload_bytes', return_value={'key':'candidate','url':'https://stored'}):
             self.run_stills()
         shot = self.result['shots'][0]
         self.assertEqual(generate.call_count, 1)
-        self.assertEqual(shot['still_frame_error_kind'], 'verification')
-        self.assertIsNone(shot['still_frame_url'])
-        self.assertIn('still_frame_candidate', shot)
-        with patch.object(service, 'generate_still') as generate, \
-             patch.object(service, '_download_reference_image', return_value=self.image), \
-             patch.object(service.storage_service, 'asset_url', return_value='https://candidate'), \
-             patch.object(service.storage_service, 'upload_bytes', return_value={'key':'approved','url':'https://approved'}), \
-             patch.object(service, 'check_still', return_value={'approved':True,'reason':'Matches'}):
-            self.run_stills()
-        generate.assert_not_called()
         self.assertEqual(shot['still_frame_status'], 'ready')
+        self.assertEqual(shot['still_frame_url'], 'https://stored')
+        self.assertIsNone(shot['still_frame_verification']['approved'])
+        self.assertIn('verification was unavailable', shot['still_frame_warning'].casefold())
         self.assertNotIn('still_frame_candidate', shot)
 
     def test_opening_prompt_excludes_later_composition(self):
@@ -91,7 +84,7 @@ class StillFramesTests(unittest.TestCase):
         invalidate_changed_stills(result)
         self.assertEqual(shot['still_frame_url'], 'https://example/image.jpg')
 
-    def test_visual_rejection_feedback_improves_the_next_manual_recovery(self):
+    def test_visual_review_feedback_improves_user_requested_regeneration(self):
         rejected = self.checked_verdict()
         rejected.update(approved=False, reason='Opening state advanced to the ending')
         rejected['visual_checks']['opening_state'].update(status='fail', evidence='Ending shown')
@@ -100,8 +93,12 @@ class StillFramesTests(unittest.TestCase):
              patch.object(service.storage_service, 'upload_bytes', return_value={'key':'unused','url':'https://unused'}):
             self.run_stills()
         shot = self.result['shots'][0]
-        self.assertEqual(shot['still_frame_status'], 'failed')
+        self.assertEqual(shot['still_frame_status'], 'ready')
+        self.assertEqual(shot['still_frame_url'], 'https://unused')
         self.assertIn('Opening state advanced', shot['still_frame_retry_feedback'])
+        shot['still_frame_url'] = None
+        shot.pop('still_frame_key', None)
+        shot['still_frame_status'] = 'pending'
         with patch.object(service, 'generate_still', return_value=self.image) as generated, \
              patch.object(service, 'check_still', return_value=self.checked_verdict()), \
              patch.object(service.storage_service, 'upload_bytes', return_value={'key':'ready','url':'https://ready'}):
@@ -316,20 +313,19 @@ class StillFramesTests(unittest.TestCase):
             service.check_still("A cup", [], self.image)
 
     @patch.object(service.storage_service, "upload_bytes", return_value={"url": "https://stored", "key": "stored"})
-    @patch.object(service, "check_still", side_effect=[{"approved": False, "reason": "Wrong framing"}, {"approved": True, "reason": "Matches"}])
+    @patch.object(service, "check_still", return_value={"approved": False, "reason": "Wrong framing"})
     @patch.object(service, "generate_still")
-    def test_visual_rejection_retries_then_persists(self, generate, check, upload):
+    def test_visual_review_never_triggers_second_paid_generation(self, generate, check, upload):
         generate.return_value = self.image
         shots = self.run_stills()
-        self.assertEqual(generate.call_count, 2)
-        self.assertEqual(generate.call_args.args[-1], "Wrong framing")
+        self.assertEqual(generate.call_count, 1)
+        self.assertEqual(generate.call_args.args[-1], "")
         self.assertEqual(generate.call_args.args[2], "9:16")
         self.assertEqual(shots[0]["still_frame_url"], "https://stored")
         first_contract = generate.call_args_list[0].args[0]
-        second_contract = generate.call_args_list[1].args[0]
-        self.assertEqual(first_contract, second_contract)
         self.assertEqual(first_contract, check.call_args_list[0].args[0])
-        self.assertEqual(first_contract, check.call_args_list[1].args[0])
+        self.assertFalse(shots[0]['still_frame_verification']['approved'])
+        self.assertIn('Review it before creating video', shots[0]['still_frame_warning'])
         upload.assert_called_once()
 
     def test_contract_is_defined_before_generation_and_checker_cannot_rewrite_it(self):
@@ -362,6 +358,34 @@ class StillFramesTests(unittest.TestCase):
         sent = google.call_args.args[0][0]['text']
         self.assertIn('helicopter cabin', sent)
         self.assertNotIn('invented after generation', sent)
+
+    def test_targeted_contract_scrutiny_preserves_sibling_contract_exactly(self):
+        from app.services.preview_plan import attach_visual_contracts
+        from test_ad_direction import directed
+        result = directed()
+        sibling = {**result['shots'][0], 'shot_number': 2,
+                   'still_frame_contract': {'preserved': 'exactly'},
+                   'preview_input': {'preserved': 'exactly'}}
+        result['shots'].append(sibling)
+        attach_visual_contracts(result, {1})
+        self.assertEqual(result['shots'][1]['still_frame_contract'], {'preserved': 'exactly'})
+        self.assertEqual(result['shots'][1]['preview_input'], {'preserved': 'exactly'})
+        self.assertEqual(result['shots'][0]['still_frame_contract']['contract_version'], 'shot-opening-v2')
+
+    def test_generation_executes_persisted_contract_without_rebuilding_it(self):
+        from app.services.preview_plan import attach_visual_contracts
+        from test_ad_direction import directed
+        result = directed()
+        result['aspect_ratio'] = '9:16'
+        attach_visual_contracts(result)
+        frozen = result['shots'][0]['still_frame_contract']
+        with patch.object(service, 'generate_still', return_value=self.image) as generate, \
+             patch.object(service, 'check_still', return_value={'approved': True, 'reason': 'Matches'}), \
+             patch.object(service.storage_service, 'upload_bytes', return_value={'key': 'accepted', 'url': 'https://accepted'}):
+            service.generate_still_frames(result, job_id='immutable-contract', emit=Mock())
+        # Worker snapshots are deep copies, but the provider receives exactly
+        # the frozen value rather than a newly authored prompt.
+        self.assertEqual(generate.call_args.args[0], frozen)
 
     def test_nano_banana_receives_polished_brief_before_machine_contract(self):
         from app.services.preview_plan import visual_contract

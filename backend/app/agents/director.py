@@ -363,6 +363,7 @@ def validate_and_correct(
     ad_direction_plan: dict | None = None,
     approved_story: dict | None = None,
     semantic_review: bool | None = None,
+    review_shot_numbers: set[int] | None = None,
 ) -> dict:
     """Run the pipeline's single QA and duration self-correction sequence.
 
@@ -379,11 +380,12 @@ def validate_and_correct(
         from app.services.director_review import review, timeline
         current_shots = render_camera_summaries(shots)
         verdict = review(current_shots, characters, minimum_shot_seconds,
-            (approved_story or {}).get("production_context", {}).get("commercial"))
+            (approved_story or {}).get("production_context", {}).get("commercial"),
+            shot_numbers=review_shot_numbers)
         for shot in current_shots:
             shot["review_mode"] = "user"
         if verdict["approved"]:
-            ad_direction.accept_shots(current_shots)
+            ad_direction.accept_shots(current_shots, review_shot_numbers)
         return {"shots": current_shots, "qa": verdict,
                 "assembly": timeline(current_shots, provisional=any(s.get("has_dialogue") for s in current_shots))}
 

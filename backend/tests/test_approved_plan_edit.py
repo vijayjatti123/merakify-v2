@@ -72,6 +72,20 @@ class ApprovedPlanEditTests(unittest.TestCase):
         self.assertEqual(contract["contract_version"],"shot-opening-v2")
         self.assertIn("first physical instant",contract["checks"]["opening_state"])
 
+    def test_edit_rebuilds_only_target_image_contract(self):
+        with self.sessions() as db:
+            result = jobs.job_result(jobs.get_job(db, self.job_id))
+            result['shots'][0]['still_frame_contract'] = {'sibling': 'unchanged'}
+            result['shots'][0]['preview_input'] = {'sibling': 'unchanged'}
+            jobs.set_result(db, self.job_id, result)
+        self.assertEqual(self.client.post(f"/api/jobs/{self.job_id}/revise", json=self.payload()).status_code, 200)
+        response = self.client.post(f"/api/jobs/{self.job_id}/approve")
+        self.assertEqual(response.status_code, 200, response.text)
+        shots = response.json()['result']['shots']
+        self.assertEqual(shots[0]['still_frame_contract'], {'sibling': 'unchanged'})
+        self.assertEqual(shots[0]['preview_input'], {'sibling': 'unchanged'})
+        self.assertEqual(shots[1]['still_frame_contract']['contract_version'], 'shot-opening-v2')
+
     def test_noop_preserves_approval_and_media(self):
         original=self.client.get(f"/api/jobs/{self.job_id}").json()["result"]["shots"][1]
         payload={"expected_plan_revision":0,"shots":[{"shot_number":2,"description":original["description"],"dialogue_text":original["dialogue_text"]}]}

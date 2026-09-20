@@ -47,18 +47,17 @@ class StillRecoveryTests(unittest.TestCase):
             self.db.expire_all()
             return jobs.job_result(jobs.get_job(self.db, self.job.id)), provider.call_count
 
-    def test_double_rejection_has_no_usable_output_and_no_video_call(self):
+    def test_visual_mismatch_preserves_image_without_starting_video(self):
         result, calls = self.run_recovery({'approved':False, 'reason':'Deliberate framing mismatch'})
         self.assertEqual(calls, 0)
-        self.assertEqual(result['shots_needing_attention'], [1])
-        self.assertEqual(result['shots'][0]['still_frame_status'], 'failed')
-        self.assertEqual(result['shots'][0]['still_frame_error_kind'], 'mismatch')
+        self.assertEqual(result['shots_needing_attention'], [])
+        self.assertEqual(result['shots'][0]['still_frame_status'], 'ready')
         self.assertEqual(result['shots'][0]['still_frame_retry_feedback'], 'Deliberate framing mismatch')
-        self.assertIsNone(result['shots'][0]['still_frame_url'])
+        self.assertEqual(result['shots'][0]['still_frame_url'], 'https://audit/still')
         self.assertFalse(result['shots'][0].get('video_url'))
         self.assertEqual(result['shots'][1], self.result['shots'][1])
         messages = [e.note for e in jobs.get_events_since(self.db, self.job.id)]
-        self.assertEqual(sum('Reason: Deliberate framing mismatch' in m for m in messages), 2)
+        self.assertEqual(sum('Reason: Deliberate framing mismatch' in m for m in messages), 1)
         self.assertNotIn('Continuing with compiled text', str(messages))
 
     def test_success_reuses_existing_video_path_and_only_target_changes(self):
@@ -121,9 +120,9 @@ class StillRecoveryTests(unittest.TestCase):
              patch.object(still, 'check_still', return_value={'approved': False, 'reason': 'Deliberate mismatch'}):
             still.generate_still_frames(self.result, job_id=self.job.id, emit=lambda *args: None,
                 shot_numbers={1}, on_progress=lambda result: seen.append(result['shots'][0]['still_frame_status']))
-        self.assertEqual(seen, ['pending', 'generating', 'failed'])
+        self.assertEqual(seen, ['pending', 'generating', 'ready'])
 
-    def test_verification_retry_persists_candidate_and_leaves_sibling_unchanged(self):
+    def test_verification_outage_preserves_image_and_leaves_sibling_unchanged(self):
         def run(error=False):
             task = BackgroundTasks()
             with patch.object(routes, 'SessionLocal', self.sessions), \
@@ -138,13 +137,11 @@ class StillRecoveryTests(unittest.TestCase):
                 asyncio.run(task())
                 self.db.expire_all()
                 return jobs.job_result(jobs.get_job(self.db,self.job.id)), generate.call_count
-        failed, calls = run(True)
+        ready, calls = run(True)
         self.assertEqual(calls, 1)
-        self.assertEqual(failed['shots'][0]['still_frame_error_kind'], 'verification')
-        self.assertIn('still_frame_candidate', failed['shots'][0])
-        ready, calls = run()
-        self.assertEqual(calls, 0)
         self.assertEqual(ready['shots'][0]['still_frame_status'], 'ready')
+        self.assertEqual(ready['shots'][0]['still_frame_url'], 'https://audit/candidate')
+        self.assertNotIn('still_frame_candidate', ready['shots'][0])
         self.assertEqual(ready['shots'][1], self.result['shots'][1])
         self.assertFalse(ready['shots'][0].get('video_url'))
 
