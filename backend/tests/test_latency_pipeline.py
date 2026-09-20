@@ -75,6 +75,8 @@ class LatencyPipelineTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
 
     def test_independent_previews_overlap_without_compilation_and_persist_on_owner(self):
+        for shot in self.result["shots"]:
+            shot["still_frame_contract"] = "approved shot"
         barrier = threading.Barrier(2)
         active, peak = 0, 0
         lock = threading.Lock()
@@ -104,6 +106,34 @@ class LatencyPipelineTests(unittest.TestCase):
             still.generate_still_frames(self.result, job_id="test", emit=lambda *a: None)
             self.assertEqual(len(calls), 3)
             self.assertEqual(urls, [s["still_frame_url"] for s in self.result["shots"]])
+
+    def test_visual_verification_does_not_hold_generation_workers(self):
+        for shot in self.result["shots"]:
+            shot["still_frame_contract"] = "approved shot"
+        third_generated = threading.Event()
+        generated = []
+        def generate(*args, **kwargs):
+            generated.append(len(generated) + 1)
+            if len(generated) == 3:
+                third_generated.set()
+            return self.image
+        def check(*args, **kwargs):
+            self.assertTrue(third_generated.wait(2), "third image was blocked behind verification")
+            return {"approved": True, "reason": "ok", "visible_entities": []}
+        with patch.object(still, "generate_still", side_effect=generate), \
+             patch.object(still, "check_still", side_effect=check), \
+             patch.object(still.storage_service, "upload_bytes",
+                          side_effect=lambda **k: {"url": "https://image/" + k["key"], "key": k["key"]}):
+            still.generate_still_frames(self.result, job_id="test", emit=lambda *a: None)
+        self.assertEqual(generated, [1, 2, 3])
+        self.assertTrue(all(s["still_frame_verification"]["approved"] for s in self.result["shots"]))
+
+    def test_only_job_invented_props_require_generated_anchors(self):
+        products = [{"name": "Coca-Cola"}]
+        self.assertFalse(still._needs_generated_anchor("locations:open sky", "Open sky", products))
+        self.assertFalse(still._needs_generated_anchor("props:chilled coca cola bottle",
+                                                       "Chilled Coca-Cola bottle", products))
+        self.assertTrue(still._needs_generated_anchor("props:golden lasso", "Golden lasso", products))
 
     def test_shared_entity_waits_for_accepted_anchor_and_failed_retry_preserves_sibling(self):
         self.result["continuity"]["props"] = [{"name": "Cup"}]

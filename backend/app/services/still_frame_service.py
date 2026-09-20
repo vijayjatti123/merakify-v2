@@ -532,6 +532,24 @@ def match_entities(result, shot, visual):
     return matches
 
 
+def _needs_generated_anchor(entity_id, entity_name, products):
+    """Only job-invented props need a prior generated frame as identity input.
+
+    Locations are fully specified by the frozen opening-frame contract and should
+    not serialize otherwise independent shots. Approved products already have an
+    authoritative uploaded reference, so a generated scene is never their source
+    of truth either.
+    """
+    if not entity_id.startswith("props:"):
+        return False
+    entity_words = set(_words(entity_name))
+    for product in products:
+        product_words = set(_words(product.get("name", "")))
+        if product_words and product_words <= entity_words:
+            return False
+    return True
+
+
 def _continuous_pair(previous, shot, result):
     """Conservative existing-data proxy, not a new action-state classifier.
 
@@ -551,7 +569,9 @@ def _continuous_pair(previous, shot, result):
                 re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I))
 
 
-def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on_progress=None, feedback_by_shot=None, reference_cache=None, on_accepted=None):
+def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on_progress=None,
+                                  feedback_by_shot=None, reference_cache=None, on_accepted=None,
+                                  on_verification=None):
     """Keep the plan reviewable, but explicitly mark missing output as failed."""
     characters = {c["name"].strip().casefold(): c for c in result.get("continuity", {}).get("characters", [])}
     # References live only in this job's result JSON, pointing to its own stills.
@@ -729,35 +749,37 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                     continue
                 emit("still_frame", f"Shot {number}: decoded {dimensions['width']}x{dimensions['height']} "
                      f"matches {aspect_ratio} within 2% ratio tolerance.")
-                started = time.monotonic()
-                emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_started", "attempt": attempt + 1}))
-                try:
-                    verdict = check_still(request_contract, references, image, emit=emit, entities=entities, continuation=continuation)
-                except Exception as error:
-                    # Verification is a separate quality annotation. Once the
-                    # provider returned valid pixels, preserve and display them;
-                    # never turn a checker outage into another paid generation.
-                    verdict = {"approved": None, "reason": "Verification unavailable"}
-                    emit("preview_verification_error", json.dumps({"shot_number": number,
-                        "error": type(error).__name__, "message": "Generated image preserved; verification unavailable."}))
+                verdict = None
+                if on_verification is None:
+                    started = time.monotonic()
+                    emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_started", "attempt": attempt + 1}))
+                    try:
+                        verdict = check_still(request_contract, references, image, emit=emit, entities=entities, continuation=continuation)
+                    except Exception as error:
+                        # Verification is a separate quality annotation. Once the
+                        # provider returned valid pixels, preserve and display them;
+                        # never turn a checker outage into another paid generation.
+                        verdict = {"approved": None, "reason": "Verification unavailable"}
+                        emit("preview_verification_error", json.dumps({"shot_number": number,
+                            "error": type(error).__name__, "message": "Generated image preserved; verification unavailable."}))
+                    shot["still_frame_verification"] = verdict
+                    emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_completed", "attempt": attempt + 1,
+                        "elapsed_sec": round(time.monotonic() - started, 3), "approved": verdict["approved"]}))
                 shot.pop("still_frame_candidate", None)
                 candidate = None
-                shot["still_frame_verification"] = verdict
-                emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_completed", "attempt": attempt + 1,
-                    "elapsed_sec": round(time.monotonic() - started, 3), "approved": verdict["approved"]}))
-                if verdict["approved"]:
+                if verdict and verdict["approved"]:
                     shot.pop("still_frame_retry_feedback", None)
                     if continuation:
                         emit("still_frame", f"Warning — shot {number}: physical-state QA approval is a model judgment, "
                              "not proof of an unseen event. A missing stream does not establish that a pour concluded; "
                              "review the visible state against the explicit planned boundary.")
                     break
-                if verdict["approved"] is False:
+                if verdict and verdict["approved"] is False:
                     feedback = verdict["reason"]
                     shot["still_frame_retry_feedback"] = feedback
                     shot["still_frame_warning"] = "Preview ready. Review it before creating video; you can regenerate this shot if needed."
                     emit("still_frame", f"Shot {number}: generated image preserved with a visual-review note. Reason: {feedback}")
-                else:
+                elif verdict:
                     shot["still_frame_warning"] = "Preview ready. Automatic verification was unavailable; review it before creating video."
                 break
             else:
@@ -772,14 +794,21 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                         still_frame_source_hash=shot_fingerprint(shot), still_frame_status="ready")
             if on_accepted:
                 on_accepted(number, image, stored["key"])
+            if on_verification is not None:
+                on_verification(number, request_contract, references, image, entities,
+                                continuation, stored["url"], stored["key"])
             # Reuse the exact bytes uploaded at this URL; no redundant S3 download.
             previous_image = image
             cache.seed(stored["url"], image)
-            observed = verdict.get("visible_entities", [])
+            observed = verdict.get("visible_entities", []) if verdict else []
             if not isinstance(observed, list):
                 observed = []
             for entity_id in entities:
-                if entity_id not in reference_map and entity_id in observed:
+                # A frozen contract explicitly places job-only props in the
+                # opening frame. Seed their identity as soon as valid pixels are
+                # stored so a slow checker cannot block the next image request.
+                planned_anchor = verdict is None and _needs_generated_anchor(entity_id, entities[entity_id], products)
+                if entity_id not in reference_map and (entity_id in observed or planned_anchor):
                     reference_map[entity_id] = {"name": entities[entity_id], "url": stored["url"],
                                                 "key": stored["key"], "shot_number": number,
                                                 "source_hash": shot_fingerprint(shot)}
@@ -787,7 +816,8 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                     emit("still_frame", f"Shot {number}: established job-only reference for {entity_id}.")
                 elif entity_id not in reference_map:
                     emit("still_frame", f"WARNING: Shot {number}: QA did not confirm visibility of {entity_id}; no job reference established.")
-            emit("still_frame", f"Shot {number}: opening still passed visual check and was stored.")
+            emit("still_frame", f"Shot {number}: opening still was stored" +
+                 ("; visual verification is running in parallel." if verdict is None else " after visual review."))
         except Exception as error:
             detail = str(error) if isinstance(error, StillFrameError) else type(error).__name__
             warning = f"Shot {number}: This shot couldn't be generated — try regenerating it. No still was accepted. Reason: {detail}."
@@ -818,13 +848,18 @@ def dependency_priority(ordered, deps, pending):
 
 
 def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progress=None, feedback_by_shot=None):
-    """Two bounded workers; only the owning thread persists progress or emits DB events.
+    """Two bounded generation workers plus two overlapping verification workers.
 
-    Potential entity seeders serialize until QA establishes a canonical reference;
-    continuous action anchors remain sequential. Each worker receives a snapshot,
-    never the owner's mutable plan or DB session.
+    Only genuinely job-invented prop seeders and continuous action anchors remain
+    sequential. Locations and approved products use their frozen contracts or
+    authoritative references. Each worker receives a snapshot, never the owner's
+    mutable plan or DB session.
     """
     from app.services.preview_plan import preview_input, preview_visual
+    from app.db import SessionLocal
+    from app.services.product_service import job_references
+    with SessionLocal() as product_db:
+        products = job_references(product_db, job_id)
     ordered = sorted(result.get("shots", []), key=lambda s: s["shot_number"])
     targets = {s["shot_number"] for s in ordered if shot_numbers is None or s["shot_number"] in shot_numbers}
     for shot in ordered:
@@ -841,7 +876,9 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
             number = shot["shot_number"]
             visual = preview_visual(shot["preview_input"]) if shot.get("preview_input") else visual_description(shot["compiled_prompt"]) if shot.get("compiled_prompt") else ""
             dependencies = set()
-            for entity in match_entities(result, shot, visual):
+            for entity, entity_name in match_entities(result, shot, visual).items():
+                if not _needs_generated_anchor(entity, entity_name, products):
+                    continue
                 anchor = references.get(entity, {}).get("shot_number")
                 if anchor is not None and anchor < number:
                     dependencies.add(anchor)
@@ -874,6 +911,8 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
             shot["still_frame_status"] = "pending"
     persist()
     display_tasks = queue.Queue()
+    verification_tasks = queue.Queue()
+    verification_futures = {}
     def display_job(number, image, key):
         from app.services.preview_display import store_variants
         try:
@@ -882,9 +921,62 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
             events.put(("still_frame", f"Shot {number}: display derivative unavailable ({type(error).__name__}); original retained."))
             return None
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="preview-display") as display_pool, \
+         ThreadPoolExecutor(max_workers=2, thread_name_prefix="preview-verify") as verification_pool, \
          ThreadPoolExecutor(max_workers=2, thread_name_prefix="still-preview") as pool:
         def accepted(number, image, key):
             display_tasks.put((number, key, display_pool.submit(display_job, number, image, key)))
+        def verification_requested(number, contract, refs, image, entities, continuation, url, key):
+            def verify():
+                started = time.monotonic()
+                events.put(("preview_timing", json.dumps({"shot_number": number,
+                    "phase": "visual_check_started", "attempt": 1})))
+                try:
+                    verdict = check_still(contract, refs, image,
+                        emit=lambda k, n: events.put((k, n)), entities=entities, continuation=continuation)
+                except Exception as error:
+                    verdict = {"approved": None, "reason": "Verification unavailable"}
+                    events.put(("preview_verification_error", json.dumps({"shot_number": number,
+                        "error": type(error).__name__, "message": "Generated image preserved; verification unavailable."})))
+                events.put(("preview_timing", json.dumps({"shot_number": number,
+                    "phase": "visual_check_completed", "attempt": 1,
+                    "elapsed_sec": round(time.monotonic() - started, 3), "approved": verdict.get("approved")})))
+                return verdict
+            future = verification_pool.submit(verify)
+            verification_tasks.put((future, number, entities, url, key))
+        def collect_verifications(*, wait_for_all=False):
+            while not verification_tasks.empty():
+                future, number, entities, url, key = verification_tasks.get_nowait()
+                verification_futures[future] = (number, entities, url, key)
+            complete = list(verification_futures) if wait_for_all else [f for f in verification_futures if f.done()]
+            for future in complete:
+                number, entities, url, key = verification_futures[future]
+                target = by_number[number]
+                if target.get("still_frame_key") != key:
+                    if not wait_for_all:
+                        continue  # The generation result has not merged into the owner yet.
+                    verification_futures.pop(future)
+                    continue  # A newer regeneration replaced this verification.
+                verification_futures.pop(future)
+                verdict = future.result()
+                target["still_frame_verification"] = verdict
+                if verdict.get("approved"):
+                    target.pop("still_frame_retry_feedback", None)
+                    target.pop("still_frame_warning", None)
+                elif verdict.get("approved") is False:
+                    target["still_frame_retry_feedback"] = verdict.get("reason") or "Review the image"
+                    target["still_frame_warning"] = "Preview ready. Review it before creating video; you can regenerate this shot if needed."
+                else:
+                    target["still_frame_warning"] = "Preview ready. Automatic verification was unavailable; review it before creating video."
+                observed = verdict.get("visible_entities", [])
+                if not isinstance(observed, list):
+                    observed = []
+                for entity_id, entity_name in entities.items():
+                    if entity_id not in references and entity_id in observed:
+                        references[entity_id] = {"name": entity_name, "url": url,
+                            "key": key, "shot_number": number,
+                            "source_hash": target.get("still_frame_source_hash")}
+                        emit("still_frame", f"Shot {number}: established job-only reference for {entity_id}.")
+                persist()
         while pending or futures:
             pending_before = len(pending)
             deps = dependency_graph()
@@ -911,7 +1003,8 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
                 started = time.monotonic()
                 def work(snapshot=snapshot, number=number):
                     _generate_still_frames_serial(snapshot, job_id=job_id,
-                        emit=lambda k, n: events.put((k, n)), shot_numbers={number}, feedback_by_shot=feedback_by_shot, reference_cache=cache, on_accepted=accepted)
+                        emit=lambda k, n: events.put((k, n)), shot_numbers={number}, feedback_by_shot=feedback_by_shot,
+                        reference_cache=cache, on_accepted=accepted, on_verification=verification_requested)
                     return snapshot
                 futures[pool.submit(work)] = (number, started)
             if not futures:
@@ -937,6 +1030,8 @@ def generate_still_frames(result, *, job_id, emit, shot_numbers=None, on_progres
                 persist()
                 emit("preview_timing", json.dumps({"shot_number": number, "phase": "completed",
                     "elapsed_sec": round(time.monotonic() - started, 3), "status": target.get("still_frame_status")}))
+            collect_verifications()
+        collect_verifications(wait_for_all=True)
         while not display_tasks.empty():
             number, key, future = display_tasks.get_nowait()
             display = future.result()
