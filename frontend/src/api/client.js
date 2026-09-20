@@ -266,3 +266,7 @@ export async function productRequest(path = "", payload) {
   if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(typeof body.detail === "string" ? body.detail : "Couldn't update your product. Please try again."); }
   return res.json();
 }
+
+export async function productAlbumRequest(productId, path = "", payload) {
+  return productRequest(`/${productId}/album${path}`, payload);
+}

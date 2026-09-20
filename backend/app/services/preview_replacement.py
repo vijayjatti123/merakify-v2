@@ -159,8 +159,10 @@ def run(job_id, number, token, snapshot, hint="", upload=None):
                 # Uploaded pixels are a deliberate user choice, never silently regenerated.
                 # Check against locked identity/style and display any discrepancy for review.
                 from app.services.character_image_service import GeneratedCharacterImage, _download_reference_image
-                from app.services.preview_plan import preview_visual
-                visual = preview_visual(shot["preview_input"]) if shot.get("preview_input") else still.visual_description(shot["compiled_prompt"])
+                from app.services.preview_plan import preview_visual, visual_contract
+                facts = shot.get("preview_input")
+                visual = preview_visual(facts) if facts else still.visual_description(shot["compiled_prompt"])
+                request_contract = shot.get("still_frame_contract") or (visual_contract(facts, visual) if facts else visual)
                 warning = ""
                 try:
                     refs = []
@@ -169,7 +171,7 @@ def run(job_id, number, token, snapshot, hint="", upload=None):
                         if character.get("name", "").casefold() in names and character.get("image_url"):
                             url = still.fresh_reference(character["image_url"])
                             refs.append((character["name"], _download_reference_image(url), url, 0, 0))
-                    verdict = still.check_still(visual, refs, GeneratedCharacterImage(data=upload, content_type="image/png"), emit=emit)
+                    verdict = still.check_still(request_contract, refs, GeneratedCharacterImage(data=upload, content_type="image/png"), emit=emit)
                     if not verdict["approved"]:
                         warning = "This image differs from the shot plan: " + verdict["reason"]
                 except Exception:

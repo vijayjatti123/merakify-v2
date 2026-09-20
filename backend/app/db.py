@@ -135,3 +135,16 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def ensure_product_album_columns():
+    columns = {c["name"] for c in inspect(engine).get_columns("job_products")}
+    if "views_json" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE job_products ADD COLUMN views_json TEXT"))
+    columns = {c["name"] for c in inspect(engine).get_columns("product_views")}
+    with engine.begin() as connection:
+        for name, ddl in {"status_url": "TEXT", "response_url": "TEXT", "generation_contract": "JSON",
+                          "verification_only": "BOOLEAN NOT NULL DEFAULT FALSE"}.items():
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE product_views ADD COLUMN {name} {ddl}"))

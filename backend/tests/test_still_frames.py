@@ -1,3 +1,4 @@
+import base64
 import json
 import io
 import unittest
@@ -158,7 +159,8 @@ class StillFramesTests(unittest.TestCase):
         order = []
         def generate(visual, refs, aspect, feedback, *, continuation, emit):
             import re
-            number = int(re.search(r'Audit frame (\d+)', visual).group(1))
+            source_visual = visual.get('source_visual', '') if isinstance(visual, dict) else visual
+            number = int(re.search(r'Audit frame (\d+)', source_visual).group(1))
             order.append(f'generate{number}')
             self.assertEqual(refs[0][:2], ('Meera', self.image))
             if number > 1:
@@ -268,7 +270,76 @@ class StillFramesTests(unittest.TestCase):
         self.assertEqual(generate.call_args.args[-1], "Wrong framing")
         self.assertEqual(generate.call_args.args[2], "9:16")
         self.assertEqual(shots[0]["still_frame_url"], "https://stored")
+        first_contract = generate.call_args_list[0].args[0]
+        second_contract = generate.call_args_list[1].args[0]
+        self.assertEqual(first_contract, second_contract)
+        self.assertEqual(first_contract, check.call_args_list[0].args[0])
+        self.assertEqual(first_contract, check.call_args_list[1].args[0])
         upload.assert_called_once()
+
+    def test_contract_is_defined_before_generation_and_checker_cannot_rewrite_it(self):
+        from app.services.preview_plan import attach_visual_contracts, generation_prompt
+        self.result.update(visual_style='cinematic naturalism', ad_visual_direction='Warm practical realism')
+        self.result['shots'][0].update(
+            state_at_shot_start='Kabir stands inside the helicopter cabin with both boots on its floor.',
+            description='Kabir jumps from the helicopter after Tara gives the signal.',
+            camera_angle='Eye-level medium shot', lens='35mm', lighting='Cold daylight',
+            characters_in_shot=['Kabir'])
+        self.result['continuity']['characters'] = [{
+            'name': 'Kabir', 'description': 'olive flight suit and black parachute harness'}]
+        attach_visual_contracts(self.result)
+        contract = self.result['shots'][0]['still_frame_contract']
+        self.assertIn('inside the helicopter cabin', contract['checks']['placement_support'])
+        self.assertNotIn('jumps from the helicopter', contract['checks']['opening_state'])
+        self.assertEqual(set(contract['checks']), set(service.VISUAL_CHECKS))
+        self.assertEqual(contract['generation_brief']['version'], 'vague-to-polished-image-v1')
+        self.assertIn('Cinematic character-commercial', contract['generation_brief']['preset'])
+        self.assertIn('EXACT OPENING MOMENT', generation_prompt(contract))
+
+        provider_verdict = self.checked_verdict()
+        for row in provider_verdict['visual_checks'].values():
+            row['requirement'] = 'A requirement invented after generation'
+        response = {'candidates': [{'content': {'parts': [{'text': json.dumps(provider_verdict)}]}}]}
+        with patch.object(service, '_google', return_value=response) as google:
+            verdict = service.check_still(contract, [], self.image)
+        self.assertEqual(verdict['visual_checks']['opening_state']['requirement'],
+                         contract['checks']['opening_state'])
+        sent = google.call_args.args[0][0]['text']
+        self.assertIn('helicopter cabin', sent)
+        self.assertNotIn('invented after generation', sent)
+
+    def test_nano_banana_receives_polished_brief_before_machine_contract(self):
+        from app.services.preview_plan import visual_contract
+        facts = {
+            'ad_type': 'product', 'aspect_ratio': '16:9',
+            'state_at_shot_start': 'A sealed tea tin stands centered on black stone.',
+            'description': 'The tea tin rotates later.', 'characters': [],
+            'camera_angle': 'Low-angle macro close-up', 'lens': '100mm macro',
+            'lighting': 'Large softbox key with a narrow amber rim',
+            'visual_style': {'palette': ['charcoal', 'amber', 'cream']},
+        }
+        contract = visual_contract(facts)
+        response = {'candidates': [{'content': {'parts': [{
+            'inlineData': {'data': base64.b64encode(self.image.data).decode(),
+                           'mimeType': 'image/png'}}]}}]}
+        with patch.object(service, '_google', return_value=response) as google:
+            service.generate_still(contract, [], '16:9')
+        prompt = google.call_args.args[0][-1]['text']
+        self.assertLess(prompt.index('COMMERCIAL TREATMENT:'), prompt.index('AUTHORITATIVE MACHINE-READABLE CONTRACT:'))
+        self.assertIn('Premium product-commercial', prompt)
+        self.assertIn('Low-angle macro close-up; 100mm macro', prompt)
+        self.assertIn('wrong inside/outside placement', prompt)
+        self.assertNotIn('rotates later', contract['generation_brief']['opening_moment'])
+
+    def test_legacy_image_requests_also_receive_a_readable_polished_layer(self):
+        response = {'candidates': [{'content': {'parts': [{
+            'inlineData': {'data': base64.b64encode(self.image.data).decode(),
+                           'mimeType': 'image/png'}}]}}]}
+        with patch.object(service, '_google', return_value=response) as google:
+            service.generate_still('A blue cup on a walnut table.', [], '1:1')
+        prompt = google.call_args.args[0][-1]['text']
+        self.assertIn('ROLE: Commercial still photographer', prompt)
+        self.assertIn('EXACT OPENING MOMENT: A blue cup on a walnut table.', prompt)
 
     @patch.object(service, "generate_still", side_effect=service.StillFrameError("HTTP 404"))
     def test_provider_failure_continues_and_clears_stale_image(self, generate):

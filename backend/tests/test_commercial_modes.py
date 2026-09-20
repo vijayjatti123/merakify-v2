@@ -135,6 +135,37 @@ class CommercialModesTests(unittest.TestCase):
         self.assertNotIn("explodes", visual)
         self.assertNotIn("A field of stars", visual)
 
+    def test_prompt_polish_layers_are_deterministic_and_mode_specific(self):
+        from app.agents.director import prompt_polish_context
+        product = prompt_polish_context("product", brief="a cola bottle ad", language="English",
+            duration_seconds=None, aspect_ratio="16:9", visual_style="Natural",
+            color_grade="Warm", quality="720p", video_model="h3_max_fal")
+        character = prompt_polish_context("character", brief="a runner finds confidence", language="English",
+            duration_seconds=None, aspect_ratio="9:16", visual_style="Cinematic",
+            color_grade="None", quality="720p", video_model="seedance_mini")
+        self.assertIn("PROMPT POLISH CONTRACT", product)
+        self.assertIn("PRODUCT PRESET", product)
+        self.assertIn('"video_model": "h3_max_fal"', product)
+        self.assertIn("CHARACTER PRESET", character)
+        self.assertNotIn("PRODUCT PRESET", character)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProductAlbumContractTests(unittest.TestCase):
+    def test_album_limits_and_estimate_are_bounded(self):
+        from app.services.product_album_service import options, MODELS
+        self.assertEqual(options()["angles"], ["front", "three_quarter", "side", "back", "top", "detail"])
+        self.assertGreater(MODELS["pro"][1], MODELS["standard"][1])
+
+    def test_video_reference_angle_selection_is_narrow(self):
+        from app.services.product_album_service import relevant_views
+        product = {"name": "Bottle", "views": [
+            {"id": "side", "angle": "side", "provenance": "original", "object_key": "products/side.png"},
+            {"id": "back", "angle": "back", "provenance": "inferred", "object_key": "products/back.png"},
+        ]}
+        self.assertEqual(relevant_views(product, {"description": "Bottle side view on table", "camera_angle": "side"})[0]["id"], "side")
+        self.assertEqual(relevant_views(product, {"description": "Bottle rear label close-up", "camera_angle": "close-up"})[0]["id"], "back")
+        self.assertEqual(relevant_views(product, {"description": "A table with no named item"}), [])

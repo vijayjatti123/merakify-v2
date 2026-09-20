@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, Float, Integer, DateTime, ForeignKey, String, Text, UniqueConstraint, JSON
+from sqlalchemy import Boolean, Column, Float, Integer, DateTime, ForeignKey, String, Text, UniqueConstraint, JSON
 from sqlalchemy.orm import relationship
 
 from app.db import Base
@@ -211,3 +211,31 @@ class JobProduct(Base):
     product_id = Column(String, ForeignKey("products.id"), primary_key=True)
     name = Column(String, nullable=False)
     object_key = Column(String, nullable=False)  # immutable job reference snapshot
+    views_json = Column(Text, nullable=True)  # immutable approved album snapshot
+
+
+class ProductView(Base):
+    __tablename__ = "product_views"
+    id = Column(String, primary_key=True, default=new_id)
+    product_id = Column(String, ForeignKey("products.id"), nullable=False, index=True)
+    request_key = Column(String, unique=True, nullable=False)
+    angle = Column(String, nullable=False)
+    provenance = Column(String, nullable=False)  # original | inferred
+    status = Column(String, nullable=False, default="review")
+    object_key = Column(String)
+    thumbnail_key = Column(String)
+    source_keys = Column(JSON, nullable=False, default=list)
+    generation_contract = Column(JSON)
+    candidate_keys = Column(JSON, nullable=False, default=list)
+    model = Column(String)
+    request_id = Column(String)
+    status_url = Column(Text)
+    response_url = Column(Text)
+    verification_only = Column(Boolean, nullable=False, default=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    verdict = Column(JSON)
+    error = Column(Text)
+    lease_until = Column(DateTime)
+    next_poll_at = Column(DateTime)
+    started_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

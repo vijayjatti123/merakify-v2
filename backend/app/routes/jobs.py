@@ -557,6 +557,10 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
         } if not edited or shot["shot_number"] in edited else shot
         for shot in result.get("shots", [])
     ]
+    # Persist the exact visual checklist before any image provider is called.
+    # Generation and verification consume this same contract.
+    from app.services.preview_plan import attach_visual_contracts
+    attach_visual_contracts(updated_result)
     job_service.set_result(db, job_id, updated_result)
     job_service.append_event(db, job_id, "voice_generation", "Approved; starting real dialogue voice generation.")
     for shot in updated_result["shots"]:

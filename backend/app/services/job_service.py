@@ -98,7 +98,9 @@ def create_job(
     db.add(job)
     db.flush()
     for product in products:
-        db.add(JobProduct(job_id=job.id, product_id=product.id, name=product.name, object_key=product.accepted_key))
+        from app.services.product_album_service import approved_snapshot
+        db.add(JobProduct(job_id=job.id, product_id=product.id, name=product.name, object_key=product.accepted_key,
+            views_json=json.dumps(approved_snapshot(db, product.id), ensure_ascii=False)))
     db.commit()
     db.refresh(job)
     return job
@@ -130,7 +132,7 @@ def copy_job_for_retry(db: Session, source: Job) -> Job:
     from app.models import JobProduct
     for reference in db.query(JobProduct).filter_by(job_id=source.id).all():
         db.add(JobProduct(job_id=job.id, product_id=reference.product_id,
-                          name=reference.name, object_key=reference.object_key))
+                          name=reference.name, object_key=reference.object_key, views_json=reference.views_json))
     db.commit()
     db.refresh(job)
     from app.models import AgentCheckpoint

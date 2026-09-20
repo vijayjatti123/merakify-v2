@@ -232,6 +232,56 @@ def save(db, state):
                                "confidence", "status", "refined_prompt")})
 
 
+def refine_text(state, knowledge):
+    """One normal refinement; one format repair within a shared 50s budget."""
+    from app.agents.prompts import refinement_system, REFINEMENT_LAYER_VERSION
+    from app.agents.output_contracts import contract_for, validate
+    context = state['gathered'].get('_context', {})
+    script_mode = context.get('input_mode') == 'script'
+    system = refinement_system(context.get('ad_type', 'character'), script_mode)
+    payload = json.dumps({**_model_context(state), 'knowledge': knowledge}, ensure_ascii=False, default=str)
+    _, schema = contract_for(system, payload)
+    started = time.monotonic()
+    attempts = []
+    state['gathered']['refinement_diagnostics'] = {'version': REFINEMENT_LAYER_VERSION, 'attempts': attempts}
+    for attempt in range(2):
+        remaining = 50 - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError('Refinement time budget exhausted')
+        result = None
+        violation = 'invalid_json_or_schema'
+        try:
+            result = call_agent(system, payload, max_tokens=4096, request_timeout=remaining)
+            validate(result, schema)
+            violation = 'empty_or_overlong_fields'
+            if script_mode:
+                notes = result['production_direction']
+                if any(not v.strip() or len(v) > 700 for v in notes.values()) or sum(len(v.split()) for v in notes.values()) > 350:
+                    raise ValueError('Production direction exceeds field contract')
+                text = '\n\n'.join(f'{label}: {notes[key].strip()}' for key, label in DIRECTION_FIELDS.items())
+            else:
+                text = result['refined_prompt'].strip()
+                if not text or len(text) > 20000 or (len(state['raw_brief'].split()) <= 350 and len(text.split()) > 350):
+                    raise ValueError('Refined brief exceeds field contract')
+            attempts.append({'attempt': attempt + 1, 'status': 'valid', 'elapsed_seconds': round(time.monotonic() - started, 3)})
+            return text
+        except ValueError:
+            # Never persist parser exceptions: they can contain private model output.
+            attempts.append({'attempt': attempt + 1, 'status': 'invalid_format', 'violation': violation,
+                             'elapsed_seconds': round(time.monotonic() - started, 3)})
+            if attempt:
+                raise
+            system += ('\nFORMAT REPAIR: Repair the supplied draft, not a new creative treatment. '
+                       'Return only the required JSON fields. Shorten redundant direction to 180-240 words total '
+                       'while preserving every supplied factual constraint and dialogue. No preamble.')
+            repair_payload = json.loads(payload)
+            repair_payload['format_violation'] = violation
+            if result is not None:
+                repair_payload['draft_to_repair'] = result
+            payload = json.dumps(repair_payload, ensure_ascii=False, default=str)
+    raise ValueError('Refinement unavailable')
+
+
 def act(db, row, action, value=None):
     state = snapshot(row)
     if state["status"] == "cancelled":
@@ -247,21 +297,7 @@ def act(db, row, action, value=None):
         knowledge = lookup_techniques(db, state["known_fields"].get("content_type"),
                                      state["known_fields"].get("ai_model"))
         try:
-            result = call_agent(CLARIFIER_REFINE, json.dumps({**_model_context(state), "knowledge": knowledge},
-                                ensure_ascii=False, default=str), max_tokens=4096, request_timeout=50,
-                                truncation_retry_tokens=6144)
-            if state["gathered"].get("_context", {}).get("input_mode") == "script":
-                notes = result.get("production_direction")
-                if not isinstance(notes, dict) or set(notes) != set(DIRECTION_FIELDS) or any(
-                    not isinstance(v, str) or not v.strip() or len(v) > 700 for v in notes.values()):
-                    raise ValueError("Invalid production direction")
-                if sum(len(v.split()) for v in notes.values()) > 350:
-                    raise ValueError("Production direction too verbose")
-                text = "\n\n".join(f"{label}: {notes[key].strip()}" for key, label in DIRECTION_FIELDS.items())
-            else:
-                text = result["refined_prompt"]
-            if not isinstance(text, str) or not text.strip() or len(text) > 20000:
-                raise ValueError("Invalid refinement")
+            text = refine_text(state, knowledge)
         except Exception:
             state["status"] = "degraded"
             state["confidence"] = 0.0

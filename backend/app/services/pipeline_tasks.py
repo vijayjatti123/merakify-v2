@@ -33,6 +33,8 @@ def polling_loop(stop):
     active, completed = {}, queue.Queue()
     while not stop.is_set():
         try:
+            from app.services.product_album_service import dispatch as dispatch_album
+            dispatch_album()
             with SessionLocal() as db:
                 while not completed.empty():
                     job_id, token, status = completed.get_nowait()

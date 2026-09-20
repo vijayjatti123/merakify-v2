@@ -63,6 +63,12 @@ def contracts():
 def contract_for(system, content):
     from app.agents import prompts
     from app.config import settings
+    if system.startswith(prompts.CLARIFIER_REFINE):
+        payload = json.loads(content)
+        script_mode = payload.get('gathered', {}).get('_context', {}).get('input_mode') == 'script'
+        fields = ('audience', 'takeaway', 'product_role', 'execution', 'must_haves', 'exclusions', 'open_questions')
+        return ('refinement-v1', obj({'production_direction': obj({k: TEXT for k in fields})})
+                if script_mode else obj({'refined_prompt': TEXT}))
     try:
         payload = json.loads(content) if system == prompts.QA_AGENT else None
     except (ValueError, TypeError):

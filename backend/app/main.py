@@ -11,11 +11,13 @@ from app.db import (
     ensure_asset_tagging_columns,
     ensure_character_reference_sheet_column,
     ensure_job_intake_columns,
+    ensure_product_album_columns,
 )
 from app.routes import asset_routes, character_routes, jobs, script_routes, clarifier_routes
 
 Base.metadata.create_all(bind=engine)
 ensure_job_intake_columns()
+ensure_product_album_columns()
 ensure_asset_tagging_columns()
 ensure_character_reference_sheet_column()
 from app.services.prompt_technique_service import seed_techniques

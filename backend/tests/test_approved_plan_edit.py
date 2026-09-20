@@ -66,7 +66,11 @@ class ApprovedPlanEditTests(unittest.TestCase):
             response=self.client.post(f"/api/jobs/{self.job_id}/approve")
         self.assertEqual(response.status_code,200,response.text)
         queue.assert_called_once()
-        self.assertEqual(response.json()["result"]["plan_edited_shots"],[2])
+        result=response.json()["result"]
+        self.assertEqual(result["plan_edited_shots"],[2])
+        contract=result["shots"][1]["still_frame_contract"]
+        self.assertEqual(contract["contract_version"],"shot-opening-v1")
+        self.assertIn("first physical instant",contract["checks"]["opening_state"])
 
     def test_noop_preserves_approval_and_media(self):
         original=self.client.get(f"/api/jobs/{self.job_id}").json()["result"]["shots"][1]

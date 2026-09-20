@@ -24,6 +24,33 @@ from app.services.still_frame_service import generate_still_frames
 
 EventFn = Callable[[str, str], None]
 
+
+def prompt_polish_context(ad_type: str, *, brief: str, language: str,
+                          duration_seconds: float | None, aspect_ratio: str,
+                          visual_style: str | None, color_grade: str | None,
+                          quality: str | None, video_model: str | None) -> str:
+    """Assemble the compact, server-owned prompt layers for the Director.
+
+    This is intentionally deterministic: Clarifier supplies user intent and
+    the existing Director remains the only creative model call. The assembled
+    contract gives vague briefs a concrete default while keeping typed facts
+    authoritative and provider details in the later adapter.
+    """
+    preset = prompts.PROMPT_POLISH_PRESETS.get(ad_type, prompts.PROMPT_POLISH_PRESETS["character"])
+    facts = {
+        "language": language,
+        "duration_seconds": duration_seconds if duration_seconds is not None else "choose from explicit brief; otherwise classifier target",
+        "aspect_ratio": aspect_ratio,
+        "visual_style": visual_style or "Natural",
+        "color_grade": color_grade or "None",
+        "quality": quality or "standard",
+        "video_model": video_model or "provider default",
+    }
+    return ("\n\n" + prompts.PROMPT_POLISH_BASE + "\n" + preset
+            + "\nLOCKED PRODUCTION FACTS (code-owned; do not reinterpret):\n"
+            + json.dumps(facts, ensure_ascii=False)
+            )
+
 SHOT_STATUS_PENDING = "pending"
 SHOT_STATUS_GENERATING = "generating"
 SHOT_STATUS_DONE = "done"
@@ -593,6 +620,17 @@ def run_pipeline(db: Session, job_id: str) -> None:
         commercial_context = {"ad_type": job.ad_type, "ad_brief": json.loads(job.ad_brief_json or "{}")}
         direction_note += "\nCommercial format instructions:\n" + prompts.COMMERCIAL_DIRECTIONS[job.ad_type]
         direction_note += "\nUser commercial settings (preserve explicit script; do not invent claims):\n" + json.dumps(commercial_context, ensure_ascii=False)
+        polish_note = prompt_polish_context(
+            job.ad_type,
+            brief=brief,
+            language=language,
+            duration_seconds=None,
+            aspect_ratio=job.aspect_ratio or "16:9",
+            visual_style=job.visual_style,
+            color_grade=job.color_grade,
+            quality=job.quality,
+            video_model=job.video_model or job.ai_model,
+        )
         if direction:
             emit("clarifier_handoff", "User-reviewed production direction and answers supplied to planning.")
 
@@ -626,7 +664,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             'commercial': commercial_context,
             'original_brief': brief, 'source_script': source_script,
             'reviewed_direction': planning_direction(direction),
-            'products': [{'name': p['name']} for p in job_references(db, job_id)],
+            'products': [{'name': p['name'], 'approved_views': [{'angle': v['angle'], 'provenance': v['provenance']} for v in p.get('views', [])]} for p in job_references(db, job_id)],
         }
 
         # 3. Visual Continuity Agent — builds the reference library BEFORE any
@@ -701,7 +739,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
 
         cine = call_agent(
             prompts.CINEMATOGRAPHY_AGENT,
-            cinematography_input + direction_note,
+            cinematography_input + direction_note + polish_note,
             max_tokens=token_budget,
             truncation_retry_tokens=min(32768, token_budget * 2),
             on_response=record_cinematography_usage,

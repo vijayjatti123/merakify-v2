@@ -59,6 +59,11 @@ def build(result, shot, *, limit, tag_style, refresh):
             required.append(("product", product["product_id"],
                 f"{product['name']} packaging identity only: preserve geometry, colors and existing lettering/logos; use only at the directed time and position",
                 storage_service.asset_url(product["object_key"])))
+            from app.services.product_album_service import relevant_views
+            for view in relevant_views(product, shot):
+                optional.append(("product_view", view["id"],
+                    f"{product['name']} approved {view['angle']} view of the SAME product. Identity/detail guide only; never copy its white background or duplicate the product",
+                    storage_service.asset_url(view["object_key"])))
     # Continuity props remain optional. Match ONLY this shot's own facts.
     from app.services.still_frame_service import match_entities
     needed = match_entities(result, shot, text)

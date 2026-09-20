@@ -112,7 +112,10 @@ class ProductTests(unittest.TestCase):
         with patch.object(still,'_google',return_value=response) as google:
             still.generate_still('Tea tin.',refs,'1:1')
             self.assertIn('Preserve existing product packaging',google.call_args.args[0][-1]['text'])
-        with patch.object(still,'_google',return_value={'candidates':[{'content':{'parts':[{'text':'{"approved": true, "reason":"Matches"}'}]}}]}) as google:
+        verdict = {'approved': True, 'reason': 'Matches', 'spatially_grounded': True,
+                   'visible_entities': [], 'visual_checks': {key: {'status': 'pass',
+                   'requirement': 'Preserve the product', 'evidence': 'Product matches reference'} for key in still.VISUAL_CHECKS}}
+        with patch.object(still,'_google',return_value={'candidates':[{'content':{'parts':[{'text':json.dumps(verdict)}]}}]}) as google:
             still.check_still('Tea tin.',refs,image)
             self.assertIn('must NOT be rejected',google.call_args.args[0][0]['text'])
         with patch.object(still,'_google',return_value=response) as google:

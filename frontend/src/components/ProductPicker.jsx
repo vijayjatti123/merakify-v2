@@ -3,6 +3,7 @@ import { Alert, Box, Button, Card, Chip, Dialog, DialogActions, DialogContent, D
   LinearProgress, Slider, Stack, TextField, Typography } from "@mui/material";
 import { Package, Plus } from "lucide-react";
 import { productRequest } from "../api/client";
+import ProductAlbum from "./ProductAlbum";
 
 export default function ProductPicker({ selected, onChange, disabled, compact = false }) {
   const [open, setOpen] = useState(false);
@@ -13,6 +14,7 @@ export default function ProductPicker({ selected, onChange, disabled, compact = 
   const [horizontal, setHorizontal] = useState([0, 100]);
   const [vertical, setVertical] = useState([0, 100]);
   const [active, setActive] = useState(null);
+  const [albumOpen, setAlbumOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const mounted = useRef(true);
@@ -59,8 +61,10 @@ export default function ProductPicker({ selected, onChange, disabled, compact = 
     <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
       <Button type="button" variant="outlined" startIcon={<Package size={18}/>} disabled={disabled || selected.length >= 4}
         onClick={() => { setError(""); setOpen(true); }} data-testid="add-product">Add product</Button>
-      {selected.map(p => <Chip key={p.id} label={p.name} avatar={<img src={p.accepted_url} alt=""/>}
-        disabled={disabled} onDelete={() => onChange(selected.filter(v => v.id !== p.id))} />)}
+      {selected.map(p => <Box key={p.id} sx={{ display: "inline-flex", alignItems: "center", gap: .5 }}>
+        <Chip label={p.name} avatar={<img src={p.accepted_url} alt=""/>} disabled={disabled} onDelete={() => onChange(selected.filter(v => v.id !== p.id))} />
+        {!compact && <Button size="small" disabled={disabled} onClick={() => { setActive(p); setAlbumOpen(true); setOpen(true); }}>Album</Button>}
+      </Box>)}
     </Stack>
     {!compact && <Typography variant="caption" color="text.secondary">Add a product photo to keep its appearance consistent. No voice or description needed.</Typography>}
     <Dialog open={open} onClose={() => !busy && setOpen(false)} fullWidth maxWidth="md">
@@ -117,6 +121,10 @@ export default function ProductPicker({ selected, onChange, disabled, compact = 
             <Button variant="outlined" disabled={busy} onClick={() => run(() => choose("original"))} data-testid="use-original-product">Use cropped original</Button>
             <Button disabled={busy} onClick={() => setActive(null)}>Choose another photo</Button>
           </Stack>}
+          {active.status === "approved" && <Button variant="outlined" startIcon={<Package size={16}/>} onClick={() => setAlbumOpen(v => !v)}>
+            {albumOpen ? "Hide product album" : "Build product album"}
+          </Button>}
+          {albumOpen && active.status === "approved" && <ProductAlbum product={active} onClose={() => setAlbumOpen(false)} />}
         </>}
       </Stack></DialogContent>
       <DialogActions><Button disabled={busy} onClick={() => setOpen(false)}>Close</Button></DialogActions>

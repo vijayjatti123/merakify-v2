@@ -1,4 +1,5 @@
 """Reusable, explicitly approved product references. No character/voice records."""
+import json
 import base64
 import io
 import uuid
@@ -174,5 +175,5 @@ def selected(db, ids):
 
 
 def job_references(db, job_id):
-    return [{"product_id":p.product_id,"name":p.name,"object_key":p.object_key}
+    return [{"product_id":p.product_id,"name":p.name,"object_key":p.object_key,"views":json.loads(p.views_json or "[]")}
             for p in db.query(JobProduct).filter_by(job_id=job_id).all()]

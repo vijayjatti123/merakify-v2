@@ -147,8 +147,22 @@ def _inline(image):
                            "data": base64.b64encode(image.data).decode("ascii")}}
 
 
-VISUAL_CHECKS = ("identity_wardrobe", "placement_support", "props_contact",
-                 "opening_state", "framing", "lighting_style")
+from app.services.preview_plan import STILL_CHECKS as VISUAL_CHECKS
+
+
+def _still_contract(value):
+    """Production passes a persisted contract; direct legacy callers remain supported."""
+    if isinstance(value, dict) and value.get("contract_version") and isinstance(value.get("checks"), dict):
+        if set(value["checks"]) != set(VISUAL_CHECKS):
+            raise StillFrameError("Still-frame contract is missing visual checks")
+        return value, True
+    text = str(value or "").strip()
+    if not text:
+        raise StillFrameError("Compiled visual description is empty")
+    return {"contract_version": "legacy-visual-v1", "source_visual": text,
+            "checks": {key: "Check this category against the supplied visual description and references."
+                       for key in VISUAL_CHECKS},
+            "global_rules": ["Generate and verify one opening frame only."]}, False
 
 
 def _google(parts, *, aspect_ratio=None, verification=False):
@@ -254,17 +268,16 @@ def _reference_parts(references, continuation, *, checking=False, emit=None):
 
 
 def generate_still(visual, references, aspect_ratio, feedback="", *, continuation=None, emit=None):
+    contract, _ = _still_contract(visual)
+    from app.services.preview_plan import contract_text, generation_prompt
     parts = _reference_parts(references, continuation, emit=emit)
     product_reference = any(len(ref) > 2 and ref[2].startswith("product:") for ref in references)
     parts.append({"text": (
-        "Generate ONE still image: the opening frame of this compiled film shot. "
-        "Freeze the first described physical instant; later motion and transition descriptions are "
-        "context only, not additional panels or a later completed action. Preserve the specified "
-        "framing, subject placement, lighting, palette and rendering style. Supplied reference images "
-        "lock each named character's identity, face, hair and clothing; do not replace their face. "
-        "Reference sheets are identity guides, never reproduce their layout. No collage, captions, "
-        + ("invented logos, captions or audio. Preserve existing product packaging text/logos exactly as shown in approved product references.\nCompiled visual description:\n" if product_reference
-           else "logos, readable text or audio.\nCompiled visual description:\n") + visual
+        "Create the approved commercial opening frame below. Every section is an instruction, not a suggestion.\n\n"
+        + generation_prompt(contract)
+        + ("\n\nPreserve existing product packaging text and logos exactly as shown in approved product references."
+           if product_reference else "")
+        + "\n\nAUTHORITATIVE MACHINE-READABLE CONTRACT:\n" + contract_text(contract)
         + ("\nCorrect the previous visual check: " + feedback if feedback else "")
     )})
     response = _google(parts, aspect_ratio=aspect_ratio)
@@ -283,6 +296,8 @@ def generate_still(visual, references, aspect_ratio, feedback="", *, continuatio
 
 
 def check_still(visual, references, image, *, emit=None, entities=None, continuation=None):
+    contract, strict_contract = _still_contract(visual)
+    from app.services.preview_plan import contract_text
     product_reference = any(len(ref) > 2 and ref[2].startswith("product:") for ref in references)
     parts = [{"text": (
         "Check this single opening-frame preview against the compiled visual description and any "
@@ -303,7 +318,8 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
         "Use not_applicable only when no requirement/reference exists for that category; explain why. "
         "Report ALL failures together with specific corrective evidence. Approve only when every applicable "
         "check passes. Set spatially_grounded false for failed/uncertain placement_support.\n"
-        + visual
+        + "The exact checklist used before image generation follows. Do not replace its requirements with your own:\n"
+        + contract_text(contract)
     )}]
     if entities:
         parts.append({"text": "Also return visible_entities: an array of the exact entity IDs below that are "
@@ -337,6 +353,10 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
                         any(not isinstance(row.get(k), str) or not row[k].strip()
                             for k in ("requirement", "evidence"))):
                     raise ValueError("Invalid visual checklist evidence")
+                if strict_contract:
+                    # The model judges evidence; code owns the requirement. Never
+                    # allow verification prose to redefine what was generated.
+                    row["requirement"] = contract["checks"][key]
                 if row["status"] in ("fail", "uncertain"):
                     failures.append(f"{key} ({row['status']}): {row['requirement']} — {row['evidence']}")
             if failures:
@@ -492,8 +512,9 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
         if on_progress:
             on_progress(result)
         try:
-            from app.services.preview_plan import preview_visual
-            visual = preview_visual(shot["preview_input"]) if shot.get("preview_input") else visual_description(shot["compiled_prompt"])
+            from app.services.preview_plan import preview_visual, visual_contract
+            facts = shot.get("preview_input")
+            visual = preview_visual(facts) if facts else visual_description(shot["compiled_prompt"])
             if (feedback_by_shot or {}).get(number):
                 visual += "\nRequested image adjustment (preserve locked identity and style): " + feedback_by_shot[number]
             entities = match_entities(result, shot, visual)
@@ -512,6 +533,14 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                 product_image = reference(storage_service.asset_url(key), number)
                 references.append(("Product " + product["name"] + "; preserve packaging, geometry, color, logo and printed text. Use only when this shot calls for the product; never copy the reference layout or unrelated props",
                                    product_image, "product:" + key, 0, 0))
+                from app.services.product_album_service import relevant_views
+                for view in relevant_views(product, shot, opening_only=True):
+                    if len(references) >= MAX_REFERENCE_IMAGES:
+                        emit("still_frame", f"Shot {number}: optional product angle omitted due to reference limit.")
+                        break
+                    view_key = view["object_key"]
+                    references.append(("Alternate " + view["angle"] + " view of the SAME " + product["name"] + "; identity only, no duplicate product or white background",
+                        reference(storage_service.asset_url(view_key), number), "product:" + view_key, 1, 0))
                 emit("still_frame", f"Shot {number}: approved product reference {product['product_id']} attached for generation and QA.")
             if products:
                 visual += "\nApproved product images lock product identity, NOT this scene's framing. Do not insert a product into a shot that does not call for it."
@@ -529,13 +558,19 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                            "garment construction, object geometry/material/color or location surfaces. Keep those "
                            "facts identical; follow THIS shot's camera, pose and action. Do not copy the old "
                            "composition or add other subjects from the reference. Matched entities: " + json.dumps(entities))
+            request_contract = visual_contract(facts, visual) if facts else visual
+            if facts:
+                shot["still_frame_contract"] = request_contract
+                # The contract is now durable before the provider receives it.
+                if on_progress:
+                    on_progress(result)
             emit("still_frame", f"Shot {number}: considering {len(references)} locked image reference(s) before budget selection.")
             if continuation:
                 emit("still_frame", f"Shot {number}: considering previous-shot action anchor from shot {continuation[0]} "
                      f"subject to reference budget (image SHA256 {hashlib.sha256(continuation[1].data).hexdigest()}).")
             feedback = ""
             aspect_ratio = result.get("aspect_ratio") or "16:9"
-            verification_source = hashlib.sha256(json.dumps([visual, aspect_ratio,
+            verification_source = hashlib.sha256(json.dumps([request_contract, aspect_ratio,
                 [hashlib.sha256(r[1].data).hexdigest() for r in references],
                 hashlib.sha256(continuation[1].data).hexdigest() if continuation else None], sort_keys=True).encode()).hexdigest()
             candidate = shot.get("still_frame_candidate")
@@ -556,7 +591,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                         except Exception as error:
                             raise VerificationUnavailable("Saved preview could not be loaded for verification") from error
                     else:
-                        image = generate_still(visual, references, aspect_ratio, feedback, continuation=continuation, emit=attempt_emit)
+                        image = generate_still(request_contract, references, aspect_ratio, feedback, continuation=continuation, emit=attempt_emit)
                 except NoStillImageError as error:
                     if not error.retryable or attempt == 1:
                         raise
@@ -589,7 +624,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                 started = time.monotonic()
                 emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_started", "attempt": attempt + 1}))
                 try:
-                    verdict = check_still(visual, references, image, emit=emit, entities=entities, continuation=continuation)
+                    verdict = check_still(request_contract, references, image, emit=emit, entities=entities, continuation=continuation)
                 except Exception as error:
                     if not candidate:
                         ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[image.content_type]
