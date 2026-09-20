@@ -46,7 +46,8 @@ class AdDirectionTests(unittest.TestCase):
                     still_frame_url='https://example.com/scene.jpg', still_frame_status='ready')
         shot.pop('direction_source', None)
         shot['shot_direction'].update(blocking='The cup stays centered; Meera is screen right.',
-            action_beats=['Meera reaches for the handle.', 'She lifts the cup, then settles her hand.'],
+            action_beats=['Meera reaches for the handle.', 'She lifts the cup and speaks the approved line, then settles her hand.'],
+            dialogue_beat_index=2,
             critical_outcome='The cup visibly clears the table.')
         ad_direction.accept_shots([shot])
         result.update(director.validate_and_correct([shot], [], 5))

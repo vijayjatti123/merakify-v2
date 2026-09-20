@@ -47,8 +47,12 @@ def snapshot(db, job_id, shot):
         "forbidden_geometry": direction.get('forbidden_geometry'), "action_beats": direction.get('action_beats')}
     generated_narration = job.video_model in {"h3_max_fal", "seedance_mini_evolink", "seedance_mini_fal", "automatic_omni_mini"}
     if is_onscreen_speech(shot) or (is_voiceover(shot) and generated_narration):
+        from app.services.dialogue_window import from_shot
+        timing = from_shot(shot)
         expected["speech"] = {"dialogue_text": shot.get("dialogue_text", ""),
-                              "language": job.language, "speaker": shot.get("speaker_label")}
+                              "language": job.language, "speaker": shot.get("speaker_label"),
+                              **({"start_sec": timing["start_sec"], "end_sec": timing["end_sec"]}
+                                 if timing else {})}
     return expected
 
 
@@ -266,7 +270,11 @@ def accept(db, job_id, shot, media, *, check_cache=None):
     if verdict.get("speech", {}).get("status") == "mismatch":
         from app.services.speech_compliance_service import SPEECH_RULE
         # Never feed the checker's garbled transcription back into generation.
-        request["prompt"] = request.get("prompt", "") + "\nSpeech correction: " + SPEECH_RULE
+        speech_contract = (data.get("video_compliance_expected") or {}).get("speech") or {}
+        request["prompt"] = (request.get("prompt", "") + "\nSpeech correction: " + SPEECH_RULE
+            + " Follow this approved transcript, speaker and timing contract exactly: "
+            + json.dumps(speech_contract, ensure_ascii=False) + ". Generate the voice and visible articulation "
+              "together; do not overlay or replace audio after generating the video.")
     # Do not replay a legacy paid request containing an uploaded Vault portrait.
     if data.get("video_provider") == "hedra" and data.get("video_reference_source") != "module_o_still":
         from app.services.hedra_video_service import MediaValidationError

@@ -26,7 +26,9 @@ class AudioVideoTests(unittest.TestCase):
                          characters_in_shot=['Meera'], compiled_prompt='Meera reads outdoors, then looks up to speak.',
                          still_frame_url='https://example.com/scene.jpg', still_frame_status='ready',
                          dialogue_audio_url='https://example.com/approved.wav', dialogue_audio_duration_sec=4.2,
-                         dialogue_text='Hello there.', duration_sec=4.2)
+                         dialogue_text='Hello there.', duration_sec=4.2,
+                         shot_direction={'action_beats':['Meera looks up and speaks the approved line.'],
+                                         'dialogue_beat_index':1})
         self.result = dict(shots=[self.shot], generation_approved=True, quality='720p', aspect_ratio='16:9',
                            continuity={'characters': [{'name':'Meera','character_id':'vault', 'image_url':'https://example.com/portrait.jpg'}]})
         self.job = jobs.create_job(self.db, 'isolated audit', ai_model='Seedance 2.0')
@@ -119,7 +121,8 @@ class AudioVideoTests(unittest.TestCase):
             self.assertEqual(data['video_fal_status_url'],'https://queue.fal.run/status')
             self.assertEqual(data['video_retry_request']['audio_url'],self.shot['dialogue_audio_url'])
             self.assertTrue(data['video_onscreen_speech'])
-            self.assertEqual(data['video_approved_audio_url'],self.shot['dialogue_audio_url'])
+            self.assertNotIn('video_approved_audio_url',data)
+            self.assertIn('start_sec', data['video_compliance_expected']['speech'])
 
     def test_fal_queue_failure_and_completed_media(self):
         shot={'video_fal_status_url':'https://queue.fal.run/status','video_fal_response_url':'https://queue.fal.run/result','video_model':'test'}
@@ -174,9 +177,9 @@ class AudioVideoTests(unittest.TestCase):
         with patch.object(audio,'submit',return_value={'id':'one','status_url':'https://queue.fal.run/status','response_url':'https://queue.fal.run/result'}):
             video.start(self.db,self.job.id,1,audio_model='seedance_fal')
         download=MagicMock();download.__enter__.return_value.iter_bytes.return_value=[b'\0\0\0\x20ftypisom'+b'0'*40]
-        with patch.object(audio,'poll',return_value={'status':'completed','model':self.saved()['video_model'],'results':['https://example.com/video.mp4']}), patch.object(video.httpx,'stream',return_value=download), patch.object(audio,'validate_audio_result'), patch('app.services.approved_audio_lock.apply',return_value={'bytes':52,'sha256':'locked','policy':'approved-dialogue-plus-silence-v1'}) as lock, patch.object(gate,'accept',return_value=True), patch.object(video.storage_service,'upload_file',return_value={'url':'https://example.com/stored.mp4'}):
+        with patch.object(audio,'poll',return_value={'status':'completed','model':self.saved()['video_model'],'results':['https://example.com/video.mp4']}), patch.object(video.httpx,'stream',return_value=download), patch.object(audio,'validate_audio_result'), patch('app.services.approved_audio_lock.apply',side_effect=AssertionError('post-generation audio replacement is forbidden')) as lock, patch.object(gate,'accept',return_value=True), patch.object(video.storage_service,'upload_file',return_value={'url':'https://example.com/stored.mp4'}):
             video.poll(self.db,self.job.id,self.saved())
-        lock.assert_called_once()
+        lock.assert_not_called()
         self.assertEqual(self.saved()['video_status'],'done')
         self.assertEqual(self.saved()['video_url'],'https://example.com/stored.mp4')
 

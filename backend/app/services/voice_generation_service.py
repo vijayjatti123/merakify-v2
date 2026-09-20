@@ -335,6 +335,8 @@ async def _generate_dialogue_shot(
         if final_duration != target:
             job_service.append_event(db, job_id, "voice_generation", f"Shot {shot_number}: shot duration {target:.3f}s -> {final_duration:.3f}s; decoded speech remains {measured:.3f}s. Assembly/duration check follows.")
         # Speech length is metadata, not the complete action/performance duration.
+        from app.services.dialogue_window import calculate as calculate_dialogue_window
+        placement = calculate_dialogue_window(shot, measured, final_duration)
         object_key = f"jobs/{job_id}/shots/{shot_number}/dialogue-{uuid.uuid4()}{generated.extension}"
         uploaded = await asyncio.to_thread(
             storage_service.upload_bytes,
@@ -354,7 +356,7 @@ async def _generate_dialogue_shot(
             "dialogue_audio_duration_sec": measured,
             "dialogue_timing": {"character_count":len(text),"planned_duration_sec":target,"mood":mood,
                                 "mood_pace":mood_pace(mood),"final_pace":pace,"attempts":attempts,
-                                "relative_error":abs(measured-final_duration)/final_duration},
+                                "relative_error":abs(measured-final_duration)/final_duration, **placement},
         }
         job_service.update_shot_fields(db, job_id, shot_number, **fields)
         job_service.append_shot_status_event(

@@ -45,7 +45,7 @@ def problems(shot):
         found.append('opening_characters must list only the exact cast names visible at the opening, not later arrivals')
     direction = shot.get("shot_direction")
     if (not isinstance(direction, dict) or not set(SHOT_FIELDS).issubset(direction)
-            or set(direction) - set(SHOT_FIELDS) - set(EXECUTION_FIELDS)
+            or set(direction) - set(SHOT_FIELDS) - set(EXECUTION_FIELDS) - {'dialogue_beat_index'}
             or any(not isinstance(direction.get(k), str) or not direction[k].strip()
                    or len(direction[k]) > 350 for k in SHOT_FIELDS)):
         found.append("shot_direction needs concise purpose, performance, product_props and edit_intent")
@@ -57,6 +57,16 @@ def problems(shot):
         if (not isinstance(beats, list) or not 2 <= len(beats) <= 3
                 or any(not isinstance(b, str) or not b.strip() or len(b) > 350 for b in beats)):
             found.append('shot_direction.action_beats needs two or three ordered, achievable visual beats')
+        # The structured Director contract requires this on new output. Keep
+        # older saved plans usable; their unique explicit speech cue can be
+        # resolved deterministically by dialogue_window during regeneration.
+        if 'dialogue_beat_index' in direction:
+            dialogue_index = direction.get('dialogue_beat_index')
+            speaks = shot.get('speech_mode') in ('onscreen', 'voiceover') or bool(shot.get('has_dialogue'))
+            if (not isinstance(dialogue_index, int) or isinstance(dialogue_index, bool)
+                    or (speaks and isinstance(beats, list) and not 1 <= dialogue_index <= len(beats))
+                    or (not speaks and dialogue_index != 0)):
+                found.append('shot_direction.dialogue_beat_index must identify the speaking action beat, or be 0 for silence')
         spatial = ('entry_exit_paths', 'support_and_contact', 'spatial_invariants', 'forbidden_geometry')
         # Older reviewed plans remain editable/regenerable. Fresh Director-v2
         # output is schema-required to provide the complete spatial contract.

@@ -1,8 +1,8 @@
-"""Replace generated dialogue audio with the exact approved recording.
+"""Legacy reader for clips already completed under the old audio-lock policy.
 
-The video model still receives that recording to drive the visible performance.
-This local mux is not lip sync and makes no provider call: it removes the model's
-new soundtrack, keeps its video frames, and pads the approved line with silence.
+New video completion must not call this module: replacing a generated soundtrack
+cannot preserve the model's visible speech timing. It remains only so previously
+stored policy records and their tests stay readable during migration.
 """
 import hashlib
 import io
@@ -43,7 +43,7 @@ def _audio_url(shot):
 
 
 def apply(media, shot):
-    """Mutate a seekable MP4 file to carry only approved speech plus silence."""
+    """Legacy operation; do not use for new generation tasks."""
     url = _audio_url(shot)
     if urlsplit(url).scheme != "https":
         raise ValueError("Approved speech URL is unavailable; generated speech was not accepted")

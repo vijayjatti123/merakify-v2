@@ -52,6 +52,8 @@ def translate(result, shot):
         request["prompt"] += ("\nAudio 1 is off-screen narration. No visible person speaks; do not animate lips."
                               if is_voiceover(shot) else f"\nAudio 1 belongs exclusively to {speaker}. Only this character speaks; other characters remain silent.")
         request["prompt"] += approved_speech_text(result, shot, speaker)
+        from app.services.dialogue_window import prompt_instruction
+        request["prompt"] += "\n" + prompt_instruction(shot, duration, "Audio 1")
     else:
         request["prompt"] += "\nAmbient sound only; no speech or music."
     video_references.check_prompt(request["prompt"], refs["manifest"])

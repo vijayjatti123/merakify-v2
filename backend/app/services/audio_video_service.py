@@ -44,7 +44,7 @@ def approved_speech_text(result, shot, speaker):
     # JSON quoting preserves native script, punctuation and embedded quotes.
     return ("\nApproved speech (transcript, not on-screen text): "
             + json.dumps({"speaker": speaker, "language": language, "dialogue": text}, ensure_ascii=False)
-            + "\nSpeak these exact words in the specified language using the supplied audio's voice, pronunciation and timing. "
+            + "\nSpeak these exact words in the specified language using the supplied audio's voice, accent and pronunciation. "
               "Do not translate, paraphrase, read these labels aloud, or display the transcript as captions. " + SPEECH_RULE)
 
 
@@ -134,13 +134,16 @@ def translate(result, shot, choice=None):
         references = video_references.build(result, shot, limit=9, tag_style=provider, refresh=fresh_url)
         manifest = references["manifest"]
         warnings.extend(references["warnings"])
-        prompt = (f"{image_tag} is the approved scene and opening composition. {audio_tag} is {speaker}'s complete approved spoken performance.\n"
-                  + references["instructions"] + "\n" + direction + f"\nUse {audio_tag} for the dialogue, voice, pronunciation, pauses and speaking timing. "
-                  "Synchronize the visible speaker's mouth to it. Preserve the scene and perform the requested action. "
+        seconds = math.ceil(performance)
+        prompt = (f"{image_tag} is the approved scene and opening composition. {audio_tag} is a voice and pronunciation reference for {speaker}.\n"
+                  + references["instructions"] + "\n" + direction + f"\nUse {audio_tag} only for the speaker's voice, accent and pronunciation. "
+                  "Generate mouth motion and native soundtrack "
+                  "as one synchronized performance. Preserve the scene and perform the requested action. "
                   "Do not translate, paraphrase, add dialogue or substitute a different voice.")
         prompt += approved_speech_text(result, shot, speaker)
+        from app.services.dialogue_window import prompt_instruction
+        prompt += "\n" + prompt_instruction(shot, seconds, audio_tag)
         prompt += f"\nComplete the approved action over {math.ceil(performance)} seconds. Keep speech at its natural reference pace; use the remaining time for the approved action and reaction, without extra words or repeating the line."
-        seconds = math.ceil(performance)
         video_references.check_prompt(prompt, manifest)
         request = {"prompt": prompt, "image_urls": references["images"], "audio_urls": [audio],
                    "aspect_ratio": result.get("aspect_ratio", "16:9"), "generate_audio": True}

@@ -43,6 +43,9 @@ class H3Tests(unittest.TestCase):
             if mode != "none":
                 self.assertIn("Hello there.", r["prompt"])
                 self.assertIn("Audio 1", r["prompt"])
+                self.assertIn("PERFORMANCE TIMELINE", r["prompt"])
+                self.assertIn("pronunciation reference only", r["prompt"])
+                self.assertIn("waveform must not be laid over", r["prompt"])
             if mode == "voiceover":
                 self.assertIn("No visible person speaks", r["prompt"])
 

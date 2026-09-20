@@ -46,6 +46,13 @@ class SpeechParseTests(unittest.TestCase):
             with self.assertRaises(ValueError):speech.parse(raw({**finding(),**change}),6)
         with self.assertRaises(ValueError):speech.parse(raw({**finding(),"status":"pass"}),6)
 
+    def test_clear_timing_mismatch_is_valid_structured_evidence(self):
+        verdict = finding()
+        verdict.update(reason='Approved line starts before its directed action beat',
+            issues=[{'kind':'wrong_timing','start_sec':0,'end_sec':2.1,
+                     'evidence':'Expected the line within 4.7-6.9 seconds'}])
+        self.assertEqual(speech.parse(raw(verdict), 7)['issues'][0]['kind'], 'wrong_timing')
+
     def test_strict_prompt_preserves_native_script_exactly(self):
         line="यह जोड़ कभी नहीं टूटेगा।"
         text=audio.approved_speech_text({"language":"Hindi"},{"dialogue_text":line},"Yamaraj")
@@ -58,7 +65,7 @@ class SpeechGateTests(unittest.TestCase):
         base.ComplianceTests.setUp(self)
         jobs.update_video(self.db,self.job.id,1,video_provider="fal",video_model="minimax/h3-max/reference-to-video",
             video_retry_request={"prompt":"approved direction","reference_image_urls":["scene"],"reference_audio_urls":["approved.wav"]},
-            video_compliance_expected={"visual_style":"Natural","speech":{"dialogue_text":"Drink this, have confidence.","language":"English"}})
+            video_compliance_expected={"visual_style":"Natural","speech":{"dialogue_text":"Drink this, have confidence.","language":"English","start_sec":4.7,"end_sec":6.9}})
         self.extract=patch.object(speech,"extract_audio",return_value=(b"wav",6));self.extract.start();self.addCleanup(self.extract.stop)
         self.visual=patch.object(gate,"inspect",side_effect=lambda *a:base.verdict());self.visual.start();self.addCleanup(self.visual.stop)
     tearDown=base.ComplianceTests.tearDown
@@ -72,6 +79,8 @@ class SpeechGateTests(unittest.TestCase):
             self.assertEqual(request["reference_audio_urls"],["approved.wav"])
             self.assertEqual(request["reference_image_urls"],["scene"])
             self.assertIn("exactly ONCE",request["prompt"])
+            self.assertIn('"start_sec": 4.7',request["prompt"])
+            self.assertIn('Generate the voice and visible articulation together',request["prompt"])
             self.assertNotIn("garbled words",request["prompt"])
             self.assertFalse(self.check())
             self.shot["video_task_id"]="second"

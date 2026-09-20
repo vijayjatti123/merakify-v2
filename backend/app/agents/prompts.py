@@ -180,6 +180,9 @@ action_beats: TWO or THREE short ordered strings: establish/anticipate, primary 
 visible result, then reaction/settle where needed. A held product shot can establish then hold;
 never invent movement to fill this field. Each beat must fit the shot's allotted performance time.
 These are parts of ONE achievable shot, not hidden scene cuts or several unrelated actions.
+dialogue_beat_index: for onscreen speech or voiceover, the 1-based action_beats entry during which
+the complete approved line is delivered; use 0 only for a silent shot. Put an explicit speaking or
+narration cue in that beat. This timing decision controls both model direction and final audio placement.
 critical_outcome: the single observable fact the audience must see for the shot to work.
 For a failed attempt specify what moves and what remains fixed; for a reveal specify what becomes
 visible; for a product shot preserve supplied geometry/markings and reserve a readable ending hold.
@@ -278,6 +281,7 @@ Return {"ad_direction":{"takeaway":"supplied viewer outcome","visual_approach":"
 "shot_direction":{"purpose":"why this shot matters","performance":"observable behavior",
 "product_props":"supplied objects and product role","edit_intent":"motivated connection or final hold",
 "blocking":"positions, eyelines and contact", "action_beats":["opening/anticipation", "action and visible result", "reaction or settle"],
+"dialogue_beat_index":0,
 "critical_outcome":"the visible fact this shot must establish",
 "entry_exit_paths":["Name: exact origin zone -> safe route -> destination zone, or no boundary crossing"],
 "support_and_contact":"what supports every body/object and every required hand/seat/floor contact",
@@ -321,7 +325,7 @@ Use the usual Director shot fields including camera_direction, shot_direction, o
 opening_characters, characters_in_shot, speech_mode="none", has_dialogue=false, dialogue_text="".
 shot_direction must include purpose, performance, product_props, edit_intent, blocking,
 two or three action_beats, critical_outcome, entry_exit_paths, support_and_contact,
-spatial_invariants and forbidden_geometry. Make every physical field explicit.
+spatial_invariants, forbidden_geometry and dialogue_beat_index=0. Make every physical field explicit.
 Code assigns ordinals. Return no existing shot copies; patches target only allowed_fields,
 and patches=[] is valid when there are no authorized existing-field changes. Respect duration
 bounds and both neighboring states. Do not erase the neighboring action or assume it changed.

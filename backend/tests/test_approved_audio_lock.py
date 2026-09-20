@@ -53,5 +53,6 @@ class ApprovedAudioLockTests(unittest.TestCase):
             self.assertLess(sum(abs(value) for value in tail) / len(tail), 80)  # padded silence
 
 
+
 if __name__ == '__main__':
     unittest.main()

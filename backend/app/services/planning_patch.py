@@ -35,6 +35,13 @@ def apply_insertion_response(shots, response, permissions, anchors):
     validates feasibility, boundaries and coverage after this operation.
     """
     from app.agents.output_contracts import contracts, validate
+    # Silent insertion is enforced below, so its timing index is a fixed fact
+    # code can safely supply for older cached/model responses.
+    response = copy.deepcopy(response)
+    for operation in response.get('insertions', []):
+        direction = (operation.get('shot') or {}).get('shot_direction')
+        if isinstance(direction, dict):
+            direction.setdefault('dialogue_beat_index', 0)
     validate(response, contracts()['patch-insert-v1'])
     updated = apply_patch_response(shots, {'patches': response['patches']}, permissions) if permissions else copy.deepcopy(shots)
     if not permissions and response['patches']:

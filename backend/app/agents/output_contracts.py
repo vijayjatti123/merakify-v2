@@ -31,6 +31,7 @@ def contracts():
         ('speed', camera.SPEEDS), ('stabilization', camera.STABILIZATIONS))})
     direction = obj({**{k: TEXT for k in SHOT_FIELDS}, 'blocking': TEXT,
                      'action_beats': array(TEXT), 'critical_outcome': TEXT,
+                     'dialogue_beat_index': INTEGER,
                      'entry_exit_paths': array(TEXT), 'support_and_contact': TEXT,
                      'spatial_invariants': array(TEXT), 'forbidden_geometry': array(TEXT)})
     visual = {k: TEXT for k in ('camera_angle', 'lens', 'lighting', 'composition_note',
