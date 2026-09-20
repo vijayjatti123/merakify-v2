@@ -61,6 +61,35 @@ export function videoReviewWarnings(shot) {
   return [...new Set(result)];
 }
 
+export function videoReviewGuidance(shot) {
+  const error = String(shot?.video_error || '');
+  if (/speech|dialogue|spoken/i.test(error)) return {
+    title: 'Your approved dialogue is safe',
+    message: 'The automatic listener could not confirm the words. The saved voice recording is applied directly, so you do not need to rewrite or control the speech.',
+    action: 'The saved clip will be finished automatically without generating another video.',
+  };
+  if (/staging|position|placement|inside|outside/i.test(error)) return {
+    title: 'The action or placement did not match',
+    message: 'A person or object was not positioned as described in the approved shot.',
+    action: 'Describe the placement you want below, then regenerate this shot.',
+  };
+  if (/style|appearance|identity/i.test(error)) return {
+    title: 'The visual result did not match',
+    message: 'The clip did not preserve the approved character appearance or visual style closely enough.',
+    action: 'Add the correction you want below, then regenerate this shot.',
+  };
+  if (/scale|framing|composition/i.test(error)) return {
+    title: 'The framing did not match',
+    message: 'The subject size or composition differed from the approved opening image.',
+    action: 'Describe the framing you want below, then regenerate this shot.',
+  };
+  return {
+    title: 'This clip needs another try',
+    message: 'The generated clip did not match the approved shot closely enough.',
+    action: 'Describe what should change below, then regenerate this shot.',
+  };
+}
+
 export function progressMessage(event) {
   const key = event?.agent_key || "";
   if (key === "pipeline_timing" || key === "pipeline_usage") {

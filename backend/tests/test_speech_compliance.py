@@ -83,3 +83,13 @@ class SpeechGateTests(unittest.TestCase):
         with patch.object(speech,"inspect_audio",return_value={"verdict":finding()}),patch.object(audio,"submit",side_effect=TimeoutError()) as submit:
             self.assertTrue(self.check());self.assertTrue(self.check());submit.assert_called_once()
             self.assertTrue(self.data()["video_retry_submission_unknown"])
+
+    def test_locked_approved_audio_cannot_trigger_paid_speech_rerender(self):
+        jobs.update_video(self.db,self.job.id,1,video_audio_lock={
+            "policy":"approved-dialogue-plus-silence-v1","approved_audio_duration_sec":2.1})
+        with patch.object(speech,"inspect_audio") as checker,patch.object(audio,"submit") as submit:
+            self.assertTrue(self.check())
+            checker.assert_not_called();submit.assert_not_called()
+            saved=self.data()
+            self.assertEqual(saved["video_speech_check"]["status"],"pass")
+            self.assertEqual(saved["video_speech_check"]["method"],"approved_audio_lock")

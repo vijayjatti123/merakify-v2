@@ -9,7 +9,7 @@ import ActionProgress from "../components/ActionProgress";
 import ShotImageActions from "../components/ShotImageActions";
 import { AdDirectionPlan, ShotDirectionPlan } from "../components/AdDirectionPlan";
 import ShotPreviewImage from "../components/ShotPreviewImage";
-import { friendlyMessage, progressMessage, videoReviewWarnings } from "../utils/presentation";
+import { friendlyMessage, progressMessage, videoReviewGuidance, videoReviewWarnings } from "../utils/presentation";
 import { retryFailedJob, retryShotPreview, retryPreviewPreparation } from "../api/client";
 import { previewState, previewSummary } from "../utils/previewState";
 import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, assembleFinalVideo } from "../api/client";
@@ -29,11 +29,14 @@ const COLORS = {
 };
 
 const videoReady = (shot) => Boolean(shot.video_url && shot.video_status === "done" && !shot.video_source_changed);
+const lockedAudioReview = (shot) => shot.video_status === "review_required" && shot.video_audio_lock?.policy === "approved-dialogue-plus-silence-v1";
 
 function shotOutputStatus(shot, audioStatus) {
   if (["submitting", "processing"].includes(shot.video_status)) return ["generating", "Generating video"];
   if (shot.video_status === "submission_unknown") return ["pending", "Checking video request"];
   if (shot.video_source_changed) return ["pending", "Video needs regeneration"];
+  if (lockedAudioReview(shot)) return ["generating", "Finishing saved video"];
+  if (shot.video_status === "review_required") return ["error", "Video needs a correction"];
   if (["error", "failed"].includes(shot.video_status)) return ["error", "Video generation failed"];
   if (videoReady(shot)) return ["done", "Video ready"];
   if (shot.still_frame_status === "generating") return ["generating", shot.still_frame_candidate ? "Verifying preview" : "Creating preview"];
@@ -46,7 +49,7 @@ function shotOutputStatus(shot, audioStatus) {
 function FinalVideo({ data, shots, busy, onAssemble }) {
   const missing = shots.filter((shot) => !videoReady(shot)).map((shot) => shot.shot_number);
   const readyCount = shots.length - missing.length;
-  const needsRecovery = shots.some((shot) => !videoReady(shot) && (shot.video_source_changed || ["error", "failed"].includes(shot.video_status) || shot.still_frame_status === "failed"));
+  const needsRecovery = shots.some((shot) => !videoReady(shot) && (shot.video_source_changed || ["error", "failed", "review_required"].includes(shot.video_status) || shot.still_frame_status === "failed"));
   return (
     <Card component="section" className="generation-stage generation-placeholder generation-placeholder--final" aria-label="Final video" aria-live="polite">
       {busy ? <Loader2 size={30} className="animate-spin" /> : <Clapperboard size={32} />}
@@ -88,7 +91,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const [statusRefreshing, setStatusRefreshing] = useState(null);
   const [videoHints, setVideoHints] = useState({});
   const [previewSubmitting, setPreviewSubmitting] = useState(null);
-  const videoBusy = !final || final?.result?.audio_assembly_pending || final?.result?.preview_preparation_pending || final?.status === "running" || final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
+  const videoBusy = !final || final?.result?.audio_assembly_pending || final?.result?.preview_preparation_pending || final?.status === "running" || final?.result?.shots?.some((shot) => (shot.still_frame_status === "generating" || ["submitting", "processing"].includes(shot.video_status) || lockedAudioReview(shot) || ["queued", "running"].includes(shot.face_enhancement?.status))) || final?.result?.final_video?.status === "running";
 
   useEffect(() => {
     if (!videoBusy && !final?.result?.shots?.some(s => s.preview_replacement?.status === "working")) return;
@@ -444,15 +447,22 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     {shot.video_url && shot.video_source_changed && <Alert severity="info" sx={{ my: 2 }}>This video uses an earlier version of the shot. Click “Regenerate video” to use your current image before combining the final video.</Alert>}
                     <FaceEnhancement jobId={jobId} shot={shot} onRefresh={async () => setFinal(await getJob(jobId))} />
                     {shot.video_status && <Stack direction="row" spacing={1} alignItems="center" sx={{ my: 1 }}>
-                      <p className="text-sm" role="status" style={{ margin: 0 }}>Video: {shot.video_source_changed && shot.video_status === "done" ? "Previous version — needs regeneration" : {done: "Ready", error: "Needs attention", failed: "Generation failed", review_required: "Needs review", processing: "Generating", submitting: "Starting", submission_unknown: "Checking the request"}[shot.video_status] || "Checking progress"}{shot.has_dialogue && shot.video_status === "done" ? ((shot.video_provider === "hedra" || shot.video_audio_model) ? " · Spoken performance with audio" : " · Voice recording has not been added yet") : ""}</p>
-                      {!videoReady(shot) && !["error", "done"].includes(shot.video_status) && <Button size="small" variant="outlined" startIcon={<RefreshCw size={14} />} disabled={statusRefreshing === shot.shot_number} onClick={() => refreshVideoStatus(shot)} data-testid={`refresh-video-status-${shot.shot_number}`}>
+                      <p className="text-sm" role="status" style={{ margin: 0 }}>Video: {lockedAudioReview(shot) ? "Finishing saved video" : shot.video_source_changed && shot.video_status === "done" ? "Previous version — needs regeneration" : {done: "Ready", error: "Needs attention", failed: "Generation failed", review_required: "Needs review", processing: "Generating", submitting: "Starting", submission_unknown: "Checking the request"}[shot.video_status] || "Checking progress"}{shot.has_dialogue && shot.video_status === "done" ? ((shot.video_provider === "hedra" || shot.video_audio_model) ? " · Spoken performance with audio" : " · Voice recording has not been added yet") : ""}</p>
+                      {!videoReady(shot) && ["processing", "submitting", "submission_unknown"].includes(shot.video_status) && <Button size="small" variant="outlined" startIcon={<RefreshCw size={14} />} disabled={statusRefreshing === shot.shot_number} onClick={() => refreshVideoStatus(shot)} data-testid={`refresh-video-status-${shot.shot_number}`}>
                         {statusRefreshing === shot.shot_number ? "Checking…" : "Check status"}
                       </Button>}
                     </Stack>}
                     {(videoSubmitting === shot.shot_number || regeneratingShot === shot.shot_number || ["submitting", "processing"].includes(shot.video_status)) && <ActionProgress label={shot.video_phase === "preparing_voice" ? `Preparing the saved voice for shot ${shot.shot_number}…` : `Generating video for shot ${shot.shot_number}…`} />}
                     {savingShot === shot.shot_number && <ActionProgress label="Saving your changes and checking the shot…" />}
                     {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
-                    {shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
+                    {shot.video_status === "review_required" ? (() => {
+                      const guidance = videoReviewGuidance(shot);
+                      return <Alert severity="warning" data-testid={`video-review-required-${shot.shot_number}`}>
+                        <AlertTitle>{guidance.title}</AlertTitle>
+                        <p style={{ margin: 0 }}>{guidance.message}</p>
+                        <p style={{ margin: '6px 0 0' }}>{guidance.action}</p>
+                      </Alert>;
+                    })() : shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
                     {videoReviewWarnings(shot).map((warning) => <Alert severity={["mismatch", "unverified"].includes(shot.video_speech_check?.status) ? "warning" : "info"} key={warning} data-testid={`video-review-note-${shot.shot_number}`}>{warning}</Alert>)}
                     {approved && !errored && (shot.has_dialogue || result.video_model || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && shot.still_frame_url && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
                       <Button id={`generate-video-${shot.shot_number}`} type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={editBlocksApproval || shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
@@ -464,7 +474,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       <span><Clock3 size={12} /> {Number(shot.duration_sec.toFixed(1))}s · {shot.lighting}</span>
                     </div>
 
-                    {(shot.video_url || ["error", "failed"].includes(shot.video_status)) && (
+                    {(shot.video_url || ["error", "failed"].includes(shot.video_status) || (shot.video_status === "review_required" && !lockedAudioReview(shot))) && (
                       <div className="my-3 text-xs">
                         <label className="block">What would you like to change? (optional)
                           <textarea aria-label={`Regeneration change for shot ${shot.shot_number}`} maxLength={1000} value={videoHints[shot.shot_number] || ""} onChange={(event) => setVideoHints((current) => ({ ...current, [shot.shot_number]: event.target.value }))} className="block w-full rounded-md p-2 mt-1" style={{ background: COLORS.field, color: COLORS.text }} placeholder="For example: keep both people inside the cabin and make the lighting warmer" />
@@ -484,7 +494,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       ) : (
                         <>
                           <Button type="button" disabled={previews.busy || videoBusy || editBlocksApproval || shots.some(s => s.video_status === "submission_unknown" || s.preview_replacement?.status === "working")} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot plan ${shot.shot_number}`}><Pencil size={13} /> Edit shot plan</Button>
-                          {(shot.video_url || ["error", "failed"].includes(shot.video_status)) && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={editBlocksApproval || shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
+                          {(shot.video_url || ["error", "failed"].includes(shot.video_status) || (shot.video_status === "review_required" && !lockedAudioReview(shot))) && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={editBlocksApproval || shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Regenerate video
                           </Button>}
                         </>

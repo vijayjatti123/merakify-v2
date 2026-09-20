@@ -84,6 +84,36 @@ class VideoWorkerTests(unittest.TestCase):
             self.assertNotIn('private',data['video_error'])
             self.assertEqual(data['video_status'],'processing')
 
+    def test_locked_audio_speech_only_review_resumes_existing_task(self):
+        speech_only = {'verdict': {
+            'style': {'status': 'pass'}, 'scale': {'status': 'pass'},
+            'staging': {'status': 'pass'}, 'speech': {'status': 'mismatch'}}}
+        with self.sessions() as db:
+            for number in range(2, 8):
+                jobs.update_video(db, self.job, number, video_status='done')
+            jobs.update_video(db, self.job, 1, video_status='review_required',
+                video_error='speech mismatch',
+                video_audio_lock={'policy':'approved-dialogue-plus-silence-v1'},
+                video_compliance_checks={'1': speech_only})
+            pending = jobs.pending_videos(db)
+            self.assertEqual([(job, shot['shot_number']) for job, shot in pending], [(self.job, 1)])
+            claimed = jobs.video_worker_lease(db, self.job, 1, '1', 'recovery')
+            self.assertEqual(claimed['video_status'], 'processing')
+            self.assertIsNone(claimed['video_error'])
+
+    def test_visual_review_never_resumes_automatically(self):
+        visual = {'verdict': {
+            'style': {'status': 'mismatch'}, 'scale': {'status': 'pass'},
+            'staging': {'status': 'pass'}, 'speech': {'status': 'pass'}}}
+        with self.sessions() as db:
+            for number in range(2, 8):
+                jobs.update_video(db, self.job, number, video_status='done')
+            jobs.update_video(db, self.job, 1, video_status='review_required',
+                video_audio_lock={'policy':'approved-dialogue-plus-silence-v1'},
+                video_compliance_checks={'1': visual})
+            self.assertEqual(jobs.pending_videos(db), [])
+            self.assertIsNone(jobs.video_worker_lease(db, self.job, 1, '1', 'blocked'))
+
     def test_compliance_save_survives_concurrent_heartbeat(self):
         from sqlalchemy.orm import Query
         update = Query.update

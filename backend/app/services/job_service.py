@@ -654,9 +654,26 @@ def update_video(db, job_id, number, **fields):
 
 
 
+def _recoverable_locked_audio_review(data):
+    if data.get("video_status") != "review_required":
+        return False
+    if (data.get("video_audio_lock") or {}).get("policy") != "approved-dialogue-plus-silence-v1":
+        return False
+    check = (data.get("video_compliance_checks") or {}).get(data.get("video_task_id")) or {}
+    verdict = check.get("verdict") or {}
+    mismatches = {key for key, value in verdict.items() if value.get("status") == "mismatch"}
+    return mismatches == {"speech"}
+
+
 def pending_videos(db):
-    return [(row.job_id, {**json.loads(row.data_json), "shot_number": int(row.shot_number)})
-            for row in db.query(VideoTask).filter(VideoTask.status.in_(["processing", "submitting"])).all()]
+    pending = []
+    rows = db.query(VideoTask).filter(VideoTask.status.in_(["processing", "submitting", "review_required"])).all()
+    for row in rows:
+        data = json.loads(row.data_json)
+        if row.status == "review_required" and not _recoverable_locked_audio_review(data):
+            continue
+        pending.append((row.job_id, {**data, "shot_number": int(row.shot_number)}))
+    return pending
 
 
 def video_worker_lease(db, job_id, number, task, token, *, renew=False, release=False):
@@ -672,16 +689,19 @@ def video_worker_lease(db, job_id, number, task, token, *, renew=False, release=
     if renew or release:
         if lease.get("token") != token:
             return None
-    elif (row.status not in {"processing", "submitting"}
+    elif ((row.status not in {"processing", "submitting"} and not _recoverable_locked_audio_review(data))
           or data.get("video_task_id") != task
           or (lease.get("until") and datetime.fromisoformat(lease["until"]) > now)):
         return None
+    if row.status == "review_required":
+        data["video_status"] = "processing"
+        data["video_error"] = None
     if release:
         data.pop("video_worker_lease", None)
     else:
         data["video_worker_lease"] = {"token": token, "until": (now + timedelta(seconds=120)).isoformat()}
     changed = db.query(VideoTask).filter(VideoTask.id == row.id, VideoTask.data_json == old).update(
-        {VideoTask.data_json: json.dumps(data)}, synchronize_session=False)
+        {VideoTask.data_json: json.dumps(data), VideoTask.status: data["video_status"]}, synchronize_session=False)
     if changed != 1:
         db.rollback()
         return None

@@ -162,6 +162,21 @@ def warning(db, job_id, number, task, data, message):
     job_service.append_event(db, job_id, "render_compliance", f"Shot {number}: {message}")
 
 
+def _approved_audio_verdict(data):
+    lock = data.get("video_audio_lock") or {}
+    if lock.get("policy") != "approved-dialogue-plus-silence-v1":
+        return None
+    expected = (data.get("video_compliance_expected") or {}).get("speech") or {}
+    return {
+        "status": "pass",
+        "confidence": 1.0,
+        "transcript": expected.get("dialogue_text", ""),
+        "reason": "The finished clip carries the exact approved recording plus silence.",
+        "issues": [],
+        "method": "approved_audio_lock",
+    }
+
+
 def accept(db, job_id, shot, media, *, check_cache=None):
     """False defers acceptance while one durable full-generation retry is in flight."""
     number, task = shot["shot_number"], shot["video_task_id"]
@@ -176,7 +191,16 @@ def accept(db, job_id, shot, media, *, check_cache=None):
                 expected = data.get("video_compliance_expected")
                 if not expected:
                     raise ValueError("No submission-time compliance snapshot (legacy task)")
-                check = inspect_all(media, expected)
+                locked_speech = _approved_audio_verdict(data)
+                if locked_speech:
+                    # The model soundtrack is already gone. A probabilistic
+                    # transcript cannot justify another paid visual render.
+                    check = inspect(media, expected)
+                    check["speech_check"] = {"verdict": locked_speech}
+                    check["verdict"]["speech"] = {
+                        **locked_speech, "observed": locked_speech["transcript"]}
+                else:
+                    check = inspect_all(media, expected)
             except Exception as error:
                 # Preserve existing outage/user-review policy, never spend on a rerender here.
                 check = {"error": type(error).__name__, "unverified": True}
@@ -189,7 +213,12 @@ def accept(db, job_id, shot, media, *, check_cache=None):
     if check.get("unverified"):
         warning(db, job_id, number, task, data, f"not verified ({check['error']}); accepting video for user review.")
         return True
-    verdict = check["verdict"]
+    verdict = {key: dict(value) for key, value in check["verdict"].items()}
+    locked_speech = _approved_audio_verdict(data)
+    if locked_speech:
+        # Recover cached speech-only mismatches produced before this rule.
+        check = {**check, "speech_check": {"verdict": locked_speech}}
+        verdict["speech"] = {**locked_speech, "observed": locked_speech["transcript"]}
     verdict.setdefault('staging', {"status":"unverified", "observed":"", "reason":"Legacy compliance result has no staging verdict"})
     if "speech" in verdict:
         job_service.update_video(db, job_id, number, expected_task_id=task,

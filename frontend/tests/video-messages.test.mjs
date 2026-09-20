@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { friendlyMessage, videoReviewWarnings } from '../src/utils/presentation.js';
+import { friendlyMessage, videoReviewGuidance, videoReviewWarnings } from '../src/utils/presentation.js';
 
 const providerError = JSON.stringify({code:'invalid_parameters', message:'Invalid parameters. Please check that resolution, duration, prompt length, and other parameters are within the model\'s supported range.'});
 const warnings = [
@@ -35,4 +35,12 @@ test('speech mismatch and checker outage stay distinct from generic timing advic
     assert.match(notes[0], expected);
     assert.doesNotMatch(notes[0], /timing may differ/);
   }
+});
+test('stopped clips explain the cause and the user action in plain language', () => {
+  const speech = videoReviewGuidance({video_error:'speech: Approved dialogue does not match generated speech.'});
+  assert.match(speech.message, /saved voice recording/);
+  assert.match(speech.action, /automatically/);
+  const staging = videoReviewGuidance({video_error:'staging: character is outside the approved location'});
+  assert.match(staging.message, /positioned/);
+  assert.match(staging.action, /Describe the placement/);
 });
