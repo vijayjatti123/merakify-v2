@@ -718,6 +718,13 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
     # Historical retries keep accepted previews; only this review metadata is added.
     prepare_boundaries(result, brief=brief, emit=emit, call_agent=call_agent)
     messages = queue.Queue()
+    buffered_events = []
+    buffered_keys = {"preview_timing", "still_provider_response",
+                     "preview_verification_error", "still_frame"}
+    def flush_events():
+        if buffered_events:
+            job_service.append_events(db, job_id, buffered_events)
+            buffered_events.clear()
     started = time.monotonic()
     result["video_prompts_pending"] = True
     result.pop("video_prompt_error", None)
@@ -734,7 +741,12 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
             "elapsed_sec": round(time.monotonic() - started, 3)}))
         try:
             if kind == "previews":
-                snapshot["shots"] = generate_still_frames(snapshot, job_id=job_id, emit=notify, shot_numbers=edited or None,
+                # A completed early-preview branch may already have accepted
+                # most shots while speech was rendering. Retry only missing or
+                # explicitly edited images; never reconsider paid accepted work.
+                preview_targets = edited or {shot["shot_number"] for shot in snapshot["shots"]
+                                              if not shot.get("still_frame_url")}
+                snapshot["shots"] = generate_still_frames(snapshot, job_id=job_id, emit=notify, shot_numbers=preview_targets,
                     on_progress=lambda current: messages.put(("preview_progress", copy.deepcopy(current))))
                 messages.put(("preview_progress", snapshot))
             else:
@@ -760,8 +772,12 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
         message = messages.get()
         action = message[0]
         if action == "event":
-            emit(message[1], message[2])
+            if message[1] in buffered_keys:
+                buffered_events.append((message[1], message[2]))
+            else:
+                emit(message[1], message[2])
         elif action == "preview_progress":
+            flush_events()
             current = message[1]
             by_number = {s["shot_number"]: s for s in current["shots"]}
             for shot in result["shots"]:
@@ -787,6 +803,7 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
             result["video_prompts_pending"] = False
             job_service.set_result(db, job_id, result)
         elif action == "failed":
+            flush_events()
             kind, error = message[1:]
             if kind == "compiler":
                 result["video_prompts_pending"] = False
@@ -800,9 +817,11 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
                 emit("still_frame", f"WARNING: Preview preparation failed: {type(error).__name__}; accepted previews preserved.")
             job_service.set_result(db, job_id, result)
         elif action == "finished":
+            flush_events()
             remaining.remove(message[1])
             emit("media_preparation_timing", json.dumps({"branch": message[1], "phase": "finished",
                 "elapsed_sec": round(message[2], 3)}))
+    flush_events()
     if not result.get("video_prompt_error") and all(s.get("still_frame_url") for s in result["shots"]):
         result.pop("plan_edited_shots", None)
         job_service.set_result(db, job_id, result)

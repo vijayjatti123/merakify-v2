@@ -52,6 +52,8 @@ class StillRecoveryTests(unittest.TestCase):
         self.assertEqual(calls, 0)
         self.assertEqual(result['shots_needing_attention'], [1])
         self.assertEqual(result['shots'][0]['still_frame_status'], 'failed')
+        self.assertEqual(result['shots'][0]['still_frame_error_kind'], 'mismatch')
+        self.assertEqual(result['shots'][0]['still_frame_retry_feedback'], 'Deliberate framing mismatch')
         self.assertIsNone(result['shots'][0]['still_frame_url'])
         self.assertFalse(result['shots'][0].get('video_url'))
         self.assertEqual(result['shots'][1], self.result['shots'][1])
@@ -81,6 +83,20 @@ class StillRecoveryTests(unittest.TestCase):
         jobs.claim_still_retry(self.db,self.job.id,1,'none')
         with self.assertRaisesRegex(ValueError,'already regenerating'):
             jobs.claim_still_retry(self.db,self.job.id,1,'none')
+
+    def test_visual_mismatch_allows_one_improved_manual_recovery_not_an_endless_loop(self):
+        self.result['shots'][0]['still_frame_error_kind'] = 'mismatch'
+        jobs.set_result(self.db, self.job.id, self.result)
+        jobs.claim_still_retry(self.db, self.job.id, 1, 'none')
+        saved = jobs.job_result(jobs.get_job(self.db, self.job.id))
+        self.assertEqual(saved['shots'][0]['still_retry_count'], 1)
+        stored = json.loads(jobs.get_job(self.db, self.job.id).result_json)
+        shot = stored['shots'][0]
+        shot.update(still_frame_status='failed', still_frame_error_kind='mismatch')
+        shot.pop('still_retry_token', None); shot.pop('still_retry_started_at', None)
+        self.job.result_json = json.dumps(stored); self.db.commit()
+        with self.assertRaisesRegex(ValueError, 'already been tried'):
+            jobs.claim_still_retry(self.db, self.job.id, 1, 'none')
 
     def test_preview_retry_never_starts_video(self):
         task = BackgroundTasks()

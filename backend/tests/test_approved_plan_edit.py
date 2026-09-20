@@ -69,7 +69,7 @@ class ApprovedPlanEditTests(unittest.TestCase):
         result=response.json()["result"]
         self.assertEqual(result["plan_edited_shots"],[2])
         contract=result["shots"][1]["still_frame_contract"]
-        self.assertEqual(contract["contract_version"],"shot-opening-v1")
+        self.assertEqual(contract["contract_version"],"shot-opening-v2")
         self.assertIn("first physical instant",contract["checks"]["opening_state"])
 
     def test_noop_preserves_approval_and_media(self):

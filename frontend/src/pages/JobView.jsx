@@ -37,7 +37,7 @@ function shotOutputStatus(shot, audioStatus) {
   if (["error", "failed"].includes(shot.video_status)) return ["error", "Video generation failed"];
   if (videoReady(shot)) return ["done", "Video ready"];
   if (shot.still_frame_status === "generating") return ["generating", shot.still_frame_candidate ? "Verifying preview" : "Creating preview"];
-  if (shot.still_frame_status === "failed" && !shot.still_frame_url) return ["error", shot.still_frame_error_kind === "verification" ? "Verification unavailable" : "Preview failed"];
+  if (shot.still_frame_status === "failed" && !shot.still_frame_url) return ["error", shot.still_frame_error_kind === "verification" ? "Verification unavailable" : shot.still_frame_error_kind === "mismatch" ? "Preview needs adjustment" : "Preview failed"];
   if (shot.has_dialogue && audioStatus === "error") return ["error", "Audio preparation failed"];
   if (shot.still_frame_url) return ["done", "Preview ready"];
   return ["pending", "Waiting"];
@@ -435,9 +435,9 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     </div>
                     {approved && (shot.still_frame_url || shot.preview_input || shot.compiled_prompt) && <ShotImageActions jobId={jobId} shot={shot} aspectRatio={result.aspect_ratio || final.aspect_ratio} disabled={previews.busy || editBlocksApproval || result.final_video?.status === "running" || ["submitting", "processing", "submission_unknown"].includes(shot.video_status)} onRefresh={async () => setFinal(await getJob(jobId))} />}
                     {shot.still_frame_status === "generating" ? <ActionProgress label={shot.still_frame_candidate ? `Verifying the saved preview for shot ${shot.shot_number}…` : `Creating and checking the preview for shot ${shot.shot_number}…`} /> : previewState(shot).key === "failed" && <Alert severity="warning" sx={{ my: 2 }}>
-                      <AlertTitle>{shot.still_frame_error_kind === "verification" ? "Your image is saved — verification is unavailable" : "This preview couldn't be created"}</AlertTitle>
-                      {shot.still_frame_error_kind === "verification" ? "Retry verification to check the saved image without generating another one." : shot.video_url ? "Your existing video is still available below." : "Try this preview again. Video generation is a separate step."}
-                      {approved && shot.compiled_prompt && !shot.video_url && <Button data-testid={`retry-preview-${shot.shot_number}`} disabled={previews.busy || previewSubmitting !== null} onClick={() => handlePreviewRetry(shot)}>{shot.still_frame_error_kind === "verification" ? "Retry verification" : "Retry preview"}</Button>}
+                      <AlertTitle>{shot.still_frame_error_kind === "verification" ? "Your image is saved — verification is unavailable" : shot.still_frame_error_kind === "mismatch" ? "We couldn't make a reliable preview automatically" : "This preview couldn't be created"}</AlertTitle>
+                      {shot.still_frame_error_kind === "verification" ? "Retry verification to check the saved image without generating another one." : shot.still_frame_error_kind === "mismatch" ? (shot.still_retry_count ? "Automatic correction has already been tried. Upload an image or edit this shot to continue." : "We tried alternate instructions automatically. Try one corrected preview; you don't need to change anything.") : shot.video_url ? "Your existing video is still available below." : "Try this preview again. Video generation is a separate step."}
+                      {approved && shot.compiled_prompt && !shot.video_url && !(shot.still_frame_error_kind === "mismatch" && shot.still_retry_count) && <Button data-testid={`retry-preview-${shot.shot_number}`} disabled={previews.busy || previewSubmitting !== null} onClick={() => handlePreviewRetry(shot)}>{shot.still_frame_error_kind === "verification" ? "Retry verification" : shot.still_frame_error_kind === "mismatch" ? "Try corrected preview" : "Retry preview"}</Button>}
                     </Alert>}
 
                     {shot.video_url && <ShotVideo shot={shot} />}

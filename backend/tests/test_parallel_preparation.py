@@ -100,3 +100,21 @@ class ParallelPreparationTests(unittest.TestCase):
         self.assertEqual(result["shots"][0]["dialogue_audio_url"], "keep-audio")
         self.assertEqual(result["shots"][1]["compiled_prompt"], "new")
         self.assertNotIn("plan_edited_shots", result)
+
+    def test_second_phase_never_regenerates_an_accepted_early_preview(self):
+        result = {"shots": [
+            {"shot_number": 1, "description": "accepted", "still_frame_url": "keep-image",
+             "still_frame_key": "keep-key", "compiled_prompt": "old"},
+            {"shot_number": 2, "description": "missing", "compiled_prompt": "old"}]}
+        def previews(snapshot, *, shot_numbers, **kwargs):
+            self.assertEqual(shot_numbers, {2})
+            snapshot["shots"][1].update(still_frame_url="new-image", still_frame_status="ready")
+            return snapshot["shots"]
+        def compiler(snapshot, **kwargs):
+            return [{**shot, "compiled_prompt": "new"} for shot in snapshot["shots"]]
+        with patch.object(director.job_service, "set_result"), \
+             patch.object(director, "generate_still_frames", side_effect=previews), \
+             patch.object(director, "compile_shot_prompts", side_effect=compiler):
+            director._prepare_media_parallel(Mock(), "audit", result, brief="test", emit=Mock())
+        self.assertEqual(result["shots"][0]["still_frame_url"], "keep-image")
+        self.assertEqual(result["shots"][1]["still_frame_url"], "new-image")

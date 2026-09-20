@@ -2,7 +2,7 @@
 import json
 from urllib.parse import urlsplit, urlunsplit
 
-STILL_CONTRACT_VERSION = "shot-opening-v1"
+STILL_CONTRACT_VERSION = "shot-opening-v2"
 IMAGE_POLISH_VERSION = "vague-to-polished-image-v1"
 STILL_CHECKS = ("identity_wardrobe", "placement_support", "props_contact",
                 "opening_state", "framing", "lighting_style")
@@ -48,13 +48,10 @@ def preview_input(result, shot):
         direction = visual_direction(result)
         facts['ad_visual_direction'] = {'visual_approach': direction['visual_approach']} if direction else None
         facts['characters_in_shot'] = opening_cast(shot)
-        directed = shot.get('shot_direction') or {}
-        facts['opening_blocking'] = directed.get('blocking')
-        facts['support_and_contact'] = directed.get('support_and_contact')
-        facts['spatial_invariants'] = directed.get('spatial_invariants') or []
-        facts['forbidden_geometry'] = directed.get('forbidden_geometry') or []
-        # Performance, story purpose and ending belong to video. Their named
-        # later arrivals must not leak into this opening-frame request.
+        # state_at_shot_start is deliberately the sole physical staging source
+        # for the still. shot_direction describes the complete performance;
+        # importing its later support/contact or outcome into the opening image
+        # created impossible contracts. Performance and ending stay in video.
     # Deliberately excludes duration, dialogue, signed audio URLs and video prose.
     # Source image URLs remain in the fingerprint but are omitted from prose.
     return facts
@@ -70,10 +67,7 @@ def preview_visual(facts):
         visible.pop("composition_note", None)
     visible = {**visible, "characters": [{k: v for k, v in c.items() if k != "image_url"}
                                       for c in facts["characters"]]}
-    spatial = ["Follow each person's inside/outside position, support surface and contact relationships in the opening state. Show enough surrounding geometry to establish those relationships. A camera looking out through a doorway must not relocate an inside person into the exterior. An explicitly airborne or outside person must remain outside. Do not infer containment merely from a mentioned vehicle or room."]
-    spatial.extend(str(value) for value in (facts.get('opening_blocking'), facts.get('support_and_contact')) if value)
-    spatial.extend(str(value) for value in facts.get('spatial_invariants', []))
-    spatial.extend("FORBIDDEN: " + str(value) for value in facts.get('forbidden_geometry', []))
+    spatial = ["Use state_at_shot_start as the complete physical truth for this opening image. Follow every stated inside/outside position, support surface, relative position and hand/object contact. Show enough surrounding geometry to prove those relationships. A camera looking out through a doorway must not relocate an inside person into the exterior. An explicitly airborne or outside person must remain outside."]
     if spatial:
         visible["spatial_requirements"] = spatial
     if facts.get('direction_version') == 1:
@@ -124,11 +118,9 @@ def visual_contract(facts, visual=None):
     checks = {
         "identity_wardrobe": ("Opening-frame visible characters: " + identities if identities else
                               "No named character identity or wardrobe requirement in this opening frame."),
-        "placement_support": (opening + " Opening blocking: " + _requirement(facts.get('opening_blocking'), 'use the stated opening positions')
-                              + " Physical support/contact: " + _requirement(facts.get('support_and_contact'), 'keep every body and object visibly supported')
-                              + " Invariants: " + '; '.join(facts.get('spatial_invariants') or ['preserve stated containment'])
-                              + " Forbidden: " + '; '.join(facts.get('forbidden_geometry') or ['no contradictory placement'])
-                              + " Preserve every explicit inside/outside relationship, support surface, relative position and physical contact; show enough environment to prove containment."),
+        "placement_support": (opening + " Treat only this opening state as physical truth. Preserve every "
+                              "explicit inside/outside relationship, support surface, relative position and "
+                              "physical contact stated there; show enough environment to prove containment."),
         "props_contact": (opening + " Preserve every explicitly stated prop owner, hand/object contact and product "
                           "presence. Do not add a prop, product or contact that belongs only to later action."),
         "opening_state": ("Render exactly this first physical instant, before any later action or reveal: " + opening),

@@ -55,6 +55,61 @@ class StillFramesTests(unittest.TestCase):
         self.assertNotIn('Parachute deploys', text)
         self.assertIn('High angle', text)
 
+    def test_opening_contract_excludes_later_performance_geometry(self):
+        from app.services.preview_plan import preview_input, visual_contract
+        from test_ad_direction import directed
+        result = directed()
+        shot = result['shots'][0]
+        shot.update(state_at_shot_start='Kabir is in freefall reaching for the deployment handle.',
+                    state_at_shot_end='Kabir hangs beneath the inflated canopy.',
+                    opening_characters=[])
+        shot['shot_direction'].update(
+            blocking='The canopy deploys upward above Kabir.',
+            action_beats=['Kabir reaches for the handle.', 'The canopy deploys and settles.'],
+            critical_outcome='The canopy visibly opens above Kabir.',
+            entry_exit_paths=['Kabir remains in open air.'],
+            support_and_contact='Kabir is suspended by risers connected to the inflated canopy.',
+            spatial_invariants=['The inflated canopy remains above Kabir.'],
+            forbidden_geometry=['No collapsed canopy.'])
+        shot.pop('direction_source', None)
+        contract = visual_contract(preview_input(result, shot))
+        rendered = json.dumps(contract).casefold()
+        self.assertIn('reaching for the deployment handle', rendered)
+        for later in ('inflated canopy', 'suspended by risers', 'collapsed canopy'):
+            self.assertNotIn(later, rendered)
+
+    def test_retired_opening_projection_fields_do_not_hide_historical_images(self):
+        from app.services.still_frame_service import invalidate_changed_stills, shot_fingerprint
+        from app.services.preview_plan import preview_input
+        from test_ad_direction import directed
+        result = directed()
+        shot = result['shots'][0]
+        shot['preview_input'] = preview_input(result, shot)
+        shot['preview_input']['support_and_contact'] = 'Retired whole-performance field'
+        shot.update(still_frame_url='https://example/image.jpg', still_frame_key='image.jpg')
+        shot['still_frame_source_hash'] = shot_fingerprint(shot)
+        invalidate_changed_stills(result)
+        self.assertEqual(shot['still_frame_url'], 'https://example/image.jpg')
+
+    def test_visual_rejection_feedback_improves_the_next_manual_recovery(self):
+        rejected = self.checked_verdict()
+        rejected.update(approved=False, reason='Opening state advanced to the ending')
+        rejected['visual_checks']['opening_state'].update(status='fail', evidence='Ending shown')
+        with patch.object(service, 'generate_still', return_value=self.image), \
+             patch.object(service, 'check_still', return_value=rejected), \
+             patch.object(service.storage_service, 'upload_bytes', return_value={'key':'unused','url':'https://unused'}):
+            self.run_stills()
+        shot = self.result['shots'][0]
+        self.assertEqual(shot['still_frame_status'], 'failed')
+        self.assertIn('Opening state advanced', shot['still_frame_retry_feedback'])
+        with patch.object(service, 'generate_still', return_value=self.image) as generated, \
+             patch.object(service, 'check_still', return_value=self.checked_verdict()), \
+             patch.object(service.storage_service, 'upload_bytes', return_value={'key':'ready','url':'https://ready'}):
+            self.run_stills()
+        self.assertIn('Opening state advanced', generated.call_args.args[3])
+        self.assertEqual(shot['still_frame_status'], 'ready')
+        self.assertNotIn('still_frame_retry_feedback', shot)
+
     def test_changed_candidate_source_generates_and_saves_current_evidence(self):
         shot = self.result['shots'][0]
         shot['still_frame_candidate'] = {'key': 'old', 'source': 'stale', 'attempt': 0}
@@ -134,7 +189,7 @@ class StillFramesTests(unittest.TestCase):
             'characters': [], 'camera_angle': 'Eye-level medium',
         })
         self.assertIn('spatial requirements are hard acceptance criteria', text.casefold())
-        self.assertIn('support surface and contact relationships', text)
+        self.assertIn('support surface, relative position and hand/object contact', text)
         self.assertNotIn('every listed person must be visibly inside', text)
 
     def run_stills(self):

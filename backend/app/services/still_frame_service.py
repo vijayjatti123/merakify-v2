@@ -31,6 +31,10 @@ class VerificationUnavailable(StillFrameError):
     pass
 
 
+class VisualMismatch(StillFrameError):
+    """Pixels were generated, but both bounded candidates contradicted the plan."""
+
+
 class StillProviderError(StillFrameError):
     def __init__(self, status, model):
         self.status = status
@@ -114,11 +118,12 @@ def invalidate_changed_stills(result):
             # preview_input is the immutable contract that produced the accepted
             # pixels. A newly deployed projection may add fields; that schema
             # evolution must not make every historical image look stale. Compare
-            # only facts that existed when this image was generated. Actual plan
-            # edits still change those stored facts and invalidate the image.
+            # shared facts: newly added facts and deliberately retired inputs do
+            # not invalidate old pixels. Actual edits to still-relevant facts do.
             current_input = preview_input(result, shot) or {}
             source_changed = source_changed or any(
-                current_input.get(key) != value for key, value in stored_input.items()
+                current_input[key] != value for key, value in stored_input.items()
+                if key in current_input
             )
         if source_changed:
             shot["still_frame_url"] = None
@@ -586,7 +591,9 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
             if continuation:
                 emit("still_frame", f"Shot {number}: considering previous-shot action anchor from shot {continuation[0]} "
                      f"subject to reference budget (image SHA256 {hashlib.sha256(continuation[1].data).hexdigest()}).")
-            feedback = ""
+            # A manual recovery must improve the prior rejected request rather
+            # than buying the same two candidates forever.
+            feedback = str(shot.get("still_frame_retry_feedback") or "").strip()
             aspect_ratio = result.get("aspect_ratio") or "16:9"
             verification_source = hashlib.sha256(json.dumps([request_contract, aspect_ratio,
                 [hashlib.sha256(r[1].data).hexdigest() for r in references],
@@ -657,17 +664,19 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
                 emit("preview_timing", json.dumps({"shot_number": number, "phase": "visual_check_completed", "attempt": attempt + 1,
                     "elapsed_sec": round(time.monotonic() - started, 3), "approved": verdict["approved"]}))
                 if verdict["approved"]:
+                    shot.pop("still_frame_retry_feedback", None)
                     if continuation:
                         emit("still_frame", f"Warning — shot {number}: physical-state QA approval is a model judgment, "
                              "not proof of an unseen event. A missing stream does not establish that a pour concluded; "
                              "review the visible state against the explicit planned boundary.")
                     break
                 feedback = verdict["reason"]
+                shot["still_frame_retry_feedback"] = feedback
                 emit("still_frame", f"Shot {number}: visual check rejected candidate {attempt + 1}; "
                      + ("retrying once." if attempt == 0 else "no still accepted; regeneration needed.")
                      + f" Reason: {feedback}")
             else:
-                raise StillFrameError("Still-frame visual check rejected both candidates")
+                raise VisualMismatch("Still-frame visual check rejected both candidates")
             ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[image.content_type]
             key = f"jobs/{job_id}/stills/{number}-{uuid.uuid4().hex}.{ext}"
             started = time.monotonic()
@@ -698,7 +707,9 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
             detail = str(error) if isinstance(error, StillFrameError) else type(error).__name__
             warning = f"Shot {number}: This shot couldn't be generated — try regenerating it. No still was accepted. Reason: {detail}."
             shot["still_frame_status"] = "failed"
-            shot["still_frame_error_kind"] = "verification" if isinstance(error, VerificationUnavailable) else "generation"
+            shot["still_frame_error_kind"] = ("verification" if isinstance(error, VerificationUnavailable)
+                                                else "mismatch" if isinstance(error, VisualMismatch)
+                                                else "generation")
             if isinstance(error, VerificationUnavailable):
                 warning = "Your image is saved, but we couldn't verify it. Retry verification to check the same image."
             shot["still_frame_warning"] = warning

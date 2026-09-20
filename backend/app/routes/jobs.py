@@ -164,11 +164,12 @@ def _recover_missing_still(job_id, number, token, expected_attempt, hint, genera
     from app.services import still_frame_service, video_generation_service
     with SessionLocal() as db:
         result = None
+        events = []
         try:
             result, shot = job_service.video_source(db, job_id, number)
             if shot.get("still_retry_token") != token:
                 return
-            emit = lambda agent, message: job_service.append_event(db, job_id, agent, message)
+            emit = lambda agent, message: events.append((agent, message))
             still_frame_service.generate_still_frames(result, job_id=job_id, emit=emit, shot_numbers={number})
             if not job_service.finish_still_retry(db, job_id, number, token, result):
                 return
@@ -181,8 +182,10 @@ def _recover_missing_still(job_id, number, token, expected_attempt, hint, genera
             if result is not None and not shot.get("still_frame_url"):
                 shot.update(still_frame_status="failed", still_frame_warning="This shot couldn't be generated — try regenerating it.")
                 job_service.finish_still_retry(db, job_id, number, token, result)
-            job_service.append_event(db, job_id, "still_frame", "WARNING: Shot " + str(number)
-                + ": regeneration did not complete. Check the shot's current output before retrying. " + type(error).__name__)
+            events.append(("still_frame", "WARNING: Shot " + str(number)
+                + ": regeneration did not complete. Check the shot's current output before retrying. " + type(error).__name__))
+        finally:
+            job_service.append_events(db, job_id, events)
 
 
 @router.post("/{job_id}/shots/{shot_number}/preview/retry", status_code=202)

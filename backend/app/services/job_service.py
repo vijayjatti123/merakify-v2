@@ -276,6 +276,17 @@ def append_event(db: Session, job_id: str, agent_key: str, note: str) -> AgentEv
     return event
 
 
+def append_events(db: Session, job_id: str, events) -> list[AgentEvent]:
+    """Persist a diagnostic burst in one transaction while retaining each row."""
+    rows = [AgentEvent(job_id=job_id, agent_key=agent_key, note=note)
+            for agent_key, note in events]
+    if not rows:
+        return []
+    db.add_all(rows)
+    db.commit()
+    return rows
+
+
 def append_shot_status_event(
     db: Session,
     job_id: str,
@@ -509,9 +520,13 @@ def claim_still_retry(db, job_id, number, expected_attempt):
     target = next(s for s in stored["shots"] if s["shot_number"] == number)
     if target.get("still_frame_status") == "generating" and not still_retry_expired(target):
         raise ValueError("This shot is already regenerating")
+    retry_count = int(target.get("still_retry_count") or 0)
+    if target.get("still_frame_error_kind") == "mismatch" and retry_count >= 1:
+        raise ValueError("Automatic preview correction has already been tried. Upload an image or edit this shot before continuing.")
     token = uuid.uuid4().hex
     target.update(still_frame_status="generating", still_retry_token=token,
-                  still_retry_started_at=datetime.now(timezone.utc).isoformat())
+                  still_retry_started_at=datetime.now(timezone.utc).isoformat(),
+                  still_retry_count=retry_count + 1)
     changed = db.query(Job).filter(Job.id == job_id, Job.result_json == old).update(
         {Job.result_json: json.dumps(stored)}, synchronize_session=False)
     if changed != 1:
@@ -548,6 +563,7 @@ def finish_still_retry(db, job_id, number, token, regenerated):
         (siblings[str(n)].get('still_frame_key') or siblings[str(n)].get('still_frame_url')) == key
         for n, key in dependencies.items())
     compatible = dependencies_match and shot_fingerprint(current) == shot_fingerprint(source)
+    retry_count = target.get('still_retry_count')
     if not compatible:
         target.update(still_frame_status='failed', still_frame_error_kind='generation',
                       still_frame_warning='The plan or a reference changed during preview preparation. Retry this preview.')
@@ -558,6 +574,8 @@ def finish_still_retry(db, job_id, number, token, regenerated):
             if key.startswith("still_frame_") or key.startswith("still_retry_"):
                 target.pop(key)
         target.update({k: v for k, v in source.items() if k.startswith("still_frame_")})
+        if target.get('still_frame_status') == 'failed' and retry_count:
+            target['still_retry_count'] = retry_count
         if source.get('preview_input'):
             target['preview_input'] = source['preview_input']
         target['preview_dependencies'] = dependencies

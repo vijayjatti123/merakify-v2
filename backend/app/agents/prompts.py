@@ -194,6 +194,10 @@ Plan sound across cuts as edit intent only; do not promise music or effects have
 description remains the authoritative full action; never hide a second story in shot_direction.
 Opening/end states describe separate visible instants, including static shots. The opening must
 precede the action's payoff; product presence must match that instant, not every shot of the ad.
+The opening preview uses state_at_shot_start as its sole physical staging authority because
+shot_direction describes the complete moving performance. Put every opening support, contact,
+inside/outside and relative-position fact in state_at_shot_start. Never defer an opening fact to
+blocking/support_and_contact/spatial_invariants, and never put an ending fact in the opening state.
 opening_characters lists ONLY cast visible in that opening instant, as an exact-name subset of
 characters_in_shot (which covers the entire video). Do not put a spirit/visitor into the opening
 preview if they only appear later during the action. Use [] for an opening without visible characters.

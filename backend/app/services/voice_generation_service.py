@@ -489,8 +489,10 @@ async def generate_job_dialogue_audio(
             if current:
                 _merge_preview_snapshot(current, preview_work["result"])
                 job_service.set_result(db, job_id, current)
-            for key, note in preview_work["events"]:
-                job_service.append_event(db, job_id, key, note)
+            # The off-thread branch already accumulated these diagnostics.
+            # Persist them in one transaction instead of adding network latency
+            # to every row after the images have finished.
+            job_service.append_events(db, job_id, preview_work["events"])
             job_service.append_event(
                 db,
                 job_id,
