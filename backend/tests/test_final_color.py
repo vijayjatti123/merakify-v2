@@ -7,6 +7,33 @@ from app.services import final_assembly_service as a
 
 
 class ColorTests(unittest.TestCase):
+    def test_hard_cut_lookup_preserves_coefficients_and_exclusive_end(self):
+        timeline = {'shots': [{'start': 0., 'duration': 4.}, {'start': 4., 'duration': 5.}],
+                    'boundaries': [{'overlap_sec': 0}]}
+        adjustments = [dict(y=9.2446444116, u=-6, v=6, saturation=.85),
+                       dict(y=0, u=0, v=0, saturation=1)]
+        value = a.correction_filter(timeline, adjustments)
+        self.assertTrue(value.startswith('lutyuv='))
+        self.assertIn('9.244644412', value)
+        self.assertIn('(1+(-0.150000000))', value)
+        self.assertIn("enable='gte(t,0.000000000)*lt(t,4.000000000)'", value)
+        self.assertEqual(value.count('lutyuv='), 1)
+
+    def test_crossfade_keeps_continuous_original_correction(self):
+        timeline = {'shots': [{'start': 0., 'duration': 4.}, {'start': 3.5, 'duration': 5.}],
+                    'boundaries': [{'overlap_sec': .5}]}
+        adjustments = [dict(y=12, u=-6, v=6, saturation=.85), dict(y=-16, u=0, v=0, saturation=1)]
+        value = a.correction_filter(timeline, adjustments)
+        self.assertTrue(value.startswith('geq='))
+        self.assertIn('clip((4.000000000-T)/0.500000000,0,1)', value)
+        self.assertIn('clip((T-3.500000000)/0.500000000,0,1)', value)
+
+    def test_overlapping_intervals_without_transition_do_not_stack_lookups(self):
+        timeline = {'shots': [{'start': 0., 'duration': 4.}, {'start': 3., 'duration': 5.}],
+                    'boundaries': [{'overlap_sec': 0}]}
+        adjustments = [dict(y=12, u=0, v=0, saturation=1)] * 2
+        self.assertTrue(a.correction_filter(timeline, adjustments).startswith('geq='))
+
     def test_none_is_literal_copy_and_grade_changes_fingerprint(self):
         with tempfile.TemporaryDirectory() as folder:
             source, target = Path(folder)/'a', Path(folder)/'b'

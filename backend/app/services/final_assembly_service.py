@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 from array import array
 from urllib.parse import urlsplit, urlunsplit
 
@@ -324,6 +325,25 @@ def correction_plan(stats):
 
 def correction_filter(timeline, adjustments):
     """Blend correction coefficients during existing dissolves; never edit the transition."""
+    # Hard-cut intervals have constant coefficients. Build 256-entry YUV tables
+    # once rather than evaluating every shot's time expression for every pixel.
+    # Dissolves retain the original continuous coefficient interpolation below.
+    shots = timeline['shots']
+    disjoint = all(left['start'] + left['duration'] <= right['start']
+                   for left, right in zip(shots, shots[1:]))
+    if disjoint and not any(b['overlap_sec'] for b in timeline['boundaries']):
+        filters = []
+        for shot, adj in zip(shots, adjustments):
+            if all(adj[k] == (1 if k == 'saturation' else 0) for k in ('y', 'u', 'v', 'saturation')):
+                continue
+            # Preserve the original expression's rounding and arithmetic order.
+            sat = f"(1+({adj['saturation'] - 1:.9f}))"
+            filters.append(
+                f"lutyuv=y='clip(val+({adj['y']:.9f}),0,255)':"
+                f"u='clip(128+(val-128)*{sat}+({adj['u']:.9f}),0,255)':"
+                f"v='clip(128+(val-128)*{sat}+({adj['v']:.9f}),0,255)':"
+                f"enable='gte(t,{shot['start']:.9f})*lt(t,{shot['start'] + shot['duration']:.9f})'")
+        return ','.join(filters)
     terms = {k: [] for k in ('y', 'u', 'v', 'saturation')}
     for i, (shot, adj) in enumerate(zip(timeline['shots'], adjustments)):
         start, end = shot['start'], shot['start'] + shot['duration']
@@ -354,16 +374,27 @@ def color_encode(source, target, filters, emit):
     cmd = [ffmpeg(), '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source),
            '-vf', filters, '-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'fast',
            '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart', str(target)]
+    begin = time.monotonic()
     original = probe(source)
+    source_check_seconds = time.monotonic() - begin
     for attempt in range(2):
         try:
+            begin = time.monotonic()
             result = subprocess.run(cmd, capture_output=True, timeout=900)
+            encode_seconds = time.monotonic() - begin
             if result.returncode:
                 raise AssemblyError('Color pass failed: ' + result.stderr.decode(errors='replace')[-1000:])
+            begin = time.monotonic()
             actual = probe(target)
             if actual['frames'] != original['frames'] or actual['audio_samples'] != original['audio_samples'] or any(
                     abs(actual[k] - original[k]) > .05 for k in ('video_duration', 'audio_duration')):
                 raise AssemblyError('Color pass changed timeline or audio; refusing the result.')
+            emit('Color pass timing: ' + json.dumps({
+                'source_verification_seconds': round(source_check_seconds, 3),
+                'encode_seconds': round(encode_seconds, 3),
+                'output_verification_seconds': round(time.monotonic() - begin, 3),
+                'attempt': attempt + 1,
+            }))
             return
         except (AssemblyError, subprocess.TimeoutExpired):
             if attempt:
