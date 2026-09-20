@@ -103,6 +103,7 @@ class ClarifierTests(unittest.TestCase):
         self.assertEqual(service.MAX_QUESTIONS, 3)
         self.assertEqual(row.turns[0]["topic"], "product")
         self.assertEqual(row.turns[0]["question"], service.QUESTIONS["product"])
+        self.assertEqual(row.turns[0]["options"], service.QUESTION_OPTIONS["product"])
         self.assertNotIn("avoid", row.turns[0]["question"].lower())
 
     def test_existing_pending_model_question_is_neutralized_on_reload_and_answer(self):
@@ -115,6 +116,7 @@ class ClarifierTests(unittest.TestCase):
         })
         current = service.snapshot(row)
         self.assertEqual(current["turns"][0]["question"], service.QUESTIONS["product"])
+        self.assertEqual(current["turns"][0]["options"], service.QUESTION_OPTIONS["product"])
         with patch.object(service, "call_agent", side_effect=RuntimeError("outage")):
             updated = service.act(self.db, row, "answer", "Refreshment before the jump")
         self.assertEqual(updated.turns[0]["question"], service.QUESTIONS["product"])

@@ -20,6 +20,16 @@ QUESTIONS = {
     "differentiator": "What is the single most important point that should make this video stand out?",
     "constraints": "What must appear in the video, or must be avoided?",
 }
+QUESTION_OPTIONS = {
+    "product": ["Use the product role already described", "Show the main product benefit", "Make the product the visual hero", "Let the Director decide"],
+    "audience": ["General audience", "New customers", "Existing customers", "Let the Director decide"],
+    "outcome": ["Remember the brand", "Understand the product benefit", "Take action or buy", "Let the Director decide"],
+    "execution": ["Cinematic story", "Product-first commercial", "Natural social-media style", "Let the Director decide"],
+    "script_clarity": ["Keep the script exactly as written", "Keep dialogue exact; interpret the actions", "Let the Director interpret the scene"],
+    "tone": ["Cinematic", "Warm and emotional", "Energetic", "Comedic"],
+    "differentiator": ["The product benefit", "The emotional story", "A memorable visual moment", "Let the Director decide"],
+    "constraints": ["No additional requirements", "Keep supplied dialogue exactly", "Preserve product and character identity", "Let the Director decide"],
+}
 MAX_QUESTIONS = 3
 DIRECTION_FIELDS = {"audience": "Audience", "takeaway": "Intended takeaway", "product_role": "Product role",
     "execution": "Visual execution", "must_haves": "Must-haves", "exclusions": "Avoid", "open_questions": "Open questions"}
@@ -66,6 +76,7 @@ def snapshot(row):
         pending_topic = result["turns"][-1].get("topic")
         if pending_topic in QUESTIONS:
             result["turns"][-1]["question"] = QUESTIONS[pending_topic]
+            result["turns"][-1]["options"] = QUESTION_OPTIONS[pending_topic]
     result["max_questions"] = MAX_QUESTIONS
     result["assessment"] = result["gathered"].get("_assessment", {})
     return result
@@ -183,7 +194,7 @@ def advance(state):
             return
         topic = available[0]
         question = QUESTIONS[topic]
-    turns.append({"topic": topic, "question": question, "answer": None,
+    turns.append({"topic": topic, "question": question, "options": QUESTION_OPTIONS[topic], "answer": None,
                   "source": "fallback" if state["status"] == "degraded" else coverage[topic].get("question_source", "model"),
                   "warning": WARNING if state["status"] == "degraded" else None})
 

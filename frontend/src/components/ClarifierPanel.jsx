@@ -37,6 +37,7 @@ export default function ClarifierPanel({ brief, knownFields, onUse, prepareRefin
 function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, productIds, adType, adBrief, onStart, paused }) {
   const [session, setSession] = useState(null);
   const [answer, setAnswer] = useState("");
+  const [customAnswer, setCustomAnswer] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -59,7 +60,7 @@ function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, pr
   }, [busy, pending?.question, session?.refined_prompt, dismissed]);
 
   function acceptSnapshot(row) {
-    latest.current = row; setSession(row); setDraft(row.refined_prompt || ""); setAnswer("");
+    latest.current = row; setSession(row); setDraft(row.refined_prompt || ""); setAnswer(""); setCustomAnswer(false);
   }
   async function run(work) {
     if (inFlight.current || !alive.current || paused) return;
@@ -129,13 +130,17 @@ function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, pr
         <Typography variant="overline" aria-live="polite">Question {session.turns.length} of up to {session.max_questions || 3}</Typography>
         {!degraded && pending.source === "fallback" && <Chip size="small" label="General question" sx={{ alignSelf: "flex-start" }} />}
         <Typography fontWeight={600} data-testid="clarifier-question-text">{pending.question}</Typography>
-        <TextField inputRef={answerInput} fullWidth size="small" label="Your answer" value={answer} disabled={busy}
-          onChange={e => setAnswer(e.target.value)} slotProps={{ htmlInput: { "data-testid": "clarifier-answer", maxLength: 8000 } }}
-          onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); if (answer.trim()) run(() => post(latest.current, "answer", { answer: answer.trim() })); } }} />
         {Array.isArray(pending.options) && <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 1 }} data-testid="clarifier-options">
           {pending.options.map((option, i) => { const text = typeof option === "string" ? option : option.label; return <Chip key={i} label={text} disabled={busy} clickable
-            data-testid={`clarifier-option-${i}`} aria-pressed={answer === text} color={answer === text ? "primary" : "default"} onClick={() => setAnswer(text)} />; })}
+            data-testid={`clarifier-option-${i}`} aria-pressed={!customAnswer && answer === text} color={!customAnswer && answer === text ? "primary" : "default"}
+            onClick={() => { setCustomAnswer(false); setAnswer(text); }} />; })}
+          <Chip label="Other" disabled={busy} clickable data-testid="clarifier-option-other" aria-pressed={customAnswer}
+            color={customAnswer ? "primary" : "default"} onClick={() => { setCustomAnswer(true); setAnswer(""); }} />
         </Stack>}
+        {(!Array.isArray(pending.options) || customAnswer) && <TextField inputRef={answerInput} fullWidth size="small"
+          label={customAnswer ? "Write your own answer" : "Your answer"} value={answer} disabled={busy} autoFocus={customAnswer}
+          onChange={e => setAnswer(e.target.value)} slotProps={{ htmlInput: { "data-testid": "clarifier-answer", maxLength: 8000 } }}
+          onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); if (answer.trim()) run(() => post(latest.current, "answer", { answer: answer.trim() })); } }} />}
         <Button type="button" variant="contained" data-testid="clarifier-submit" disabled={busy || !answer.trim()}
           onClick={() => run(() => post(latest.current, "answer", { answer: answer.trim() }))}>Continue</Button>
       </Stack>}
