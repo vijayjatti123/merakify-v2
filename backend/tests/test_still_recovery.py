@@ -225,10 +225,23 @@ class StillRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'already running'):
             jobs.claim_preview_preparation(self.db, self.job.id)
 
-    def test_preparation_retry_cannot_overwrite_existing_images(self):
+    def test_completed_plan_can_retry_all_missing_failed_previews_once(self):
+        self.result['assembly'] = {'provisional': False}
+        self.result['shots'][0].update(still_frame_status='failed', still_frame_url=None,
+            still_frame_error_kind='generation')
+        self.job.result_json = json.dumps(self.result)
+        self.job.status = 'done'
+        self.db.commit()
+        jobs.claim_preview_preparation(self.db, self.job.id)
+        restored = jobs.job_result(jobs.get_job(self.db, self.job.id))
+        self.assertTrue(restored['preview_preparation_pending'])
+        self.assertTrue(restored['audio_assembly_pending'])
+
+    def test_preparation_retry_preserves_existing_sibling_images(self):
         self.job.status = 'error'; self.db.commit()
-        with self.assertRaisesRegex(ValueError, 'preserve existing output'):
-            jobs.claim_preview_preparation(self.db, self.job.id)
+        jobs.claim_preview_preparation(self.db, self.job.id)
+        restored = jobs.job_result(jobs.get_job(self.db, self.job.id))
+        self.assertEqual(restored['shots'][1]['still_frame_url'], 'https://audit/neighbor')
 
     def test_unapproved_plan_is_not_submitted(self):
         self.result['generation_approved'] = False

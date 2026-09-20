@@ -183,8 +183,8 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const allVideosReady = shots.length > 0 && shots.every(videoReady);
   const latestTrace = trace[trace.length - 1];
   const compilerTimeout = errored && isCompilerTimeout(final?.error_message);
-  const canResumePreviews = approved && shots.length > 0 && !previews.busy && (!shots.some(s => s.video_url) || result?.plan_edited_shots?.length) && (!shots.some(s => s.still_frame_url) || result?.video_prompt_error) &&
-    shots.every(s => !s.has_dialogue || (s.status === "done" && s.dialogue_audio_url)) && (errored || result?.assembly?.provisional);
+  const canResumePreviews = approved && shots.length > 0 && !previews.busy && (!shots.some(s => s.video_url) || result?.plan_edited_shots?.length) && (!shots.some(s => s.still_frame_url) || result?.video_prompt_error || previews.failed > 0) &&
+    shots.every(s => !s.has_dialogue || (s.status === "done" && s.dialogue_audio_url)) && (errored || result?.assembly?.provisional || previews.failed > 0);
   const progressNote = compilerTimeout ? "This shot is taking longer than expected." : done ? "Your plan is ready to review." : progressMessage(latestTrace);
 
   async function handleTimeoutRetry() {
@@ -305,7 +305,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                 <p>{result?.video_prompt_error ? "Your accepted previews are saved. We paused while preparing the instructions for your video clips; no videos have been generated yet." : result?.video_prompts_pending ? "Images appear as they're ready. We're also preparing instructions for your video clips; no videos are being generated yet." : "We prepare speech and timing, then create and check your images. No video clips are being generated yet."}</p>
                 <p role="status">{previews.ready} of {previews.total} previews ready</p>
                 {previews.busy && <ActionProgress label={result?.video_prompts_pending && shots.some(s => s.still_frame_status === "generating") ? "Creating previews and preparing video instructions…" : result?.video_prompts_pending ? "Preparing video instructions…" : shots.some(s => s.still_frame_status === "generating") ? "Creating and checking your images…" : "Preparing speech and shot details…"} />}
-                {canResumePreviews && <Alert severity="warning">{result?.video_prompt_error ? "Click Retry video instructions to continue with your saved plan and previews." : "Your plan, completed speech and accepted previews are saved. Retry preparation to continue."}</Alert>}
+                {canResumePreviews && <Alert severity="warning">{result?.video_prompt_error ? "Click Retry video instructions to continue with your saved plan and previews." : previews.failed > 0 ? "Your plan and completed speech are saved. Create the missing previews in one step." : "Your plan, completed speech and accepted previews are saved. Retry preparation to continue."}</Alert>}
               </div>
             </Card>
           )
@@ -371,7 +371,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
         {draft && !shots.length && <StoryboardDraft draft={draft} stopped={errored} />}
         {result && shots.length > 0 && (
           <>
-            {previews.failed > 0 && <Alert severity="warning" sx={{ m: 2 }}>{previews.failed} preview{previews.failed === 1 ? " needs" : "s need"} another try. Use Retry preview on the affected shot. Your other previews are kept.</Alert>}
+            {previews.failed > 0 && <Alert severity="warning" sx={{ m: 2 }}>{previews.failed} preview{previews.failed === 1 ? " is" : "s are"} missing. Your plan and completed speech are saved; use Create missing previews once. Existing previews are kept.</Alert>}
             <div className="panel-logline">
               <span>The story in one sentence</span>
               <p>{result.script.logline}</p>
@@ -513,7 +513,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
           <Typography fontWeight={600}>Editing shot {editingShot}</Typography>
           <Typography id="shot-edit-approval-hint" variant="body2">{savingShot !== null ? "Saving and checking your edit…" : hasUnsavedEdit ? "Save your edit first" : "No unsaved changes"}</Typography>
         </> : canResumePreviews ? (result?.video_prompt_error ? "Video instructions paused · your previews are saved" : "Preview preparation paused · your plan is saved") : !approved ? (result?.qa?.approved === false ? "Correct the highlighted plan details before approval" : previews.ready ? `${previews.ready} of ${shots.length} previews ready` : "No previews yet · your written plan is ready") : previews.busy ? `${previews.ready} of ${shots.length} previews ready · working…` : `${shots.filter(videoReady).length} of ${shots.length} videos ready`}</Box>
-        {canResumePreviews ? <Button variant="contained" disabled={retrying} onClick={handleTimeoutRetry}>{result?.video_prompt_error ? "Retry video instructions" : "Retry preview preparation"}</Button>
+        {canResumePreviews ? <Button variant="contained" disabled={retrying} onClick={handleTimeoutRetry}>{result?.video_prompt_error ? "Retry video instructions" : previews.failed > 0 ? "Create missing previews" : "Retry preview preparation"}</Button>
           : !approved ? <Button variant="contained" data-testid="create-previews" aria-describedby={editingShot !== null ? "shot-edit-approval-hint" : undefined} disabled={approving || editBlocksApproval || !result.qa.approved} onClick={handleApprove}>{approving ? "Starting…" : result.plan_edited_shots?.length ? "Approve edits & prepare changed shots" : previews.ready === shots.length ? "Generate video clips" : "Approve plan & create previews"}</Button>
           : previews.busy ? <span>Keep this page open or come back later.</span>
           : allVideosReady ? <Button variant="contained" disabled={editBlocksApproval || assembling || result.final_video?.status === "running"} onClick={handleAssemble}>{result.final_video?.url ? "Update final video" : "Create final video"}</Button>

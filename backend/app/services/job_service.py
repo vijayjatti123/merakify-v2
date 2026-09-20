@@ -481,11 +481,12 @@ def claim_preview_preparation(db, job_id):
         raise ValueError("Create previews from the completed plan first")
     if result.get("audio_assembly_pending") or result.get("preview_preparation_pending") or any(s.get("still_frame_status") == "generating" for s in shots):
         raise ValueError("Preview preparation is already running")
-    if not result.get("plan_edited_shots") and (any(s.get("video_url") for s in shots) or (any(s.get("still_frame_url") for s in shots) and not result.get("video_prompt_error"))):
+    failed_missing = any(s.get("still_frame_status") == "failed" and not s.get("still_frame_url") for s in shots)
+    if not result.get("plan_edited_shots") and not failed_missing and (any(s.get("video_url") for s in shots) or (any(s.get("still_frame_url") for s in shots) and not result.get("video_prompt_error"))):
         raise ValueError("Use the individual shot's Retry preview action to preserve existing output")
     if any(s.get("has_dialogue") and (s.get("status") != "done" or not s.get("dialogue_audio_url")) for s in shots):
         raise ValueError("Speech preparation must finish before previews can be retried")
-    if job.status != "error" and not result.get("assembly", {}).get("provisional"):
+    if job.status != "error" and not result.get("assembly", {}).get("provisional") and not failed_missing:
         raise ValueError("No failed preview preparation to retry")
     result["audio_assembly_pending"] = True
     result["preview_preparation_pending"] = True

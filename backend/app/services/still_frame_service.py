@@ -9,6 +9,7 @@ import uuid
 import copy
 import queue
 import time
+import httpx
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from urllib.error import HTTPError
 from urllib.parse import quote, unquote, urlsplit
@@ -299,7 +300,19 @@ def generate_still(visual, references, aspect_ratio, feedback="", *, continuatio
         + "\n\nAUTHORITATIVE MACHINE-READABLE CONTRACT:\n" + contract_text(contract)
         + ("\nCorrect the previous visual check: " + feedback if feedback else "")
     )})
-    response = _google(parts, aspect_ratio=aspect_ratio)
+    try:
+        response = _google(parts, aspect_ratio=aspect_ratio)
+    except StillProviderError as error:
+        # A Google 402 is an account/billing refusal before inference. The
+        # already configured fal account provides the same Nano Banana family,
+        # so execute the exact frozen contract there instead of failing every
+        # shot or asking the user to understand provider billing.
+        if error.status != 402 or not settings.fal_api_key.strip():
+            raise
+        if emit:
+            emit("still_frame", "Primary image service unavailable; using the configured backup for the same approved instructions.")
+        return _fal_generate_still(contract, references, aspect_ratio, feedback,
+                                   continuation=continuation, emit=emit)
     diagnostics = _image_response_diagnostics(response, parts)
     if emit:
         emit("still_provider_response", json.dumps(diagnostics))
@@ -312,6 +325,73 @@ def generate_still(visual, references, aspect_ratio, feedback="", *, continuatio
                 if raw and mime in {"image/png", "image/jpeg", "image/webp"}:
                     return GeneratedCharacterImage(raw, mime)
     raise NoStillImageError(diagnostics)
+
+
+def _fal_generate_still(contract, references, aspect_ratio, feedback="", *, continuation=None, emit=None):
+    """Direct fal Nano Banana fallback for pre-inference Google 402 failures."""
+    from app.services.preview_plan import contract_text, generation_prompt
+    prompt = ("Create this approved commercial opening frame exactly.\n\n" + generation_prompt(contract)
+              + "\n\nAUTHORITATIVE MACHINE-READABLE CONTRACT:\n" + contract_text(contract)
+              + ("\nCorrect the prior visual note: " + feedback if feedback else ""))
+    images = []
+    labels = []
+    for reference in references:
+        labels.append(reference[0])
+        images.append("data:" + reference[1].content_type + ";base64," + base64.b64encode(reference[1].data).decode())
+    if continuation:
+        labels.append(f"previous accepted shot {continuation[0]}")
+        images.append("data:" + continuation[1].content_type + ";base64," + base64.b64encode(continuation[1].data).decode())
+    if labels:
+        prompt += "\n\nREFERENCE ORDER:\n" + "\n".join(
+            f"Image {index}: {label}" for index, label in enumerate(labels, 1))
+    endpoint = "fal-ai/nano-banana-2/edit" if images else "fal-ai/nano-banana-2"
+    payload = {"prompt": prompt, "aspect_ratio": aspect_ratio, "num_images": 1,
+               "output_format": "webp", "sync_mode": True}
+    if images:
+        payload["image_urls"] = images
+    headers = {"Authorization": "Key " + settings.fal_api_key.strip()}
+    try:
+        with httpx.Client(timeout=45) as client:
+            submitted = client.post("https://queue.fal.run/" + endpoint, headers=headers, json=payload)
+            submitted.raise_for_status()
+            result = submitted.json()
+            deadline = time.monotonic() + 180
+            while not result.get("images"):
+                if time.monotonic() >= deadline:
+                    raise StillFrameError("Backup image service exceeded its completion deadline")
+                status_url = result.get("status_url")
+                response_url = result.get("response_url")
+                if not status_url or not response_url:
+                    raise StillFrameError("Backup image service returned an incomplete task")
+                status = client.get(status_url, headers=headers)
+                status.raise_for_status()
+                state = status.json().get("status")
+                if state == "COMPLETED":
+                    completed = client.get(response_url, headers=headers)
+                    completed.raise_for_status()
+                    result = completed.json()
+                    break
+                if state not in {"IN_QUEUE", "IN_PROGRESS"}:
+                    raise StillFrameError("Backup image service could not complete the request")
+                time.sleep(1.5)
+            image_url = result["images"][0]["url"]
+            if image_url.startswith("data:image/"):
+                header, encoded = image_url.split(",", 1)
+                mime = header.split(";", 1)[0].removeprefix("data:")
+                data = base64.b64decode(encoded, validate=True)
+            else:
+                downloaded = client.get(image_url)
+                downloaded.raise_for_status()
+                data = downloaded.content
+                mime = downloaded.headers.get("content-type", "image/webp").split(";", 1)[0]
+    except (httpx.HTTPError, KeyError, ValueError) as error:
+        raise StillFrameError("Both configured image services are temporarily unavailable") from error
+    if not data or mime not in {"image/png", "image/jpeg", "image/webp"}:
+        raise StillFrameError("Backup image service returned an unusable image")
+    if emit:
+        emit("still_provider_response", json.dumps({"provider": "fal", "model": endpoint,
+            "fallback_reason": "primary_http_402", "content_type": mime}))
+    return GeneratedCharacterImage(data, mime)
 
 
 def check_still(visual, references, image, *, emit=None, entities=None, continuation=None):

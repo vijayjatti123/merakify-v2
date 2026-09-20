@@ -410,6 +410,36 @@ class StillFramesTests(unittest.TestCase):
         self.assertIn('wrong inside/outside placement', prompt)
         self.assertNotIn('rotates later', contract['generation_brief']['opening_moment'])
 
+    def test_google_402_uses_fal_with_same_frozen_contract_and_webp(self):
+        from app.services.preview_plan import visual_contract
+        contract = visual_contract({'ad_type':'character', 'aspect_ratio':'16:9',
+            'state_at_shot_start':'Kabir stands inside the helicopter cabin.',
+            'characters':[], 'camera_angle':'medium', 'lighting':'daylight', 'visual_style':{}})
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {'images':[{'url':'data:image/webp;base64,' +
+            base64.b64encode(self.image.data).decode()}]}
+        client = Mock()
+        client.__enter__ = Mock(return_value=client)
+        client.__exit__ = Mock(return_value=False)
+        client.post.return_value = response
+        with patch.object(service.settings, 'fal_api_key', 'fal-key'), \
+             patch.object(service, '_google', side_effect=service.StillProviderError(402, 'google')), \
+             patch.object(service.httpx, 'Client', return_value=client):
+            generated = service.generate_still(contract, [], '16:9')
+        self.assertEqual(generated.content_type, 'image/webp')
+        url = client.post.call_args.args[0]
+        payload = client.post.call_args.kwargs['json']
+        self.assertTrue(url.endswith('/fal-ai/nano-banana-2'))
+        self.assertEqual(payload['output_format'], 'webp')
+        self.assertIn(contract['checks']['opening_state'], payload['prompt'])
+
+    def test_google_402_without_configured_fallback_remains_provider_failure(self):
+        with patch.object(service.settings, 'fal_api_key', ''), \
+             patch.object(service, '_google', side_effect=service.StillProviderError(402, 'google')):
+            with self.assertRaises(service.StillProviderError):
+                service.generate_still('A cup on a table.', [], '1:1')
+
     def test_legacy_image_requests_also_receive_a_readable_polished_layer(self):
         response = {'candidates': [{'content': {'parts': [{
             'inlineData': {'data': base64.b64encode(self.image.data).decode(),
