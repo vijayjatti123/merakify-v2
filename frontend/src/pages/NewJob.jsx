@@ -265,10 +265,11 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
             {scriptMode && adType === "character" && <ProductPicker selected={products} onChange={setProducts} disabled={collapsed || submitting} />}
             <ClarifierPanel adType={adType} adBrief={adBrief} brief={brief} inputMode={scriptMode ? "script" : "idea"} productIds={products.map(p => p.id)}
               prepareRefined={text => scriptMode ? text : preserveRefinedMentions(text, brief, characterSelections)}
-              knownFields={knownFields} disabled={collapsed || submitting} onUse={(text, row) => {
+              knownFields={knownFields} disabled={collapsed || submitting} onUse={(text, row, sessionInputs) => {
                 const acceptedBrief = scriptMode ? brief : text;
                 if (!scriptMode) setBrief(text);
-                setClarification({ brief: acceptedBrief, context: clarificationContext, id: row.session_id, revision: row.revision, text });
+                setClarification({ brief: acceptedBrief, context: sessionInputs?.context || clarificationContext,
+                  id: row.session_id, revision: row.revision, text });
               }} />
             {activeClarification && <Alert severity="success" data-testid="production-direction-saved">Your reviewed direction will guide shot planning.{scriptMode && <details><summary>View production notes (script unchanged)</summary><Typography sx={{ whiteSpace: "pre-wrap" }}>{activeClarification.text}</Typography></details>}</Alert>}
             {clarification && !activeClarification && <Alert severity="info">Your inputs changed. Refine again to update your production direction, or continue with the current inputs.</Alert>}

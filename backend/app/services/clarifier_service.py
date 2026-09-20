@@ -20,7 +20,7 @@ QUESTIONS = {
     "differentiator": "What is the single most important point that should make this video stand out?",
     "constraints": "What must appear in the video, or must be avoided?",
 }
-MAX_QUESTIONS = 5
+MAX_QUESTIONS = 3
 DIRECTION_FIELDS = {"audience": "Audience", "takeaway": "Intended takeaway", "product_role": "Product role",
     "execution": "Visual execution", "must_haves": "Must-haves", "exclusions": "Avoid", "open_questions": "Open questions"}
 WARNING = "Creative reasoning was unavailable or invalid. Using deterministic fallback; no model answer was assumed."
@@ -58,6 +58,14 @@ def snapshot(row):
     result = {name: getattr(row, name) for name in (
         "session_id", "raw_brief", "known_fields", "turns", "gathered", "confidence",
         "status", "refined_prompt", "revision", "created_at", "updated_at")}
+    # Existing in-progress sessions may contain model-authored pending wording
+    # from an older release. Normalize only the unanswered turn so refresh and
+    # the subsequent write both use the current neutral application wording.
+    result["turns"] = copy.deepcopy(result["turns"] or [])
+    if result["turns"] and result["turns"][-1].get("answer") is None:
+        pending_topic = result["turns"][-1].get("topic")
+        if pending_topic in QUESTIONS:
+            result["turns"][-1]["question"] = QUESTIONS[pending_topic]
     result["max_questions"] = MAX_QUESTIONS
     result["assessment"] = result["gathered"].get("_assessment", {})
     return result
@@ -159,9 +167,10 @@ def advance(state):
             state["status"] = "ready"
             return
         topic = candidates[0]
-        question = coverage[topic].get("question")
-        if not isinstance(question, str) or not 10 <= len(question) <= 300 or question.count("?") > 1:
-            raise ValueError("Invalid targeted question")
+        # The reasoning model selects the genuine gap. The application owns
+        # user-facing wording so it cannot introduce a leading claim, propose
+        # a rewrite, or turn one topic into a compound questionnaire.
+        question = QUESTIONS[topic]
     except Exception as error:
         safe_reasons = {"Already using fallback", "Invalid confidence", "Incomplete brief assessment", "Invalid coverage",
             "Invalid assessment update", "Ungrounded coverage claim", "Ad essentials cannot be skipped", "Missing script understanding", "Invalid targeted question"}

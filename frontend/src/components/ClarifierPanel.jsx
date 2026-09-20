@@ -16,17 +16,21 @@ export default function ClarifierPanel({ brief, knownFields, onUse, prepareRefin
   const eligible = brief.trim().length >= 20 && brief.trim().split(/\s+/).length >= 4;
   const changed = source && source.signature !== signature;
   const inputs = source || { brief, knownFields, inputMode, productIds, adType, adBrief, signature };
+  const inputContext = JSON.stringify([inputs.knownFields, inputs.inputMode, inputs.productIds, inputs.adType, inputs.adBrief]);
   return <Box hidden={disabled || signature === appliedBrief || (!eligible && !source)}>
     {changed && <Alert severity="info" data-testid="clarifier-inputs-changed" sx={{ mb: 2 }}>
-      Your brief or settings changed. Your questions, answers and draft are kept below.
-      Restore your previous inputs to continue, or explicitly start again with the new inputs.
+      Your brief or settings changed. This conversation remains editable and keeps using the inputs it started with.
+      Start again only if you want the questions to use your updated inputs.
       <Button type="button" data-testid="clarifier-restart" disabled={!eligible}
         onClick={() => { setSource(null); setGeneration(n => n + 1); }}>Start again with updated inputs</Button>
     </Alert>}
-    <Conversation key={generation} {...inputs} paused={Boolean(changed) || disabled}
+    <Conversation key={generation} {...inputs} paused={disabled}
       prepareRefined={prepareRefined}
       onStart={() => setSource(inputs)}
-      onUse={(text, row) => { setAppliedBrief(JSON.stringify([inputMode === "script" ? brief : text, context])); onUse(text, row); }} />
+      onUse={(text, row) => {
+        setAppliedBrief(JSON.stringify([inputs.inputMode === "script" ? inputs.brief : text, inputContext]));
+        onUse(text, row, { context: inputContext, inputMode: inputs.inputMode, brief: inputs.brief });
+      }} />
   </Box>;
 }
 
@@ -110,7 +114,7 @@ function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, pr
       </Alert>}
       {!!session?.assessment?.unverified?.length && <Alert severity="info" data-testid="clarifier-unverified">Some details couldn't be confirmed from your input. We'll ask rather than assume.</Alert>}
       {!session && <Stack spacing={2} data-testid="clarifier-initial">
-        <Typography color="text.secondary">We'll read your {inputMode === "script" ? "script" : "idea"} and ask about missing product details, your audience, and how you want the ad to look. Up to five questions; skip whenever you like.</Typography>
+        <Typography color="text.secondary">We'll read your {inputMode === "script" ? "script" : "idea"} and ask only about missing production decisions. Up to three questions; skip whenever you like.</Typography>
         <Stack direction="row" spacing={1}><Button type="button" variant="contained" startIcon={<Sparkles size={18} />} data-testid="clarifier-start" disabled={busy}
           onClick={() => { onStart(); return run(() => clarifierRequest("/start", { raw_brief: brief, input_mode: inputMode, product_ids: productIds, ad_type: adType, ad_brief: adBrief, known_fields: Object.fromEntries(Object.entries(knownFields).filter(([,v]) => v?.trim())) })); }}>Refine with AI</Button>
           <Button type="button" data-testid="clarifier-skip" onClick={leave}>Skip</Button></Stack>
@@ -122,7 +126,7 @@ function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, pr
         </Box>)}
       </Stack>}
       {pending && <Stack spacing={2} data-testid="clarifier-question">
-        <Typography variant="overline" aria-live="polite">Question {session.turns.length} of up to {session.max_questions || 5}</Typography>
+        <Typography variant="overline" aria-live="polite">Question {session.turns.length} of up to {session.max_questions || 3}</Typography>
         {!degraded && pending.source === "fallback" && <Chip size="small" label="General question" sx={{ alignSelf: "flex-start" }} />}
         <Typography fontWeight={600} data-testid="clarifier-question-text">{pending.question}</Typography>
         <TextField inputRef={answerInput} fullWidth size="small" label="Your answer" value={answer} disabled={busy}
@@ -142,7 +146,7 @@ function Conversation({ brief, knownFields, onUse, prepareRefined, inputMode, pr
       {session?.refined_prompt && <Stack spacing={2} data-testid="clarifier-refined">
         {highConfidence ? <Alert severity="success" data-testid="clarifier-ready-high">Your idea has a clear direction. Review your brief before using it.</Alert>
           : <Alert severity="warning" data-testid="clarifier-ready-low"><strong>More detail would help.</strong> This is our best attempt — feel free to add more detail yourself.
-            {session.turns.length >= (session.max_questions || 5) && " We've reached the question limit, but some details are still uncertain."}</Alert>}
+            {session.turns.length >= (session.max_questions || 3) && " We've reached the question limit, but some details are still uncertain."}</Alert>}
         {!!session.assessment?.unresolved?.length && <Typography variant="body2" color="text.secondary" data-testid="clarifier-unresolved">
           Still open: {session.assessment.unresolved.map(topic => topicLabels[topic] || "Creative detail").join(", ")}. You can add these details to the draft below.
         </Typography>}

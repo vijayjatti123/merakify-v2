@@ -88,6 +88,50 @@ class ClarifierTests(unittest.TestCase):
         self.assertEqual(row.status, "ready")
         self.assertLess(row.confidence, .8)
 
+    def test_model_cannot_replace_neutral_question_with_claim_rewrite(self):
+        result = assessment(["product"], .4)
+        result["coverage"]["product"]["question"] = (
+            "Should we avoid the confidence claim and frame the drink as refreshment instead?"
+        )
+        with patch.object(service, "call_agent", return_value=result):
+            row = service.start(
+                self.db,
+                "Kabir drinks Coca-Cola, finds courage, and prepares to jump.",
+                {},
+                context={"input_mode": "idea", "ad_type": "character", "products": []},
+            )
+        self.assertEqual(service.MAX_QUESTIONS, 3)
+        self.assertEqual(row.turns[0]["topic"], "product")
+        self.assertEqual(row.turns[0]["question"], service.QUESTIONS["product"])
+        self.assertNotIn("avoid", row.turns[0]["question"].lower())
+
+    def test_existing_pending_model_question_is_neutralized_on_reload_and_answer(self):
+        row = storage.create_clarifier_session(self.db, "Kabir drinks Coca-Cola.", {})
+        row = storage.update_clarifier_session(self.db, row.session_id, row.revision, {
+            "turns": [{"topic": "product", "question": "Should we avoid this claim?",
+                       "answer": None, "source": "model", "warning": None}],
+            "gathered": {"_assessment": {"coverage": assessment(["product"])["coverage"],
+                                           "understanding": "A Coca-Cola ad."}},
+        })
+        current = service.snapshot(row)
+        self.assertEqual(current["turns"][0]["question"], service.QUESTIONS["product"])
+        with patch.object(service, "call_agent", side_effect=RuntimeError("outage")):
+            updated = service.act(self.db, row, "answer", "Refreshment before the jump")
+        self.assertEqual(updated.turns[0]["question"], service.QUESTIONS["product"])
+        self.assertEqual(updated.turns[0]["answer"], "Refreshment before the jump")
+
+    def test_explicit_metaphorical_product_role_does_not_force_product_question(self):
+        result = assessment(["audience"], .6)
+        result["coverage"]["product"]["evidence"] = "drinks Coca-Cola, finds courage"
+        with patch.object(service, "call_agent", return_value=result):
+            row = service.start(
+                self.db,
+                "Kabir drinks Coca-Cola, finds courage, and prepares to jump.",
+                {},
+                context={"input_mode": "idea", "ad_type": "character", "products": []},
+            )
+        self.assertEqual(row.turns[0]["topic"], "audience")
+
     def test_invented_evidence_is_unresolved_without_discarding_valid_assessment(self):
         result = assessment()
         result['coverage']['product']['evidence'] = 'Never supplied benefit'
