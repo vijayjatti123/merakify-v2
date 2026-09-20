@@ -9,7 +9,10 @@ import re
 
 AD_FIELDS = ("takeaway", "visual_approach", "pacing", "sound_direction")
 SHOT_FIELDS = ("purpose", "performance", "product_props", "edit_intent")
-EXECUTION_FIELDS = ("blocking", "action_beats", "critical_outcome")
+# These are authored by the Director and copied verbatim into still/video
+# contracts.  They are facts, not prose for a renderer to infer.
+EXECUTION_FIELDS = ("blocking", "action_beats", "critical_outcome", "entry_exit_paths",
+                    "support_and_contact", "spatial_invariants", "forbidden_geometry")
 DIRECTION_FIELDS = ("shot_direction", "state_at_shot_start", "state_at_shot_end", "opening_characters")
 
 
@@ -54,6 +57,17 @@ def problems(shot):
         if (not isinstance(beats, list) or not 2 <= len(beats) <= 3
                 or any(not isinstance(b, str) or not b.strip() or len(b) > 350 for b in beats)):
             found.append('shot_direction.action_beats needs two or three ordered, achievable visual beats')
+        spatial = ('entry_exit_paths', 'support_and_contact', 'spatial_invariants', 'forbidden_geometry')
+        # Older reviewed plans remain editable/regenerable. Fresh Director-v2
+        # output is schema-required to provide the complete spatial contract.
+        if any(key in direction for key in spatial):
+            if not isinstance(direction.get('support_and_contact'), str) or not direction['support_and_contact'].strip() or len(direction['support_and_contact']) > 500:
+                found.append('shot_direction.support_and_contact needs one concrete, concise visual instruction')
+            for key in ('entry_exit_paths', 'spatial_invariants', 'forbidden_geometry'):
+                values = direction.get(key)
+                if (not isinstance(values, list) or not 1 <= len(values) <= 5
+                        or any(not isinstance(value, str) or not value.strip() or len(value) > 350 for value in values)):
+                    found.append(f'shot_direction.{key} needs one to five explicit physical facts')
     for field in ("state_at_shot_start", "state_at_shot_end"):
         if not isinstance(shot.get(field), str) or not shot[field].strip() or len(shot[field]) > 500:
             found.append(f"{field} must describe one visible instant, including static shots")
@@ -68,6 +82,14 @@ def execution_sections(shot):
     sections = []
     if direction.get('blocking'):
         sections.append(('Staging', direction['blocking']))
+    if direction.get('entry_exit_paths'):
+        sections.append(('Movement paths', ' '.join(direction['entry_exit_paths'])))
+    if direction.get('support_and_contact'):
+        sections.append(('Physical support and contact', direction['support_and_contact']))
+    if direction.get('spatial_invariants'):
+        sections.append(('Spatial facts that must remain true', ' '.join(direction['spatial_invariants'])))
+    if direction.get('forbidden_geometry'):
+        sections.append(('Forbidden staging', ' '.join(direction['forbidden_geometry'])))
     if direction.get('action_beats'):
         sections.append(('Action progression', ' Then '.join(
             f'{i + 1}) {text.strip()}' for i, text in enumerate(direction['action_beats']))))

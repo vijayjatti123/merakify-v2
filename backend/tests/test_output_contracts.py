@@ -12,6 +12,9 @@ class OutputContractTests(unittest.TestCase):
         value={'purpose':'Show the lift','performance':'Unhurried reach','product_props':'Blue cup', 'edit_intent':'Hold'}
         with self.assertRaises(ValueError): contracts.validate(value,schema)
         value.update(blocking='Hand screen right',action_beats=['Reach','Lift and settle'],critical_outcome='Cup clears table')
+        with self.assertRaises(ValueError): contracts.validate(value,schema)  # Old vague staging cannot pass.
+        value.update(entry_exit_paths=['Hand: screen right -> cup handle'], support_and_contact='Cup remains supported by table until grasped.',
+                     spatial_invariants=['Cup stays above table.'], forbidden_geometry=['Cup must not float.'])
         contracts.validate(value,schema)
         patch_schema=contracts.contracts()['patch-v1']
         contracts.validate({'patches':[{'shot_number':1,'changes':{'shot_direction':value}}]},patch_schema)

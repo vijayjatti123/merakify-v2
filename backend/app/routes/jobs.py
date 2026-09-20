@@ -496,6 +496,7 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
         ad_direction_plan=result.get("ad_direction"),
         approved_story=result.get("script"),
         minimum_shot_seconds=result.get("planning_constraints", {}).get("minimum_shot_seconds"),
+        semantic_review=False,
         emit=lambda key, note: job_service.append_event(db, job_id, key, note),
     )
     validated_shots = _attach_voice_refs(

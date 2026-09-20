@@ -10,7 +10,7 @@ from app.services import job_service as jobs, render_compliance_service as gate,
 
 
 def verdict(style='pass', scale='pass'):
-    return {'verdict': {k: {'status': s, 'observed': 'sample pixels', 'reason': 'photographic instead of anime' if s == 'mismatch' else s} for k,s in [('style',style),('scale',scale)]}}
+    return {'verdict': {k: {'status': s, 'observed': 'sample pixels', 'reason': 'photographic instead of anime' if s == 'mismatch' else s} for k,s in [('style',style),('scale',scale),('staging','pass')]}}
 
 
 class ComplianceTests(unittest.TestCase):
@@ -49,13 +49,13 @@ class ComplianceTests(unittest.TestCase):
             self.assertTrue(gate.accept(self.db,self.job.id,self.shot,io.BytesIO(b'video'),check_cache=cache))
             vision.assert_called_once()
         self.assertEqual(self.data()['video_compliance_checks']['first'], verdict())
-    def test_mismatch_one_retry_then_accept_with_warning(self):
+    def test_mismatch_one_retry_then_stops_for_review(self):
         with patch.object(gate,'inspect',return_value=verdict('mismatch')),patch.object(video,'provider',return_value={'id':'second'}) as api:
             self.assertFalse(self.check());self.assertFalse(self.check())
             self.assertEqual(api.call_count,1);self.assertEqual(api.call_args.args[2],{'prompt':'unchanged'})
             self.shot['video_task_id']='second'
-            self.assertTrue(self.check());self.assertEqual(api.call_count,1)
-            self.assertIn('mismatch after one retry',self.data()['video_warnings'][0])
+            self.assertFalse(self.check());self.assertEqual(api.call_count,1)
+            self.assertEqual(self.data()['video_status'], 'review_required')
     def test_checker_failure_fails_open_no_paid_retry(self):
         with patch.object(gate,'inspect',side_effect=TimeoutError()),patch.object(video,'provider') as api:
             self.assertTrue(self.check());api.assert_not_called()

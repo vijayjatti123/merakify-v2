@@ -159,7 +159,8 @@ class AudioVideoTests(unittest.TestCase):
             self.assertFalse(gate.accept(self.db,self.job.id,self.saved(),io.BytesIO()))
             self.assertEqual(call.call_args.args,('bytedance/seedance-2.0/reference-to-video',request))
             old.assert_not_called();self.assertEqual(self.saved()['video_task_id'],'two')
-            self.assertTrue(gate.accept(self.db,self.job.id,self.saved(),io.BytesIO()))
+            self.assertFalse(gate.accept(self.db,self.job.id,self.saved(),io.BytesIO()))
+            self.assertEqual(self.saved()['video_status'], 'review_required')
             self.assertEqual(call.call_count,1)
 
     def test_completed_fal_result_reuses_s3_pipeline(self):

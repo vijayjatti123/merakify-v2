@@ -64,9 +64,10 @@ class SpeechGateTests(unittest.TestCase):
     def test_second_mismatch_is_visible_without_third_paid_call(self):
         with patch.object(speech,"inspect_audio",side_effect=lambda *a:{"verdict":finding()}),patch.object(audio,"submit",return_value={"id":"second"}) as submit:
             self.assertFalse(self.check());self.shot["video_task_id"]="second"
-            self.assertTrue(self.check());self.assertTrue(self.check())
+            self.assertFalse(self.check());self.assertFalse(self.check())
             submit.assert_called_once()
             self.assertEqual(self.data()["video_speech_check"]["status"],"mismatch")
+            self.assertEqual(self.data()["video_status"], "review_required")
 
     def test_outage_no_paid_retry_and_persisted_unverified(self):
         with patch.object(speech,"inspect_audio",side_effect=TimeoutError()),patch.object(audio,"submit") as submit:

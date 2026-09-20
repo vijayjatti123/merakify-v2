@@ -38,7 +38,7 @@ export default function DirectorPlanEditor({ value, onChange, shotNumber, cast =
     {Object.entries({purpose:"Purpose",performance:"Character performance",product_props:"Product and props",edit_intent:"Edit and transition intention"}).map(([key,label]) =>
       <TextField key={key} label={label} multiline minRows={2} value={value.shot_direction?.[key] || ""} onChange={e => set("shot_direction", {...value.shot_direction,[key]:e.target.value})} />)}
     {value.shot_direction?.action_beats && <>
-      {[['blocking', 'Where everyone is'], ['critical_outcome', 'What the viewer must see']].map(([key, label]) =>
+      {[['blocking', 'Where everyone is'], ['support_and_contact', 'What supports each person/object and what touches what'], ['critical_outcome', 'What the viewer must see']].map(([key, label]) =>
         <TextField key={key} label={label} multiline minRows={2} value={value.shot_direction[key] || ''}
           slotProps={{htmlInput: {'data-testid': `edit-${key}-${shotNumber}`}}}
           onChange={e => set('shot_direction', {...value.shot_direction, [key]: e.target.value})} />)}
@@ -46,6 +46,12 @@ export default function DirectorPlanEditor({ value, onChange, shotNumber, cast =
         multiline minRows={2} value={beat} slotProps={{htmlInput: {'data-testid': `edit-action-${i + 1}-${shotNumber}`}}}
         onChange={e => set('shot_direction', {...value.shot_direction,
           action_beats: value.shot_direction.action_beats.map((text, n) => n === i ? e.target.value : text)})} />)}
+      {[["entry_exit_paths", "Entry and exit paths"], ["spatial_invariants", "Physical facts that must remain true"], ["forbidden_geometry", "Placements that must never appear"]].map(([key, label]) =>
+        <TextField key={key} label={`${label} · one per line`} multiline minRows={2}
+          value={(value.shot_direction[key] || []).join("\n")}
+          slotProps={{htmlInput: {"data-testid": `edit-${key}-${shotNumber}`}}}
+          onChange={e => set("shot_direction", {...value.shot_direction,
+            [key]: e.target.value.split("\n").map(line => line.trim()).filter(Boolean)})} />)}
     </>}
   </Box>;
 }

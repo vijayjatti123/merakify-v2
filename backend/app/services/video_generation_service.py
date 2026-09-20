@@ -388,6 +388,7 @@ class CompletionCache:
         self.stored = None
         self.size = 0
         self.digest = None
+        self.audio_locked = False
         self.attempts = 0
         self.processing_sec = 0
 
@@ -434,6 +435,15 @@ def _finish_completed(db, job_id, shot, response, cache):
                         raise ValueError("Video exceeds 512MB download bound")
                     digest.update(chunk); video.write(chunk)
             cache.size, cache.digest, cache.downloaded = size, digest.hexdigest(), True
+        from app.services.speech_mode import is_onscreen_speech
+        if is_onscreen_speech(shot) and shot.get('dialogue_audio_url') and not cache.audio_locked:
+            from app.services import approved_audio_lock
+            locked = approved_audio_lock.apply(video, shot)
+            cache.size, cache.digest, cache.audio_locked = locked['bytes'], locked['sha256'], True
+            job_service.update_video(db, job_id, number, expected_task_id=task,
+                                     video_audio_lock=locked)
+            job_service.append_event(db, job_id, 'video_generation',
+                f"Shot {number}: replaced model-generated speech with the exact approved recording; no extra words can remain.")
         size = cache.size
         timings["download_sec"] = time.monotonic() - phase
         phase = time.monotonic()

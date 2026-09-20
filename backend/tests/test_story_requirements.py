@@ -111,8 +111,13 @@ class StoryRequirementsTests(unittest.TestCase):
             state_at_shot_start='Rope slack', state_at_shot_end='Rope slack again',
             camera_direction=dict(movement='hold', direction='none', speed='none', stabilization='locked'),
             characters_in_shot=[], opening_characters=[], has_dialogue=False, dialogue_text='', speech_mode='none',
+            speaker_name='', transition_after='cut',
             shot_direction=dict(purpose='Second attempt', performance='Pull then release',
-                                product_props='Same rope', edit_intent='Cut to reaction'))
+                                product_props='Same rope', edit_intent='Cut to reaction',
+                                blocking='Rope and hands remain centered', action_beats=['Reach', 'Pull and release'],
+                                critical_outcome='Rope returns slack', entry_exit_paths=['No boundary crossing'],
+                                support_and_contact='Feet remain on floor; both hands contact rope.',
+                                spatial_invariants=['Rope remains anchored.'], forbidden_geometry=['No floating body or rope.']))
         response = {'patches': [], 'insertions': [{'after_shot_number': 1, 'shot': shot}]}
         result, mapping = apply_insertion_response(self.shots, response, {}, [1])
         self.assertEqual(mapping, {1: 1, 2: 3})
@@ -141,7 +146,12 @@ class StoryRequirementsTests(unittest.TestCase):
         new_shot = {k: copy.deepcopy(first.get(k)) for k in
                     contracts()['director-v1']['properties']['shots']['items']['properties'] if k != 'shot_number'}
         new_shot.update(scene_number=1, has_dialogue=False, dialogue_text='', speech_mode='none',
-            camera_angle='low-angle wide', camera_direction=dict(movement='hold', direction='none', speed='none', stabilization='locked'))
+            speaker_name='', transition_after='cut', camera_angle='low-angle wide',
+            camera_direction=dict(movement='hold', direction='none', speed='none', stabilization='locked'))
+        new_shot['shot_direction'].update(blocking='Person remains centered', action_beats=['Look', 'React'],
+            critical_outcome='Reaction is visible', entry_exit_paths=['No boundary crossing'],
+            support_and_contact='Feet remain on floor.', spatial_invariants=['Person remains inside room.'],
+            forbidden_geometry=['No unsupported body.'])
         for field in ('lens', 'lighting', 'composition_note'):
             new_shot[field] = new_shot[field] or 'Natural'
         calls = []

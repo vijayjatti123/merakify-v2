@@ -136,10 +136,13 @@ def apply_patch_response(shots, response, permissions):
                 if not isinstance(value, list) or any(not isinstance(n, str) or n not in by_number[number].get('characters_in_shot', []) for n in value):
                     raise ValueError('Opening cast must be drawn from the existing shot cast.')
             elif field == 'shot_direction':
-                from app.services.ad_direction import SHOT_FIELDS
-                if (not isinstance(value, dict) or set(value) != set(SHOT_FIELDS)
-                        or any(not isinstance(v, str) or not v.strip() or len(v) > 350 for v in value.values())):
+                from app.services.ad_direction import SHOT_FIELDS, EXECUTION_FIELDS
+                if (not isinstance(value, dict) or set(value) != set(SHOT_FIELDS) | set(EXECUTION_FIELDS)):
                     raise ValueError('Planning correction returned incomplete shot direction.')
+                probe = {**by_number[number], 'shot_direction': value, 'direction_version': 1}
+                from app.services.ad_direction import problems
+                if problems(probe):
+                    raise ValueError('Planning correction returned incomplete physical staging.')
             elif field == 'duration_sec':
                 import math
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:

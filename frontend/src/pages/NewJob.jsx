@@ -27,6 +27,9 @@ const COLORS = {
 
 
 const SelectField = StudioSelect;
+const CLARIFIER_HANDOFF_KEY = "merakify.clarifier-handoff.v1";
+const clearClarifierHandoff = () => { try { sessionStorage.removeItem(CLARIFIER_HANDOFF_KEY); } catch {} };
+const saveClarifierHandoff = value => { try { sessionStorage.setItem(CLARIFIER_HANDOFF_KEY, JSON.stringify(value)); } catch {} };
 
 export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "", savedJob = null }) {
   const [adType, setAdType] = useState("character");
@@ -79,6 +82,22 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [clarification, setClarification] = useState(null);
+
+  useEffect(() => {
+    if (savedJob || typeof sessionStorage === "undefined") return;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(CLARIFIER_HANDOFF_KEY) || "null");
+      if (!saved?.clarification?.id || !saved.brief) return;
+      setBrief(saved.brief); setClarification(saved.clarification);
+      setScriptMode(Boolean(saved.scriptMode)); setProducts(saved.products || []);
+      setAdType(saved.adType || "character"); setCommercialDrafts(saved.commercialDrafts || {});
+      setDuration(saved.duration || "30 seconds"); setCustomDuration(saved.customDuration || "");
+      setAspectRatio(saved.aspectRatio || "16:9"); setContentType(saved.contentType || "Ad");
+      setColorGrade(saved.colorGrade || "None"); setVisualStyle(saved.visualStyle || "Natural");
+      setQuality(saved.quality || "720p"); setLanguage(saved.language || "English");
+      setCustomLanguage(saved.customLanguage || ""); setModelChoice(saved.modelChoice || "h3_max_fal");
+    } catch { clearClarifierHandoff(); }
+  }, [savedJob]);
 
   const effectiveLanguage = language === "Other" ? customLanguage.trim() : language;
   const effectiveDuration = duration === "Custom" ? customDuration.trim() : duration;
@@ -182,6 +201,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
         ai_model: aiModel,
         video_model: videoModel,
       });
+      clearClarifierHandoff();
       recordMentionJob();
     } catch (submitError) {
       setError(submitError.message);
@@ -208,6 +228,7 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
       script_text: brief.trim(),
       resolutions,
     });
+    clearClarifierHandoff();
     setExtraction(null);
   }
 
@@ -268,8 +289,13 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
               knownFields={knownFields} disabled={collapsed || submitting} onUse={(text, row, sessionInputs) => {
                 const acceptedBrief = scriptMode ? brief : text;
                 if (!scriptMode) setBrief(text);
-                setClarification({ brief: acceptedBrief, context: sessionInputs?.context || clarificationContext,
-                  id: row.session_id, revision: row.revision, text });
+                const accepted = { brief: acceptedBrief, context: sessionInputs?.context || clarificationContext,
+                  id: row.session_id, revision: row.revision, text };
+                setClarification(accepted);
+                saveClarifierHandoff({ clarification: accepted,
+                  brief: acceptedBrief, scriptMode, products, adType, commercialDrafts,
+                  duration, customDuration, aspectRatio, contentType, colorGrade, visualStyle,
+                  quality, language, customLanguage, modelChoice });
               }} />
             {activeClarification && <Alert severity="success" data-testid="production-direction-saved">Your reviewed direction will guide shot planning.{scriptMode && <details><summary>View production notes (script unchanged)</summary><Typography sx={{ whiteSpace: "pre-wrap" }}>{activeClarification.text}</Typography></details>}</Alert>}
             {clarification && !activeClarification && <Alert severity="info">Your inputs changed. Refine again to update your production direction, or continue with the current inputs.</Alert>}
