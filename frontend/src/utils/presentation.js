@@ -72,8 +72,8 @@ export function videoReviewGuidance(shot) {
   const hasVisualFinding = /staging|position|placement|inside|outside|style|appearance|identity|scale|framing|composition/i.test(error);
   if (/misspell|label markings|packaging (?:text|markings)|printed (?:text|label)/i.test(error)) return {
     title: 'The product label needs a closer look',
-    message: 'The video checker found a problem with the printed markings on the product. This is unrelated to the voice-over.',
-    action: 'Check the opening image first. If its label is already wrong, regenerate or upload a corrected image before trying the video again.',
+    message: shot.video_source_changed ? 'The previous video used the older shot image. Your new image is ready.' : 'The video checker found a problem with the printed markings on the product. This is unrelated to the voice-over.',
+    action: shot.video_source_changed ? 'Use Regenerate corrected video below to make this shot with the new image.' : 'Use Fix product image for me above. Review the corrected image, then regenerate this shot’s video. You can upload a real product image if the lettering remains wrong.',
   };
   if (!shot?.has_dialogue && /unexpected speech in a silent shot/i.test(error)) return {
     title: 'This shot added an unwanted voice',

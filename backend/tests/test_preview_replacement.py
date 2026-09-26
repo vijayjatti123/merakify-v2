@@ -42,7 +42,8 @@ class PreviewReplacementTests(unittest.TestCase):
         def generate(result, **kwargs):
             self.assertEqual(kwargs['shot_numbers'], {2})
             self.assertEqual(kwargs['feedback_by_shot'], {2: 'Softer light'})
-            shot = result['shots'][1]; shot.update(still_frame_key='new.png', still_frame_url='https://example.invalid/new.png')
+            shot = result['shots'][1]; shot.update(still_frame_key='new.png', still_frame_url='https://example.invalid/new.png',
+                                                   still_frame_verification={'approved': True, 'reason': 'Printed label matches'})
         with self.sessions() as db:
             for shot in original['shots']:
                 jobs.claim_video(db, self.job_id, shot['shot_number'], {'video_status': 'done', 'video_key': f"v{shot['shot_number']}", 'video_source_hash': video.source_fingerprint(shot)})
@@ -62,6 +63,7 @@ class PreviewReplacementTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         final = self.result()
         self.assertEqual(final['shots'][1]['still_frame_key'], 'new.png')
+        self.assertEqual(final['shots'][1]['still_frame_verification']['reason'], 'Printed label matches')
         self.assertTrue(final['shots'][1]['video_source_changed'])
         self.assertTrue(final['final_video']['stale'])
         self.assertEqual(final['shots'][1]['dialogue_audio_url'], before['shots'][1]['dialogue_audio_url'])
@@ -75,6 +77,23 @@ class PreviewReplacementTests(unittest.TestCase):
         self.assertEqual(shot['still_frame_key'], 'old-2.png')
         self.assertEqual(shot['preview_replacement']['status'], 'failed')
         self.assertIn('unchanged', shot['preview_replacement']['warning'])
+
+    def test_generated_repair_keeps_visual_failure_visible_for_review(self):
+        def generate(result, **kwargs):
+            self.assertIn('printed brand name', kwargs['feedback_by_shot'][2])
+            shot = result['shots'][1]
+            shot.update(still_frame_key='repair.png', still_frame_url='https://example.invalid/repair.png',
+                        still_frame_verification={'approved':False, 'reason':'Brand lettering remains misspelled'})
+        with patch.object(still, 'generate_still_frames', side_effect=generate):
+            response = self.client.post(self.base + '/replacement', json={
+                'expected_key':'old-2.png', 'hint':'Correct the printed brand name exactly'})
+        self.assertEqual(response.status_code, 202)
+        candidate = self.result()['shots'][1]['preview_replacement']
+        self.assertEqual(candidate['status'], 'ready')
+        self.assertIn('Brand lettering remains misspelled', candidate['warning'])
+        response = self.client.post(self.base + '/decision', json={
+            'token':candidate['token'], 'accept':True})
+        self.assertEqual(response.status_code, 409)
 
     def test_discard_and_stale_completion_cannot_replace_current(self):
         with self.sessions() as db:

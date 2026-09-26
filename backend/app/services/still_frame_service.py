@@ -408,7 +408,11 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
         "Check this single opening-frame preview against the compiled visual description and any "
         "locked character references. Reject clear identity/outfit changes, wrong subject or framing, "
         + ("collages, invented captions, changed product branding/shape/packaging, or a later completed action. Existing text/logos on approved product packaging are required and must NOT be rejected as readable text. " if product_reference
-           else "collages, readable text, or a later completed action instead of the described opening. ") +
+           else "collages, invented captions or unrequested readable text, or a later completed action instead of the described opening. ") +
+        "For a named branded product, inspect the actual visible package lettering. Reject a "
+        "misspelled, duplicated, partial, or invented brand name; quote the letters you can read "
+        "in props_contact evidence. Do not claim correct branding from shape or placement alone. "
+        "If lettering is too small or obscured to judge, mark this check uncertain. "
         "Ignore motion/audio requirements that cannot be depicted in a still. Treat explicit "
         "spatial requirements as hard acceptance criteria. Compare inside/outside placement and "
         "support against the specified opening, respecting intentionally airborne/fantastical subjects. "
@@ -629,6 +633,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
         shot.pop("still_frame_source_hash", None)
         shot.pop("still_frame_warning", None)
         shot.pop("still_frame_error_kind", None)
+        shot.pop("still_frame_verification", None)
         shot["still_frame_status"] = "pending"
         if not shot.get("compiled_prompt") and not shot.get("preview_input"):
             continue  # Dialogue jobs wait for real post-approval compilation.
@@ -697,6 +702,15 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
             request_contract = shot.get("still_frame_contract") if facts else visual
             if facts and not request_contract:
                 raise StillFrameError("Image instructions were not prepared before generation")
+            if requested_adjustment:
+                # A replacement must be checked against the requested repair,
+                # not only the original contract that admitted the bad image.
+                request_contract = copy.deepcopy(request_contract)
+                if isinstance(request_contract, dict):
+                    request_contract.setdefault("global_rules", []).append(
+                        "Replacement requirement: " + requested_adjustment)
+                else:
+                    request_contract += "\nReplacement requirement: " + requested_adjustment
             emit("still_frame", f"Shot {number}: considering {len(references)} locked image reference(s) before budget selection.")
             if continuation:
                 emit("still_frame", f"Shot {number}: considering previous-shot action anchor from shot {continuation[0]} "

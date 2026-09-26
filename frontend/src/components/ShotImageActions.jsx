@@ -3,7 +3,7 @@ import { Alert, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, Dia
 import { RefreshCw, Upload } from "lucide-react";
 import { replaceShotPreview } from "../api/client";
 
-export default function ShotImageActions({ jobId, shot, aspectRatio, disabled, onRefresh }) {
+export default function ShotImageActions({ jobId, shot, aspectRatio, disabled, onRefresh, repairMarkings = false }) {
   const [mode, setMode] = useState(null);
   const [hint, setHint] = useState("");
   const [file, setFile] = useState(null);
@@ -16,6 +16,7 @@ export default function ShotImageActions({ jobId, shot, aspectRatio, disabled, o
   const pending = candidate?.status === "working";
   const ready = candidate?.status === "ready";
   const ratio = (aspectRatio || "16:9").replace(":", "/");
+  const markingHint = "Correct the product's printed brand name to match the approved shot plan exactly. Remove misspelled, duplicated, partial, or invented letters. Keep the same product shape, camera framing, lighting, background, and physical placement. Do not add other text.";
   useEffect(() => {
     if (!file) { setFileUrl(""); return; }
     const url = URL.createObjectURL(file); setFileUrl(url);
@@ -40,6 +41,14 @@ export default function ShotImageActions({ jobId, shot, aspectRatio, disabled, o
     return act("replacement", { expected_key: shot.still_frame_key || "", hint });
   }
   return <Box sx={{ my: 2 }} data-testid={`image-actions-${shot.shot_number}`}>
+    {repairMarkings && !pending && !ready && <Alert severity="warning" sx={{ mb: 1 }}>
+      The product lettering did not hold up in the video. We can make a corrected image for this shot while keeping the others and the saved voice.
+      <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1} sx={{ mt: 1 }}>
+        <Button variant="contained" disabled={disabled || busy} onClick={() => act("replacement", { expected_key: shot.still_frame_key || "", hint: markingHint })} data-testid={`fix-product-image-${shot.shot_number}`}>Fix product image for me</Button>
+        <Button disabled={disabled || busy} onClick={() => { setError(""); setMode("upload"); }}>Upload a product image</Button>
+      </Stack>
+    </Alert>}
+    {shot.video_source_changed && shot.video_status === "review_required" && <Alert severity="info" sx={{ mb: 1 }}>Your new image is ready. Use “Regenerate corrected video” below to make this shot with the new image.</Alert>}
     <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1}>
       <Button startIcon={<RefreshCw size={16} />} variant="outlined" disabled={disabled || busy || pending || ready} onClick={() => { setError(""); setMode("generate"); }} data-testid={`regenerate-image-${shot.shot_number}`}>Regenerate image</Button>
       <Button startIcon={<Upload size={16} />} disabled={disabled || busy || pending || ready} onClick={() => { setError(""); setMode("upload"); }} data-testid={`upload-image-${shot.shot_number}`}>Upload image</Button>

@@ -92,6 +92,10 @@ def decide(db, job_id, number, token, accept, acknowledge=False):
         shot["previous_still_frame_key"] = shot.get("still_frame_key")
         shot.update(still_frame_key=candidate["key"], still_frame_url=candidate["url"],
                     still_frame_source_hash=_hash(result, shot), still_frame_status="ready")
+        if candidate.get("verification") is not None:
+            shot["still_frame_verification"] = candidate["verification"]
+        else:
+            shot.pop("still_frame_verification", None)
         shot.pop("still_frame_warning", None)
         shot.pop("preview_replacement", None)
         # Do not feed an obsolete accepted image to future shots. Existing siblings
@@ -155,6 +159,13 @@ def run(job_id, number, token, snapshot, hint="", upload=None):
                     raise still.StillFrameError("Both candidates failed or the image service was unavailable.")
                 fields = {"status": "ready", "key": shot["still_frame_key"], "url": shot["still_frame_url"],
                           "entity_references": snapshot.get("entity_references", {})}
+                if "still_frame_verification" in shot:
+                    verdict = shot["still_frame_verification"] or {}
+                    fields["verification"] = verdict
+                    if verdict.get("approved") is False:
+                        fields["warning"] = "This image differs from the requested correction: " + str(verdict.get("reason") or "The visual check did not pass.")
+                    elif verdict.get("approved") is None:
+                        fields["warning"] = "We couldn't verify this replacement image. Review it carefully before using it."
             else:
                 # Uploaded pixels are a deliberate user choice, never silently regenerated.
                 # Check against locked identity/style and display any discrepancy for review.
@@ -164,6 +175,7 @@ def run(job_id, number, token, snapshot, hint="", upload=None):
                 visual = preview_visual(facts) if facts else still.visual_description(shot["compiled_prompt"])
                 request_contract = shot.get("still_frame_contract") or (visual_contract(facts, visual) if facts else visual)
                 warning = ""
+                verdict = None
                 try:
                     refs = []
                     names = {n.casefold() for n in shot.get("characters_in_shot", [])}
@@ -177,7 +189,8 @@ def run(job_id, number, token, snapshot, hint="", upload=None):
                 except Exception:
                     warning = "We couldn't check this image against the planned scene and character. Review it carefully before using it."
                 stored = storage_service.upload_bytes(key=f"jobs/{job_id}/stills/{number}-upload-{token}.png", body=upload, content_type="image/png")
-                fields = {"status": "ready", "key": stored["key"], "url": stored["url"], "warning": warning}
+                fields = {"status": "ready", "key": stored["key"], "url": stored["url"], "warning": warning,
+                          "verification": verdict}
             finish(db, job_id, number, token, fields)
         except Exception as error:
             db.rollback()
