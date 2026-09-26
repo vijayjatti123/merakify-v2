@@ -115,6 +115,13 @@ class ComplianceTests(unittest.TestCase):
         with patch.object(gate, 'inspect') as vision, patch.object(video, 'provider') as api:
             self.assertFalse(self.check())
             vision.assert_not_called(); api.assert_not_called()
+    def test_user_stop_recovers_indexed_status_mismatch(self):
+        row = self.db.query(VideoTask).one()
+        row.status = 'review_required'  # UI JSON still reports processing.
+        self.db.commit()
+        self.assertTrue(jobs.stop_video(self.db, self.job.id, 1, 'first'))
+        self.assertEqual(self.data()['video_status'], 'review_required')
+        self.assertTrue(self.data()['video_stop_requested'])
     def test_checker_failure_fails_open_no_paid_retry(self):
         with patch.object(gate,'inspect',side_effect=TimeoutError()),patch.object(video,'provider') as api:
             self.assertTrue(self.check());api.assert_not_called()

@@ -680,7 +680,11 @@ def stop_video(db, job_id, number, expected_attempt):
     attempt = data.get("video_task_id") or data.get("video_submitted_at")
     if attempt != expected_attempt:
         raise ValueError("This video attempt changed. Refresh and try again.")
-    if row.status not in {"submitting", "processing", "submission_unknown"}:
+    # Older/racing completion writes can leave the row's indexed status and
+    # task JSON status different. The UI reads task JSON, so stop any attempt
+    # that still appears active there even when the indexed row says finished.
+    if data.get("video_stop_requested") or (row.status not in {"submitting", "processing", "submission_unknown"}
+            and data.get("video_status") not in {"submitting", "processing", "submission_unknown"}):
         return False
     data.update(video_stop_requested=True, video_status="review_required", video_phase="stopped",
                 video_error="Stopped by you. No further automatic checks or retries will run for this attempt.")
