@@ -56,12 +56,13 @@ class GeneratedAudio:
     provider: str
 
 
-def _prepare_preview_snapshot(result: dict, job_id: str, shot_numbers: set[int] | None = None) -> dict:
+def _prepare_preview_snapshot(result: dict, job_id: str, shot_numbers: set[int] | None = None,
+                              on_progress=None) -> dict:
     """Render opening frames without touching the owner thread's DB session.
 
     Opening-frame inputs deliberately exclude dialogue audio and measured timing,
-    so this paid work can safely overlap TTS. Events stay on the private snapshot
-    until the owning task merges it after audio writes finish.
+    so this paid work can safely overlap TTS. Diagnostics stay on the private
+    snapshot; visible shot progress is handed to the owning task immediately.
     """
     from app.services.still_frame_service import generate_still_frames
 
@@ -73,6 +74,7 @@ def _prepare_preview_snapshot(result: dict, job_id: str, shot_numbers: set[int] 
         job_id=job_id,
         emit=lambda key, note: events.append((key, note)),
         shot_numbers=shot_numbers,
+        on_progress=on_progress,
     )
     return {
         "result": snapshot,
@@ -422,8 +424,10 @@ async def generate_job_dialogue_audio(
     # Opening-frame contracts exclude dialogue, measured audio duration and
     # signed audio URLs. Start previews now instead of making every image wait
     # for TTS. The worker owns a deep copy and never touches the SQLAlchemy
-    # session; its fields are merged by this owner after audio writes finish.
+    # session; this owner persists progress and merges the final image state.
     preview_task = None
+    preview_progress_task = None
+    preview_updates = None
     if (
         result.get("generation_approved") is True
         and result.get("preview_preparation_pending")
@@ -439,14 +443,54 @@ async def generate_job_dialogue_audio(
             "media_preparation_timing",
             json.dumps({"branch": "previews", "phase": "started_with_audio", "elapsed_sec": 0.0}),
         )
+        # The image worker owns only a snapshot. Deliver its progress to the
+        # owning event loop; only this task may write the job's DB row while
+        # speech generation is also updating it.
+        loop = asyncio.get_running_loop()
+        preview_updates = asyncio.Queue()
+
+        def report_preview_progress(snapshot):
+            loop.call_soon_threadsafe(preview_updates.put_nowait, copy.deepcopy(snapshot))
+
+        async def persist_preview_progress():
+            last_visible_state = None
+            while True:
+                snapshot = await preview_updates.get()
+                if snapshot is None:
+                    return
+                # A burst of worker updates needs only its newest state.
+                while not preview_updates.empty():
+                    latest = preview_updates.get_nowait()
+                    if latest is None:
+                        return
+                    snapshot = latest
+                visible_state = [(shot.get("shot_number"), shot.get("still_frame_status"),
+                    shot.get("still_frame_url"), shot.get("still_frame_warning"),
+                    shot.get("still_frame_display"), shot.get("still_frame_verification"),
+                    shot.get("still_frame_retrying")) for shot in snapshot.get("shots", [])]
+                if visible_state == last_visible_state:
+                    continue
+                last_visible_state = visible_state
+                current_job = job_service.get_job(db, job_id)
+                current = job_service.job_result(current_job) if current_job else None
+                if current:
+                    _merge_preview_snapshot(current, snapshot)
+                    job_service.set_result(db, job_id, current)
+
+        preview_progress_task = asyncio.create_task(persist_preview_progress())
         preview_task = asyncio.create_task(
             asyncio.to_thread(
                 _prepare_preview_snapshot,
                 result,
                 job_id,
                 shot_numbers,
+                report_preview_progress,
             )
         )
+        # Submit the image work before synchronous per-shot status writes below.
+        # Otherwise a six-shot job can spend many DB round trips merely queued
+        # while its preview and dialogue branches appear to be "parallel".
+        await asyncio.sleep(0)
 
     selected = [
         shot
@@ -485,7 +529,15 @@ async def generate_job_dialogue_audio(
     )
     if preview_task is not None:
         try:
-            preview_work = await preview_task
+            try:
+                preview_work = await preview_task
+            finally:
+                preview_updates.put_nowait(None)
+                try:
+                    await preview_progress_task
+                except Exception as error:
+                    job_service.append_event(db, job_id, "still_frame",
+                        f"Live preview progress unavailable ({type(error).__name__}); final image results are still retained.")
             current_job = job_service.get_job(db, job_id)
             current = job_service.job_result(current_job) if current_job else None
             if current:

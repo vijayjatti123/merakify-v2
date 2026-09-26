@@ -126,6 +126,7 @@ class ProviderRoutingTests(unittest.IsolatedAsyncioTestCase):
 class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
     async def test_preview_work_starts_while_dialogue_audio_is_still_running(self) -> None:
         preview_started = threading.Event()
+        preview_visible = asyncio.Event()
         result = {
             "generation_approved": True,
             "preview_preparation_pending": True,
@@ -142,7 +143,7 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
         }
         job = SimpleNamespace(language="English")
 
-        def previews(snapshot, _job_id, _shot_numbers):
+        def previews(snapshot, _job_id, _shot_numbers, on_progress):
             preview_started.set()
             rendered = {**snapshot}
             rendered["shots"] = [{
@@ -150,16 +151,22 @@ class JobVoiceGenerationTests(unittest.IsolatedAsyncioTestCase):
                 "still_frame_status": "ready",
                 "still_frame_url": "https://images.test/one.jpg",
             }]
+            on_progress(rendered)
             return {"result": rendered, "events": [], "elapsed_sec": 0.01}
 
         async def dialogue(*_args, **_kwargs):
             started_in_time = await asyncio.to_thread(preview_started.wait, 0.5)
             self.assertTrue(started_in_time)
+            await asyncio.wait_for(preview_visible.wait(), 0.5)
+
+        def save_result(_db, _job_id, current):
+            if current["shots"][0].get("still_frame_status") == "ready":
+                preview_visible.set()
 
         with (
             patch("app.services.voice_generation_service.job_service.get_job", return_value=job),
             patch("app.services.voice_generation_service.job_service.job_result", return_value=result),
-            patch("app.services.voice_generation_service.job_service.set_result"),
+            patch("app.services.voice_generation_service.job_service.set_result", side_effect=save_result),
             patch("app.services.voice_generation_service.job_service.append_event"),
             patch("app.services.voice_timing.select_calibrated_voices", return_value=[]),
             patch("app.agents.director._attach_voice_refs", side_effect=lambda shots, *_args: shots),
