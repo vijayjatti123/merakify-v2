@@ -31,6 +31,22 @@ def mentions(text, name):
     return bool(words and " " + " ".join(words) + " " in haystack)
 
 
+def inherited_spirit_identity(name, characters):
+    """A person's spirit keeps that person's approved visual identity.
+
+    Only the explicit possessive form is eligible. Do not guess that an
+    unrelated ghost or a similarly named character is the same person.
+    """
+    match = re.fullmatch(r"(.+?)[’']s (?:spirit|ghost|soul)", name.strip(), re.IGNORECASE)
+    if not match:
+        return None
+    owners = [character for character in characters
+              if character.get("name", "").casefold() == match.group(1).casefold()]
+    if len(owners) != 1 or not owners[0].get("image_url"):
+        return None
+    return owners[0]
+
+
 def build(result, shot, *, limit, tag_style, refresh):
     if not shot.get("still_frame_url"):
         raise ValueError("An accepted scene preview is required; a portrait cannot replace it")
@@ -38,11 +54,17 @@ def build(result, shot, *, limit, tag_style, refresh):
     optional, warnings = [], []
     cast = list(dict.fromkeys(shot.get("characters_in_shot", [])))
     opening = shot.get("opening_characters", cast)
+    characters = result.get("continuity", {}).get("characters", [])
     for name in cast:
-        matches = [c for c in result.get("continuity", {}).get("characters", []) if c.get("name", "").casefold() == name.casefold()]
+        matches = [c for c in characters if c.get("name", "").casefold() == name.casefold()]
         if len(matches) > 1:
             raise ValueError(f"Ambiguous character binding for {name}; resolve the character ID before rendering")
         character = matches[0] if matches else {}
+        inherited = None
+        if not character.get("image_url") and not character.get("character_id"):
+            inherited = inherited_spirit_identity(name, characters)
+            if inherited:
+                character = inherited
         cid = character.get("character_id")
         url = character.get("image_url")
         if cid and not url:
@@ -51,7 +73,9 @@ def build(result, shot, *, limit, tag_style, refresh):
             raise ValueError(f"{name} enters after the opening but has no identity reference; establish an approved reference first")
         if not url:
             continue  # Legacy/invented cast can already be established in the preview.
-        role = f"{name} identity only: face, hair, clothing; not a new subject or scene layout"
+        role = (f"{name} is the translucent spirit of {character['name']}: use the SAME face and identity, "
+                "but render the directed ghostly appearance; do not add another living person or copy this portrait's scene layout"
+                if inherited else f"{name} identity only: face, hair, clothing; not a new subject or scene layout")
         if name not in opening:
             role += "; enters later, do not add to the opening before the directed entrance"
         required.append(("character", cid or name, role, url))

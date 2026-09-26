@@ -16,6 +16,8 @@ export const JARGON_REPLACEMENTS = [
 export function friendlyMessage(value, context = "This step could not finish. Please try again.", { warning = false } = {}) {
   if (!value) return "";
   const text = String(value);
+  const missingEntranceIdentity = text.match(/^(.+?) enters after the opening but has no identity reference/);
+  if (missingEntranceIdentity) return `We couldn't match ${missingEntranceIdentity[1]} to an approved character image. This video has not started. Choose a saved character for this shot or add its image, then try again.`;
   // Provider failures must never become speculative review advice because a
   // generic provider message happens to mention duration/framing/style.
   if (/invalid_parameters|invalid parameters/i.test(text)) return "The video service rejected this shot's inputs. No video was created. Retry video generation; your preview and approved speech are saved.";

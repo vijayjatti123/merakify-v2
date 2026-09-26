@@ -12,6 +12,12 @@ test('actual production rejection is an input failure, never speech-timing advic
   assert.doesNotMatch(friendlyMessage(providerError), /listen|timing may differ/i);
   assert.equal(friendlyMessage('Provider duration validation failed', 'Video failed'), 'Video failed');
 });
+test('missing entrance identity explains the pre-submission block', () => {
+  const message = friendlyMessage("Carpenter's Spirit enters after the opening but has no identity reference; establish an approved reference first");
+  assert.match(message, /Carpenter's Spirit/);
+  assert.match(message, /video has not started/i);
+  assert.doesNotMatch(message, /This step could not finish/);
+});
 test('no result review notices while waiting or after a failed request', () => {
   for (const video_status of [undefined, 'submitting', 'processing', 'failed', 'review_required']) {
     assert.deepEqual(videoReviewWarnings({video_status, video_warnings:warnings, experimental_audio_sync:true}), []);

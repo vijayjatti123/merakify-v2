@@ -88,6 +88,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const [assembling, setAssembling] = useState(false);
   const [streamCycle, setStreamCycle] = useState(0);
   const [videoSubmitting, setVideoSubmitting] = useState(null);
+  const [shotActionError, setShotActionError] = useState({});
   const [statusRefreshing, setStatusRefreshing] = useState(null);
   const [videoHints, setVideoHints] = useState({});
   const [previewSubmitting, setPreviewSubmitting] = useState(null);
@@ -113,10 +114,11 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   async function handleVideo(shotNumber) {
     setVideoSubmitting(shotNumber);
     setError("");
+    setShotActionError((current) => ({ ...current, [shotNumber]: null }));
     try {
       await generateShotVideo(jobId, shotNumber);
     } catch (err) {
-      setError(err.message);
+      setShotActionError((current) => ({ ...current, [shotNumber]: err.message }));
     } finally {
       try { setFinal(await getJob(jobId)); } catch (err) { setError(err.message); }
       setVideoSubmitting(null);
@@ -273,13 +275,14 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
     const hint = (videoHints[shotNumber] || "").trim();
     setRegeneratingShot(shotNumber);
     setError("");
+    setShotActionError((current) => ({ ...current, [shotNumber]: null }));
     try {
       const shot = shots.find((item) => item.shot_number === shotNumber);
       await regenerateShotVideo(jobId, shot, hint);
       setVideoHints((current) => ({ ...current, [shotNumber]: "" }));
       setFinal(await getJob(jobId));
     } catch (regenerateError) {
-      setError(regenerateError.message);
+      setShotActionError((current) => ({ ...current, [shotNumber]: regenerateError.message }));
     } finally {
       try { setFinal(await getJob(jobId)); } catch (err) { setError(err.message); }
       setRegeneratingShot(null);
@@ -455,6 +458,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     {(videoSubmitting === shot.shot_number || regeneratingShot === shot.shot_number || ["submitting", "processing"].includes(shot.video_status)) && <ActionProgress label={shot.video_phase === "preparing_voice" ? `Preparing the saved voice for shot ${shot.shot_number}…` : shot.video_phase === "correcting" ? `Correcting shot ${shot.shot_number} automatically…` : shot.video_status === "processing" && shot.video_error ? `Finishing the saved video for shot ${shot.shot_number}…` : `Generating video for shot ${shot.shot_number}…`} />}
                     {savingShot === shot.shot_number && <ActionProgress label="Saving your changes and checking the shot…" />}
                     {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
+                    {shotActionError[shot.shot_number] && <Alert severity="error" data-testid={`shot-action-error-${shot.shot_number}`}>{friendlyMessage(shotActionError[shot.shot_number])}</Alert>}
                     {shot.video_status === "review_required" ? (() => {
                       const guidance = videoReviewGuidance(shot);
                       return <Alert severity="warning" data-testid={`video-review-required-${shot.shot_number}`}>

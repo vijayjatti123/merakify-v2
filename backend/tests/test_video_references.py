@@ -30,6 +30,20 @@ class ReferenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'identity'):self.build()
         self.result['continuity']['characters'].append(self.result['continuity']['characters'][0])
         with self.assertRaisesRegex(ValueError,'Ambiguous'):self.build()
+    def test_later_spirit_inherits_approved_person_identity(self):
+        self.shot['characters_in_shot']=['Meera',"Meera's Spirit"]
+        self.result['continuity']['characters'].append(dict(name="Meera's Spirit",description='Translucent form of Meera'))
+        built=self.build(tag_style='h3')
+        self.assertEqual(built['images'][1],'https://example.com/Meera.jpg')
+        self.assertEqual(len(built['images']),3)  # accepted scene, Meera, optional views
+        roles=built['manifest'][1]['roles']
+        self.assertTrue(any('translucent spirit of Meera' in role['instruction'] for role in roles))
+        self.assertTrue(any('enters later' in role['instruction'] for role in roles))
+    def test_unrelated_later_character_without_identity_still_blocks(self):
+        self.shot['characters_in_shot']=['Meera','Unknown Visitor']
+        self.result['continuity']['characters'].append(dict(name='Unknown Visitor',description='A different person'))
+        with self.assertRaisesRegex(ValueError,'Unknown Visitor enters after the opening'):
+            self.build()
     def test_style_sheet_not_silently_mixed(self):
         self.result['continuity']['characters'][0]['style_variant_id']='anime'
         r=self.build();self.assertEqual(len(r['images']),4);self.assertIn('style variant',r['warnings'][0])
