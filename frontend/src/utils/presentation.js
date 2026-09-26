@@ -71,6 +71,11 @@ export function videoReviewGuidance(shot) {
     message: 'The automatic listener could not confirm the words. The saved voice recording is applied directly, so you do not need to rewrite or control the speech.',
     action: 'The saved clip will be finished automatically without generating another video.',
   };
+  if (!shot?.characters_in_shot?.length && /staging:.*(?:characters? entering frame|figures? (?:entered|appear))/i.test(error)) return {
+    title: 'The video added people to your product shot',
+    message: 'The generated clip introduced people who are absent from the approved image and shot plan. Your shot direction is already clear.',
+    action: 'Choose Regenerate corrected video to retry from your saved product image with tighter instructions.',
+  };
   if (/staging|position|placement|inside|outside/i.test(error)) {
     const stagingReason = error.match(/staging:\s*([^;]+)/i)?.[1]?.trim();
     const requiredDetail = stagingReason?.match(/required support\s+["“]([^"”]+)["”]/i)?.[1];

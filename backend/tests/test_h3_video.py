@@ -55,6 +55,25 @@ class H3Tests(unittest.TestCase):
             if mode == "voiceover":
                 self.assertIn("No visible person moves their mouth", r["prompt"])
 
+    def test_product_only_voiceover_does_not_invite_other_story_characters(self):
+        self.result['continuity']['characters'].append({'name':'Yamaraj'})
+        self.result['continuity']['visual_style'] = {
+            'rendering':'Natural live action, lifelike skin/fabric textures',
+            'palette':'Warm wood browns, soft skin tones, muted whites',
+            'lighting_motif':'Workshop window light, golden glow emanating from Yamaraj and the bucket',
+        }
+        shot = {**self.shot, 'characters_in_shot':[], 'opening_characters':[],
+                'speech_mode':'voiceover', 'state_at_shot_start':'Bucket alone on workbench.',
+                'state_at_shot_end':'Bucket alone fills the frame.',
+                'shot_direction':{'action_beats':['Camera moves toward bucket.', 'Narrator delivers line.', 'Hold on bucket.'],
+                                  'dialogue_beat_index':2, 'forbidden_geometry':['Any human hands or characters entering frame']}}
+        prompt = video.translate(self.result, shot)['request']['prompt']
+        for cue in ('Yamaraj', 'skin tones', 'people, setting', 'wardrobe', 'mouths', 'characters entering frame'):
+            self.assertNotIn(cue, prompt)
+        self.assertIn('Bucket alone on workbench', prompt)
+        self.assertIn('product-only composition', prompt)
+        self.assertIn('"Hello there."', prompt)
+
     def test_duration_and_missing_inputs_fail_before_submission(self):
         for change in ({"duration_sec": 16}, {"duration_sec": float("nan")},
                        {"still_frame_status": "failed"}, {"still_frame_url": None},

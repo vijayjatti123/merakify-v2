@@ -14,6 +14,17 @@ def verdict(style='pass', scale='pass'):
 
 
 class ComplianceTests(unittest.TestCase):
+    def test_product_only_retry_is_concise_and_does_not_repeat_character_ban(self):
+        expected={'visible_characters': [], 'staging': {
+            'start':'Bucket alone on a workbench', 'critical_outcome':'Bucket label stays visible',
+            'forbidden_geometry':['Any human hands or characters entering frame']}}
+        correction=gate.visual_retry_instruction(expected, ['staging'])
+        self.assertIn('approved opening subjects', correction)
+        self.assertIn('Bucket label stays visible', correction)
+        self.assertNotIn('human hands', correction)
+        self.assertNotIn('characters entering frame', correction)
+        self.assertNotIn('{', correction)
+
     def setUp(self):
         self.engine=create_engine('sqlite://');Base.metadata.create_all(self.engine)
         self.db=Session(self.engine)

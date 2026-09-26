@@ -230,19 +230,9 @@ def automatic_review_correction(shot):
         return ""
     expected = shot.get("video_compliance_expected") or {}
     error = shot.get("video_error") or ""
-    requirements = {}
-    if "staging:" in error and expected.get("staging"):
-        requirements["physical_staging"] = expected["staging"]
-    if "style:" in error and expected.get("visual_style"):
-        requirements["visual_style"] = expected["visual_style"]
-    if "scale:" in error:
-        requirements["opening_frame"] = {
-            "camera_angle": expected.get("camera_angle"), "shot_scale": expected.get("shot_scale")}
-    if not requirements:
-        return ""
-    return ("Automatically correct the previous objective review failure. "
-            "Satisfy these approved requirements exactly: "
-            + json.dumps(requirements, ensure_ascii=False) + ".")
+    mismatches = [key for key in ("style", "scale", "staging") if f"{key}:" in error]
+    return render_compliance_service.visual_retry_instruction(
+        expected, mismatches, visible_characters=shot.get("characters_in_shot"))
 
 
 def regenerate_translation(result, shot, hint="", *, audio_model=None):

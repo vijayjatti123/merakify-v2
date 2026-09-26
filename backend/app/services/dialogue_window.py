@@ -113,14 +113,18 @@ def prompt_instruction(shot, duration=None, reference_label="Audio 1", *, exact_
         speaker = speaker or ("the off-screen narrator" if voiceover else shot.get("speaker_label"))
         if not speaker:
             raise ValueError("Identify the speaking character before video generation.")
-        mouth = ("No visible person moves their mouth to speak. " if voiceover else
+        mouth = (("No visible person moves their mouth to speak. " if shot.get("characters_in_shot") else "") if voiceover else
                  f"Only {speaker} visibly articulates this line; every other character remains silent. ")
+        before = (f"From 0 to {timing['start_sec']:.3f}s, the soundtrack contains no speech. " if voiceover and not shot.get("characters_in_shot") else
+                  f"From 0 to {timing['start_sec']:.3f}s, everyone is silent and mouths stay closed or naturally at rest. ")
+        after = (f"From {timing['end_sec']:.3f}s to the end, the soundtrack contains no speech. " if voiceover and not shot.get("characters_in_shot") else
+                 f"From {timing['end_sec']:.3f}s to the end, everyone is silent and mouths return to rest. ")
         return (
             "PERFORMANCE TIMELINE — one continuous shot, in this exact order:\n" + "\n".join(rows)
-            + f"\nFrom 0 to {timing['start_sec']:.3f}s, everyone is silent and mouths stay closed or naturally at rest. "
+            + "\n" + before
             + f"From {timing['start_sec']:.3f}s to {timing['end_sec']:.3f}s, {speaker} says exactly once: "
             + json.dumps(line, ensure_ascii=False) + "\n" + mouth
-            + f"From {timing['end_sec']:.3f}s to the end, everyone is silent and mouths return to rest. "
+            + after
             + f"{reference_label.capitalize()} is the only audio authority: use its exact waveform and timing. "
             + "Do not generate, move, repeat, translate or paraphrase speech. No extra words, muttering, "
               "filler, narration or captions. Perform only the approved action beats; never change screen sides "
@@ -152,6 +156,18 @@ def visual_instruction(result, shot, opening_label, *, speaking=True):
     if isinstance(style, dict):
         style = "; ".join(str(style.get(key) or "").strip() for key in
                           ("rendering", "palette", "lighting_motif", "texture_grain") if style.get(key))
+    # The global style bible can mention characters from other shots. In a
+    # product-only hero shot those names and human appearance cues become
+    # unwanted subjects for image-to-video models, even beside an exclusion.
+    if isinstance(style, str):
+        from app.services.video_references import mentions
+        cast = {name.casefold() for name in shot.get("characters_in_shot") or []}
+        absent = [character.get("name", "") for character in (result.get("continuity") or {}).get("characters", [])
+                  if character.get("name") and character["name"].casefold() not in cast]
+        parts = re.split(r"(?<=[^\s])[,;]\s*", style)
+        style = ", ".join(part for part in parts if part.strip() and
+                          not any(mentions(part, name) for name in absent) and
+                          (cast or not re.search(r"\b(?:skin|fabric|wardrobe|people|person|human|faces?|hair|divine elements)\b", part, re.I)))
     camera = [str(shot.get(key) or "").strip() for key in ("camera_angle", "camera_movement")]
     if shot.get("lens"):
         camera.append(f"lens {shot['lens']}")
@@ -190,6 +206,9 @@ def visual_instruction(result, shot, opening_label, *, speaking=True):
     ])
     invariants = direction.get("spatial_invariants") or []
     forbidden = direction.get("forbidden_geometry") or []
+    if not shot.get("characters_in_shot"):
+        forbidden = [rule for rule in forbidden if not re.search(r"\b(?:human|people|person|characters?|hands?)\b", rule, re.I)]
+        parts.append("Every frame keeps the approved opening's product-only composition and workshop setting.")
     if invariants:
         parts.append("Keep throughout: " + " ".join(invariants))
     if forbidden:

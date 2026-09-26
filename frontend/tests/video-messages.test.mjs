@@ -51,3 +51,9 @@ test('stopped clips explain the cause and the user action in plain language', ()
   assert.equal(staging.detail, 'Required detail not maintained: Kabir left hand grips doorframe.');
   assert.match(staging.action, /Edit this shot/);
 });
+test('product-only staging mismatch does not blame the approved shot', () => {
+  const guidance = videoReviewGuidance({characters_in_shot: [], video_error: 'The corrected render still violates the approved shot: staging: Violates rule forbidding characters entering frame.'});
+  assert.match(guidance.title, /added people/);
+  assert.match(guidance.message, /shot direction is already clear/);
+  assert.match(guidance.action, /Regenerate corrected video/);
+});
