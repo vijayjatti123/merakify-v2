@@ -122,6 +122,14 @@ class ComplianceTests(unittest.TestCase):
         self.assertTrue(jobs.stop_video(self.db, self.job.id, 1, 'first'))
         self.assertEqual(self.data()['video_status'], 'review_required')
         self.assertTrue(self.data()['video_stop_requested'])
+    def test_worker_release_does_not_reopen_terminal_review(self):
+        token = 'leased-once'
+        self.assertIsNotNone(jobs.video_worker_lease(self.db, self.job.id, 1, 'first', token))
+        jobs.update_video(self.db, self.job.id, 1, video_status='review_required',
+                          video_error='Unexpected speech in a silent shot.')
+        jobs.video_worker_lease(self.db, self.job.id, 1, None, token, release=True)
+        self.assertEqual(self.data()['video_status'], 'review_required')
+        self.assertEqual(self.db.query(VideoTask).one().status, 'review_required')
     def test_checker_failure_fails_open_no_paid_retry(self):
         with patch.object(gate,'inspect',side_effect=TimeoutError()),patch.object(video,'provider') as api:
             self.assertTrue(self.check());api.assert_not_called()

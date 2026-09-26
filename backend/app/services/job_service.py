@@ -739,6 +739,9 @@ def video_worker_lease(db, job_id, number, task, token, *, renew=False, release=
     if data.get("video_stop_requested"):
         db.rollback()
         return None
+    if renew and row.status == "review_required":
+        db.rollback()
+        return None
     lease = data.get("video_worker_lease", {})
     now = datetime.now(timezone.utc)
     if renew or release:
@@ -748,7 +751,7 @@ def video_worker_lease(db, job_id, number, task, token, *, renew=False, release=
           or data.get("video_task_id") != task
           or (lease.get("until") and datetime.fromisoformat(lease["until"]) > now)):
         return None
-    if row.status == "review_required":
+    if row.status == "review_required" and not (renew or release):
         data["video_status"] = "processing"
         data["video_error"] = None
     if release:
