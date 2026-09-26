@@ -140,6 +140,22 @@ class VideoRegenerateRequest(VideoGenerateRequest):
     expected_attempt: str = Field(min_length=1, max_length=160)
 
 
+class VideoStopRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_attempt: str = Field(min_length=1, max_length=160)
+
+
+@router.post("/{job_id}/shots/{shot_number}/video/stop")
+def stop_video(job_id: str, shot_number: int, payload: VideoStopRequest, db: Session = Depends(get_db)):
+    try:
+        stopped = job_service.stop_video(db, job_id, shot_number, payload.expected_attempt)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"status": "stopped" if stopped else "already_finished"}
+
+
 @router.post("/{job_id}/shots/{shot_number}/video/regenerate", status_code=202)
 def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     from app.services import video_generation_service as video

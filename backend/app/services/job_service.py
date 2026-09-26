@@ -653,6 +653,9 @@ def update_video(db, job_id, number, **fields):
         row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).with_for_update().populate_existing().one()
         old_json = row.data_json
         data = json.loads(old_json)
+        if data.get("video_stop_requested"):
+            db.rollback()
+            return False
         if ((expected_task is not None and data.get("video_task_id") != expected_task)
                 or (expected_started is not None and data.get("video_submitted_at") != expected_started)):
             db.rollback()
@@ -667,8 +670,39 @@ def update_video(db, job_id, number, **fields):
     raise ValueError("Video task changed concurrently; retry the saved task update")
 
 
+def stop_video(db, job_id, number, expected_attempt):
+    """Stop local polling/correction for one active attempt; provider work may remain billed."""
+    row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).populate_existing().one_or_none()
+    if row is None:
+        raise LookupError("Video attempt not found")
+    old_json = row.data_json
+    data = json.loads(old_json)
+    attempt = data.get("video_task_id") or data.get("video_submitted_at")
+    if attempt != expected_attempt:
+        raise ValueError("This video attempt changed. Refresh and try again.")
+    if row.status not in {"submitting", "processing", "submission_unknown"}:
+        return False
+    data.update(video_stop_requested=True, video_status="review_required", video_phase="stopped",
+                video_error="Stopped by you. No further automatic checks or retries will run for this attempt.")
+    changed = db.query(VideoTask).filter(VideoTask.id == row.id, VideoTask.data_json == old_json).update(
+        {VideoTask.data_json: json.dumps(data), VideoTask.status: "review_required"}, synchronize_session=False)
+    if changed != 1:
+        db.rollback()
+        raise ValueError("This video attempt changed. Refresh and try again.")
+    db.commit()
+    append_event(db, job_id, "video_generation", f"Shot {number}: user stopped local processing and automatic retries.")
+    return True
+
+
+def video_was_stopped(db, job_id, number):
+    row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).populate_existing().one_or_none()
+    return bool(row and json.loads(row.data_json).get("video_stop_requested"))
+
+
 
 def _recoverable_locked_audio_review(data):
+    if data.get("video_stop_requested"):
+        return False
     if data.get("video_status") != "review_required":
         return False
     if (data.get("video_audio_lock") or {}).get("policy") != "approved-dialogue-plus-silence-v1":
@@ -698,6 +732,9 @@ def video_worker_lease(db, job_id, number, task, token, *, renew=False, release=
         return None
     old = row.data_json
     data = json.loads(old)
+    if data.get("video_stop_requested"):
+        db.rollback()
+        return None
     lease = data.get("video_worker_lease", {})
     now = datetime.now(timezone.utc)
     if renew or release:

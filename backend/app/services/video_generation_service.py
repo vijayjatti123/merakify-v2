@@ -327,6 +327,8 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
         job_service.update_video(db, job_id, number, video_status='failed', video_error=str(error))
         raise
     try:
+        if job_service.video_was_stopped(db, job_id, number):
+            return {"status": "stopped"}
         if voice_setup:
             key, sample = voice_setup
             kling_voice_service.ensure(db, key, sample)

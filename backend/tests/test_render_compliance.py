@@ -97,6 +97,24 @@ class ComplianceTests(unittest.TestCase):
             self.shot['video_task_id']='second'
             self.assertFalse(self.check());self.assertEqual(api.call_count,1)
             self.assertEqual(self.data()['video_status'], 'review_required')
+    def test_misspelled_product_label_stops_before_paid_video_retry(self):
+        check = verdict()
+        check['verdict']['staging'] = {'status':'mismatch', 'observed':'bucket lettering',
+                                       'reason':'Violates forbidden geometry rule against misspelled brand markings'}
+        with patch.object(gate, 'inspect', return_value=check), patch.object(video, 'provider') as api:
+            self.assertFalse(self.check())
+            api.assert_not_called()
+        self.assertEqual(self.data()['video_status'], 'review_required')
+        self.assertEqual(self.data()['video_compliance_retries'], 0)
+        self.assertIn('Product label needs image repair', self.data()['video_error'])
+    def test_user_stop_prevents_later_worker_updates_and_retries(self):
+        self.assertTrue(jobs.stop_video(self.db, self.job.id, 1, 'first'))
+        self.assertEqual(self.data()['video_status'], 'review_required')
+        self.assertTrue(self.data()['video_stop_requested'])
+        self.assertFalse(jobs.update_video(self.db, self.job.id, 1, video_status='done'))
+        with patch.object(gate, 'inspect') as vision, patch.object(video, 'provider') as api:
+            self.assertFalse(self.check())
+            vision.assert_not_called(); api.assert_not_called()
     def test_checker_failure_fails_open_no_paid_retry(self):
         with patch.object(gate,'inspect',side_effect=TimeoutError()),patch.object(video,'provider') as api:
             self.assertTrue(self.check());api.assert_not_called()

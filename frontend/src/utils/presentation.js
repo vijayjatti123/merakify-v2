@@ -69,8 +69,13 @@ export function videoReviewWarnings(shot) {
 
 export function videoReviewGuidance(shot) {
   const error = String(shot?.video_error || '');
+  if (shot?.video_stop_requested) return {
+    title: 'This shot is stopped',
+    message: 'We stopped checking and retrying this video. An already-submitted provider task may still finish or incur a charge.',
+    action: 'Your plan, image, and saved speech remain available. Restart this shot only when you choose to.',
+  };
   const hasVisualFinding = /staging|position|placement|inside|outside|style|appearance|identity|scale|framing|composition/i.test(error);
-  if (/misspell|label markings|packaging (?:text|markings)|printed (?:text|label)/i.test(error)) return {
+  if (/misspell|label markings|brand markings|packaging (?:text|markings)|printed (?:text|label)/i.test(error)) return {
     title: 'The product label needs a closer look',
     message: shot.video_source_changed ? 'The previous video used the older shot image. Your new image is ready.' : 'The video checker found a problem with the printed markings on the product. This is unrelated to the voice-over.',
     action: shot.video_source_changed ? 'Use Regenerate corrected video below to make this shot with the new image.' : 'Use Fix product image for me above. Review the corrected image, then regenerate this shot’s video. You can upload a real product image if the lettering remains wrong.',

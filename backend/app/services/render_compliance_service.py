@@ -313,6 +313,16 @@ def accept(db, job_id, shot, media, *, check_cache=None):
     if data.get("video_retry_submission_unknown"):
         warning(db, job_id, number, task, data, "retry submission remains uncertain; accepting original without further charges. " + detail)
         return True
+    label_reason = verdict.get("staging", {}).get("reason", "")
+    if (verdict.get("staging", {}).get("status") == "mismatch" and
+            re.search(r"misspell|brand markings|label markings|packaging (?:text|lettering)|printed (?:text|label)|garbled (?:text|lettering)", label_reason, re.I)):
+        # A second render from the same incorrect product still cannot repair
+        # its source lettering. Route to image correction instead of charging.
+        job_service.update_video(db, job_id, number, expected_task_id=task,
+                                 video_status="review_required", video_error="Product label needs image repair: " + detail)
+        job_service.append_event(db, job_id, "render_compliance",
+            f"Shot {number}: product lettering mismatch stopped without a paid video retry; repair the opening image first.")
+        return False
     if data.get("video_compliance_retries", 0):
         job_service.update_video(db, job_id, number, expected_task_id=task, video_status="review_required",
                                  video_error="The corrected render still violates the approved shot: " + detail)
