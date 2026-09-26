@@ -76,23 +76,23 @@ export function videoReviewGuidance(shot) {
       title: 'The action or placement did not match',
       message: 'A person or object was not positioned as described in the approved shot.',
       detail: requiredDetail ? `Required detail not maintained: ${requiredDetail}.` : stagingReason,
-      action: `${/speech|dialogue|spoken/i.test(error) ? 'Your approved voice recording remains saved. ' : ''}Describe the placement you want below, then regenerate this shot.`,
+      action: `${/speech|dialogue|spoken/i.test(error) ? 'Your approved voice recording remains saved. ' : ''}Choose Edit this shot to correct the action, or try the corrected video again.`,
     };
   }
   if (/style|appearance|identity/i.test(error)) return {
     title: 'The visual result did not match',
     message: 'The clip did not preserve the approved character appearance or visual style closely enough.',
-    action: 'Add the correction you want below, then regenerate this shot.',
+    action: 'Choose Edit this shot to describe the intended look, or try the corrected video again.',
   };
   if (/scale|framing|composition/i.test(error)) return {
     title: 'The framing did not match',
     message: 'The subject size or composition differed from the approved opening image.',
-    action: 'Describe the framing you want below, then regenerate this shot.',
+    action: 'Choose Edit this shot to describe the framing, or try the corrected video again.',
   };
   return {
     title: 'This clip needs another try',
     message: 'The generated clip did not match the approved shot closely enough.',
-    action: 'Describe what should change below, then regenerate this shot.',
+    action: 'Choose Edit this shot to describe what should change, or try the corrected video again.',
   };
 }
 

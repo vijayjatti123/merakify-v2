@@ -31,23 +31,29 @@ class H3Tests(unittest.TestCase):
             shot = {**self.shot, "has_dialogue": mode != "none", "speech_mode": mode}
             t = video.translate(self.result, shot)
             r = t["request"]
-            self.assertEqual(t["model"], "minimax/h3-max/reference-to-video")
-            self.assertEqual(r["reference_image_urls"][0], shot["still_frame_url"])
-            self.assertEqual(r["reference_image_urls"][1], "https://example.com/portrait.jpg")
-            self.assertIn("Image 1:", r["prompt"])
-            self.assertNotIn("@image", r["prompt"])
+            self.assertEqual(t["model"], "minimax/h3-max/reference-to-video" if mode == "none" else
+                             "minimax/h3-max/image-to-video")
             self.assertEqual(r["prompt_expansion_mode"], "disabled")
             self.assertEqual(r["duration"], 5)
             self.assertEqual(r["resolution"], "768P")
-            self.assertEqual("reference_audio_urls" in r, mode != "none")
-            if mode != "none":
-                self.assertIn("Hello there.", r["prompt"])
-                self.assertIn("Audio 1", r["prompt"])
+            if mode == "none":
+                self.assertEqual(r["reference_image_urls"][:2],
+                                 [shot["still_frame_url"], "https://example.com/portrait.jpg"])
+                self.assertIn("Image 1:", r["prompt"])
+                self.assertNotIn("target_audio_url", r)
+            else:
+                self.assertEqual(r["image_url"], shot["still_frame_url"])
+                self.assertEqual(r["target_audio_url"], shot["dialogue_audio_url"])
+                self.assertNotIn("reference_image_urls", r)
+                self.assertNotIn("reference_audio_urls", r)
+                self.assertIn('"Hello there."', r["prompt"])
                 self.assertIn("PERFORMANCE TIMELINE", r["prompt"])
-                self.assertIn("pronunciation reference only", r["prompt"])
-                self.assertIn("waveform must not be laid over", r["prompt"])
+                self.assertIn("only authority for action order and speech", r["prompt"])
+                self.assertNotIn("then looks up to speak", r["prompt"])
+                self.assertIn("only audio authority", r["prompt"])
+                self.assertIn("everyone is silent", r["prompt"])
             if mode == "voiceover":
-                self.assertIn("No visible person speaks", r["prompt"])
+                self.assertIn("No visible person moves their mouth", r["prompt"])
 
     def test_duration_and_missing_inputs_fail_before_submission(self):
         for change in ({"duration_sec": 16}, {"duration_sec": float("nan")},
@@ -65,6 +71,16 @@ class H3Tests(unittest.TestCase):
         self.assertNotIn("video_urls", t["request"])
         self.assertIn("Warmer lighting", t["request"]["prompt"])
 
+    def test_silent_shot_keeps_directed_action_order_without_inventing_speech(self):
+        shot = {**self.shot, "has_dialogue": False, "speech_mode": "none",
+                "description": "Kabir reaches for the bottle.",
+                "shot_direction": {"action_beats": ["Kabir hesitates.", "Kabir reaches for the bottle."]}}
+        request = video.translate(self.result, shot)["request"]
+        prompt = request["prompt"]
+        self.assertLess(prompt.index("Kabir hesitates."), prompt.rindex("Kabir reaches for the bottle."))
+        self.assertIn("no dialogue, muttering", prompt)
+        self.assertNotIn("target_audio_url", request)
+
     def test_short_audio_preflight_and_durable_request(self):
         self.audio_preflight.stop()
         self.shot["dialogue_audio_duration_sec"] = 1
@@ -74,7 +90,7 @@ class H3Tests(unittest.TestCase):
         with patch.object(refs.httpx, "stream", return_value=download), patch.object(refs.storage_service, "upload_bytes", return_value={"key":"padded.wav"}), patch.object(refs.storage_service, "asset_url", return_value="https://example.com/padded.wav"), patch.object(audio,"submit",return_value={"id":"h3-task","status_url":"https://queue.fal.run/status","response_url":"https://queue.fal.run/result"}) as submit:
             video.start(self.db, self.job.id, 1)
             r = submit.call_args.args[1]
-            self.assertEqual(r["reference_audio_urls"], ["https://example.com/padded.wav"])
+            self.assertEqual(r["target_audio_url"], "https://example.com/padded.wav")
             saved = jobs.video_source(self.db, self.job.id, 1)[1]
             self.assertEqual(saved["video_provider"], "fal")
             self.assertEqual(saved["video_audio_model"], "h3_max_fal")
@@ -89,7 +105,7 @@ class H3Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unbound"):
             video_references.check_prompt("Image 9: unknown", [{"tag":"Image 1"}])
         self.result["continuity"]["characters"][0]["reference_sheet_url"] = "https://example.com/views.jpg"
-        r = video.translate(self.result, self.shot)["request"]
+        r = video.translate(self.result, {**self.shot, "has_dialogue": False, "speech_mode": "none"})["request"]
         self.assertEqual(len(r["reference_image_urls"]), 3)
         self.assertIn("Image 3", r["prompt"])
 
@@ -116,3 +132,12 @@ class H3Tests(unittest.TestCase):
                                   "video_model":"minimax/h3-max/reference-to-video"})
         self.assertEqual(outcome["usage"]["timings"], {"inference":5})
         self.assertEqual(outcome["usage"]["metrics"], {"inference_time":15})
+
+    def test_exact_audio_endpoint_is_accepted_by_durable_fal_submission(self):
+        with patch.object(audio, "fal_request", return_value={
+                "request_id": "one", "status_url": "https://queue.fal.run/status",
+                "response_url": "https://queue.fal.run/result"}) as call:
+            translated = video.translate(self.result, self.shot)
+            task = audio.submit(translated["model"], translated["request"])
+        self.assertEqual(task["id"], "one")
+        self.assertEqual(call.call_args.args[1], "https://queue.fal.run/minimax/h3-max/image-to-video")

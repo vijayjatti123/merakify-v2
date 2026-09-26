@@ -19,7 +19,8 @@ def model_route(system: str, fast: bool = False) -> tuple[str, str]:
     """Only the creative shot-planning family uses the approved Flash route."""
     from app.agents import prompts
     creative = (prompts.CINEMATOGRAPHY_AGENT, prompts.CINEMATOGRAPHY_FIX,
-                prompts.CINEMATOGRAPHY_PATCH, prompts.CINEMATOGRAPHY_TRIM)
+                prompts.CINEMATOGRAPHY_PATCH, prompts.CINEMATOGRAPHY_EDIT,
+                prompts.CINEMATOGRAPHY_TRIM)
     if system in creative:
         return 'openrouter', settings.director_model
     return 'anthropic', FAST_MODEL if fast else REASONING_MODEL

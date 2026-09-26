@@ -65,6 +65,80 @@ SHOT_STATUSES = frozenset(
 )
 
 
+def refresh_edited_shot_direction(shots, shot_number, continuity, approved_story, *, diagnostics=None):
+    """Re-direct one user-edited shot before saving; keep all other shots exact.
+
+    The user's short description and approved words are authoritative. The
+    existing Director patch model rebuilds only the execution fields that a
+    compact editor cannot safely ask a customer to maintain by hand.
+    """
+    from app.services.planning_patch import apply_patch_response
+    from app.services.dialogue_duration import MIN_SHOT_SECONDS
+
+    by_number = {shot['shot_number']: shot for shot in shots}
+    if shot_number not in by_number:
+        raise ValueError('Edited shot was not found.')
+    target = by_number[shot_number]
+    allowed = ['shot_direction', 'state_at_shot_start', 'state_at_shot_end',
+               'opening_characters', 'camera_angle', 'camera_direction',
+               'lens', 'lighting', 'composition_note', 'duration_sec']
+    required = {'shot_direction', 'state_at_shot_start', 'state_at_shot_end', 'opening_characters'}
+    planning_fields = ('shot_number', 'scene_number', 'description', 'dialogue_text',
+                       'has_dialogue', 'speech_mode', 'speaker_name', 'characters_in_shot',
+                       'opening_characters', 'shot_direction', 'camera_angle',
+                       'camera_direction', 'lens', 'lighting', 'composition_note',
+                       'duration_sec', 'state_at_shot_start', 'state_at_shot_end')
+    def view(shot):
+        return {key: shot[key] for key in planning_fields if key in shot}
+    ordered = list(by_number)
+    position = ordered.index(shot_number)
+    neighbors = [view(by_number[ordered[i]]) for i in (position - 1, position + 1)
+                 if 0 <= i < len(ordered)]
+    scene = next((s for s in (approved_story or {}).get('scenes', [])
+                  if s.get('scene_number') == target.get('scene_number')), None)
+    context = {
+        'edited_shot': view(target), 'readonly_neighbors': neighbors,
+        'characters': creative_references((continuity or {}).get('characters', [])),
+        'visual_style': (continuity or {}).get('visual_style'),
+        'source_scene': scene,
+        'camera_options': camera_options(),
+        'minimum_shot_seconds': MIN_SHOT_SECONDS,
+        'maximum_shot_seconds': 15,
+    }
+    feedback = ''
+    for attempt in range(2):
+        payload = dict(context)
+        if attempt:
+            payload['validation_finding'] = feedback
+        try:
+            response = call_agent(prompts.CINEMATOGRAPHY_EDIT,
+                                  json.dumps(payload, ensure_ascii=False),
+                                  max_tokens=3072, request_timeout=65)
+            changes = response.get('changes') or {}
+            if not required <= set(changes):
+                raise ValueError('Direction patch omitted required fields')
+            updated = apply_patch_response(shots,
+                {'patches': [{'shot_number': shot_number, 'changes': changes}]},
+                {shot_number: allowed})
+            candidate = next(shot for shot in updated if shot['shot_number'] == shot_number)
+            candidate['direction_version'] = 1
+            problems = ad_direction.problems(candidate)
+            if problems:
+                raise ValueError('; '.join(problems))
+            from app.services.director_review import review
+            verdict = review([candidate], (continuity or {}).get('characters', []), MIN_SHOT_SECONDS)
+            if not verdict['approved']:
+                raise ValueError('; '.join(issue['problem'] for issue in verdict['issues']))
+            return updated
+        except ValueError as error:
+            feedback = str(error)[:400]
+            if diagnostics is not None:
+                diagnostics.append(feedback)
+            if attempt:
+                break
+    raise ValueError('This shot could not be updated safely. Your previous version is unchanged; try saving again.')
+
+
 def _normalize_character_name(name: str) -> str:
     """Return the canonical key used to join names from separate model calls."""
     return unicodedata.normalize("NFC", name)
@@ -659,7 +733,14 @@ def assemble_shots(shots, characters, target_duration_sec, *, narrator_voice_ref
     notify("assembly", f"Runtime locked at {assembly['total_duration_sec']}s.")
 
     actual = assembly["total_duration_sec"]
-    if actual > target_duration_sec * 1.15:
+    directed_plan = any(s.get('direction_version') == 1 for s in current_shots)
+    if directed_plan and actual > target_duration_sec * 1.15:
+        # The user approves the directed action, not an exact stopwatch value.
+        # A trim call can shorten the performance or fail while attempting to
+        # compress indivisible beats. Preserve the reviewed story and expose
+        # the honest runtime that the assembler will use.
+        notify("assembly", f"Directed story needs {actual}s versus the {target_duration_sec}s target; preserving its reviewed actions and planned runtime.")
+    elif actual > target_duration_sec * 1.15:
         notify(
             "assembly",
             f"{actual}s overshoots the {target_duration_sec}s target — sending back to Cinematography to trim, no human needed.",
@@ -1002,7 +1083,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
         if minimum_shot_seconds:
             cinematography_input += f"\nMinimum generated shot duration: {minimum_shot_seconds} seconds. Group compatible sequential actions into complete beats; do not buy many tiny shots. Never merge distinct complete speaking turns or omit story events."
         if fmt["duration_target_sec"] <= 12:
-            cinematography_input += f"\nPrefer ONE continuous shot at this short duration if every required story beat, complete dialogue and achievable action fits. Multiple shots are allowed only for necessary location/time changes, incompatible staging or separate speakers. Never omit beats to force one shot. Each shot remains at least {minimum_shot_seconds} seconds; total must fit the target. Explain necessary cuts in edit_intent."
+            cinematography_input += f"\nPrefer ONE continuous shot at this short duration if every required story beat, complete dialogue and achievable action fits. Multiple shots are allowed only for necessary location/time changes, incompatible staging or separate speakers. Never omit beats to force one shot. Each shot remains at least {minimum_shot_seconds} seconds. Treat the target as a preference; if the approved story cannot fit, preserve it and state the honest longer shot durations. Explain necessary cuts in edit_intent."
         cinematography_input += f"\nTarget total duration: {fmt['duration_target_sec']} seconds"
         from app.services.voice_timing import measured_budget
         cinematography_input += f"\nMeasured dialogue budget: {json.dumps(measured_budget(db, language))}"

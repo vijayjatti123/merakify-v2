@@ -129,6 +129,19 @@ class TimingPolicyTests(unittest.TestCase):
         self.assertEqual(result["assembly"]["total_duration_sec"], 7)
         self.assertTrue(any("trim rejected" in note for note in notes))
 
+    def test_directed_story_keeps_longer_runtime_without_trim_call(self):
+        shots = [{"shot_number": 1, "duration_sec": 6, "direction_version": 1},
+                 {"shot_number": 2, "duration_sec": 5, "direction_version": 1},
+                 {"shot_number": 3, "duration_sec": 5, "direction_version": 1}]
+        notes = []
+        with patch.object(director, "call_agent", return_value={"transitions": []}) as model, \
+             patch.object(director.ad_direction, "accept_shots"):
+            result = director.assemble_shots(shots, [], 12, emit=lambda key, note: notes.append(note))
+        self.assertEqual(result["shots"], shots)
+        self.assertEqual(result["assembly"]["total_duration_sec"], 16)
+        model.assert_called_once_with(prompts.SHOT_ASSEMBLER, json.dumps(shots))
+        self.assertTrue(any("preserving its reviewed actions" in note for note in notes))
+
 
 class CorrectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_primary_payload_only_uses_supported_v3_controls(self):

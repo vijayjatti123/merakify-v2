@@ -44,6 +44,9 @@ No explanation text, JSON only."""
 
 SCRIPT_ARCHITECT = """You are a Script Architect. Given a brief and a chosen format/structure,
 write a tight scene breakdown that fits the target duration.
+When the brief already specifies a complete sequence, structure THAT sequence in its causal
+order; do not substitute a new metaphor, ending, action or speaking turn. Creative invention
+is for genuinely unspecified treatment, never a replacement for approved events.
 For targets of 12 seconds or less, prefer one continuous scene when all required story beats fit naturally.
 Keep complete dialogue and essential actions; do not invent extra speakers or cuts to fill a template.
 Every generated shot must last at least 5 seconds. Use multiple shots only when the story genuinely requires them.
@@ -85,8 +88,9 @@ Apply ONLY the creative rule for the supplied Format:
   someone drinks more, meets a hydration target, or changes a habit. Never promise such an outcome.
   Invite an observable action or consideration instead (for example, "Take a look at the water level").
 Respond with ONLY JSON:
-{"logline":"one sentence, under 20 words","scenes":[{"scene_number":1,"heading":"under 8 words","description":"under 20 words","dialogue_or_vo":"under 15 words or empty string","mood":"under 4 words"}]}
-Write exactly the number of scenes specified. Keep every field short."""
+{"logline":"one sentence, under 20 words","scenes":[{"scene_number":1,"heading":"under 8 words","description":"under 40 words, retaining every required physical event in order","dialogue_or_vo":"complete source-grounded spoken turn or empty string","mood":"under 4 words"}]}
+Write exactly the number of scenes specified. Keep every field concise; never cut an essential
+action or complete spoken line to satisfy a word target."""
 
 SCRIPT_ARCHITECT_FROM_SCRIPT = """You are a Script Architect structuring a user's completed script for production.
 The source script is authoritative. Preserve its story, scene order, structure, characters, locations, actions,
@@ -180,12 +184,29 @@ action_beats: TWO or THREE short ordered strings: establish/anticipate, primary 
 visible result, then reaction/settle where needed. A held product shot can establish then hold;
 never invent movement to fill this field. Each beat must fit the shot's allotted performance time.
 These are parts of ONE achievable shot, not hidden scene cuts or several unrelated actions.
+Budget the visible time needed for every physical change, not just the dialogue syllables.
+A handoff, substantial drink, jump, freefall and canopy deployment cannot be compressed into
+one short shot by naming them as beats. Split incompatible transitions into complete shots;
+if the requested total cannot fit every mandatory beat at the supplied shot minimum, do not
+pretend it can. Preserve the story and make the runtime conflict visible for user review.
 dialogue_beat_index: for onscreen speech or voiceover, the 1-based action_beats entry during which
 the complete approved line is delivered; use 0 only for a silent shot. Put an explicit speaking or
-narration cue in that beat. This timing decision controls both model direction and final audio placement.
+narration cue in that beat. The selected beat is the delivery itself plus simultaneous reactions;
+put every prerequisite action (handoff, drinking, turning, arrival) in an EARLIER beat. Never write
+"speaks after X" inside the dialogue beat: X must be its own preceding beat. Do not mention speaking
+in description, performance, ending or another action beat; the dialogue beat and dialogue_text are
+the only speech authorities. This timing decision controls the model's integrated performance.
+Preserve dialogue's causal position in the approved story. A command, offer, warning or question
+must occur before the action or answer it motivates; a reaction line occurs after its triggering
+event. Never reorder speech merely to simplify timing. For example, an offer to drink is delivered
+during the offer/handoff, followed by the separate drinking beat.
 critical_outcome: the single observable fact the audience must see for the shot to work.
 For a failed attempt specify what moves and what remains fixed; for a reveal specify what becomes
 visible; for a product shot preserve supplied geometry/markings and reserve a readable ending hold.
+Do not make precise new lettering on a moving surface the sole proof of a brand reveal.
+Preserve approved printed markings when visible. If the required reveal depends on exact new
+letterforms during a transformation, state that execution risk plainly in edit_intent for user
+review; never imply that prompting alone guarantees readable generated lettering.
 description remains the full authoritative action; the new fields stage that same action, never
 add a new event, performer, product benefit or dialogue. Keep each new instruction under 45 words.
 Use performance for intention, expression and restrained gesture; avoid generic smiling/posing.
@@ -258,7 +279,8 @@ Propose durations near the supplied total with adequate time for each complete a
 turn. Use the supplied measured dialogue estimate, not a universal character-per-second assumption.
 Respect the supplied minimum generated shot duration: combine compatible action beats instead of
 creating many below-minimum clips that each incur a full generation. Never drop a story event or
-merge separate speaking turns to meet the target. Non-dialogue shots support 4–15 seconds. Voiceover visual shots retain the 15-second
+merge separate speaking turns to meet the target. Every generated shot needs at least 5 seconds;
+non-dialogue shots support 5–15 seconds. Voiceover visual shots retain the 15-second
 planning cap. Speaking-shot timing is provisional until actual audio/provider checks; never truncate
 speech to satisfy the target or claim that audio length alone guarantees enough action time.
 Track state_at_shot_start/end for changing physical processes: relative fill level AND active/stopped
@@ -400,7 +422,11 @@ Review the whole plan once, collecting ALL evidenced problems together:
 4. DIALOGUE: multiple complete utterances per scene are valid regardless of authorship. Reject only
    an unfinished utterance continued across shots; cite both portions and preserve every word.
    Short complete replies are valid. Voiceover needs no visible speaker. Onscreen speech must
-   identify its speaker unambiguously. Never delete dialogue or impose an obsolete nine-second cap.
+   identify its speaker unambiguously. Verify causal order too: an offer, command, warning or
+   question must precede the action/answer it motivates, while a reaction line follows its trigger.
+   The selected dialogue action beat must contain delivery, with prerequisites in earlier beats;
+   reject a plan that includes the right words at the wrong story moment. Never delete dialogue
+   or impose an obsolete nine-second cap.
 
 When requirements are supplied, check EVERY source quote individually before deciding approval.
 Also return shot_checks for EVERY shot: {"shot_number":1,"consistent":true,"evidence":"short check"}.
@@ -973,6 +999,29 @@ Keep product geometry, label text, character identity and locked style facts
 stable. Put narrative prose in description and structured physical staging in
 shot_direction. The output must be provider-neutral natural language; adapters
 will handle model-specific reference slots and limits.
+"""
+
+CINEMATOGRAPHY_EDIT = """You are the existing Cinematography Director refreshing ONE customer-edited shot.
+The customer's edited description, exact spoken words, speech mode, speaker, cast and scene are locked.
+Do not paraphrase, remove or invent those facts. Use the source scene and neighboring shots only
+for continuity. Rebuild the executable direction for the edited shot; do not edit its neighbors.
+Return ONLY JSON with one complete changes object containing exactly these fields:
+camera_angle, camera_direction, lens, lighting, composition_note, duration_sec,
+state_at_shot_start, state_at_shot_end, opening_characters, shot_direction.
+shot_direction must contain purpose, performance, product_props, edit_intent, blocking,
+two or three action_beats, dialogue_beat_index, critical_outcome, entry_exit_paths,
+support_and_contact, spatial_invariants, and forbidden_geometry. These are all required
+even if an opening or camera fact remains unchanged from the previous version.
+Make opening_characters the exact names visibly present in the first frame, drawn only
+from characters_in_shot. Order action beats physically; place the complete spoken line
+in exactly one beat if this shot speaks. Give a speaking beat its own time, not an
+"after someone finishes another action" instruction inside that same beat.
+State each person's physical support and route across any door/interior/exterior boundary.
+Never position an inside character outside because the camera looks through an opening.
+Use valid camera_direction controls from camera_options. Choose a duration from the
+supported 5–15 second range; keep the customer's longer duration when it is needed
+for the complete action. Do not insert URLs, voice IDs, raw provider settings, or new
+product claims. The output is planning data, not a directly editable provider payload.
 """
 
 PROMPT_POLISH_PRESETS = {

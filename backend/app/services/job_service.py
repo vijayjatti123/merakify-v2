@@ -965,6 +965,22 @@ def claim_kling_video_submission(db, job_id, number, task, request):
     return changed == 1
 
 
+def assert_plan_revision_idle(db, job_id, result):
+    """Avoid a paid one-shot re-direction when the edit cannot be saved yet."""
+    videos = db.query(VideoTask).filter_by(job_id=job_id).populate_existing().all()
+    enhancements = db.query(FaceEnhancement).filter_by(job_id=job_id).populate_existing().all()
+    assembly = db.query(FinalAssembly).filter_by(job_id=job_id).populate_existing().one_or_none()
+    busy = (result.get("audio_assembly_pending") or result.get("preview_preparation_pending")
+            or any(v.status in {"submitting", "processing", "submission_unknown"} for v in videos)
+            or any(v.status in {"queued", "running"} for v in enhancements)
+            or (assembly and assembly.status == "running")
+            or any(s.get("still_frame_status") == "generating" or
+                   s.get("preview_replacement", {}).get("status") == "working" for s in result.get("shots", [])))
+    if busy:
+        raise ValueError("Wait for active generation or image replacement to finish before editing the plan.")
+    return videos, enhancements, assembly
+
+
 def save_plan_revision(db, job_id, expected_json, result, changed_numbers):
     """Reopen a stopped plan atomically; archive old output and keep sibling media."""
     import copy
@@ -976,18 +992,11 @@ def save_plan_revision(db, job_id, expected_json, result, changed_numbers):
         db.rollback()
         raise ValueError("Your plan changed. Refresh before saving.")
     old = json.loads(expected_json)
-    videos = db.query(VideoTask).filter_by(job_id=job_id).populate_existing().all()
-    enhancements = db.query(FaceEnhancement).filter_by(job_id=job_id).populate_existing().all()
-    assembly = db.query(FinalAssembly).filter_by(job_id=job_id).populate_existing().one_or_none()
-    busy = (old.get("audio_assembly_pending") or old.get("preview_preparation_pending")
-            or any(v.status in {"submitting", "processing", "submission_unknown"} for v in videos)
-            or any(v.status in {"queued", "running"} for v in enhancements)
-            or (assembly and assembly.status == "running")
-            or any(s.get("still_frame_status") == "generating" or
-                   s.get("preview_replacement", {}).get("status") == "working" for s in old.get("shots", [])))
-    if busy:
+    try:
+        videos, enhancements, assembly = assert_plan_revision_idle(db, job_id, old)
+    except ValueError:
         db.rollback()
-        raise ValueError("Wait for active generation or image replacement to finish before editing the plan.")
+        raise
     revised = copy.deepcopy(result)
     had_media = bool(old.get("generation_approved") or old.get("plan_edited_shots") or videos
                      or any(s.get("still_frame_url") or s.get("dialogue_audio_url") for s in old.get("shots", [])))

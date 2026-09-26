@@ -2,14 +2,13 @@
 import math
 import re
 from app.services import video_references
-from app.services.still_frame_service import shot_fingerprint, visual_description
+from app.services.still_frame_service import shot_fingerprint
 from app.services.dialogue_duration import performance_duration
 from app.services.speech_mode import is_voiceover, is_onscreen_speech
 
 
 def translate(result, shot):
     from app.services.video_generation_service import fresh_url
-    from app.services.audio_video_service import approved_speech_text
     if not shot.get("compiled_prompt") or not shot.get("still_frame_url") or shot.get("still_frame_status") not in (None, "ready"):
         raise ValueError("Create this shot's accepted preview before generating video")
     if shot.get("still_frame_source_hash") and shot["still_frame_source_hash"] != shot_fingerprint(shot):
@@ -30,8 +29,32 @@ def translate(result, shot):
     quality = result.get("quality", "720p")
     if quality not in {"480p", "720p"}:
         raise ValueError("H3 Max supports the platform's 480p and 720p settings (720p renders natively at 768p)")
-    refs = video_references.build(result, shot, limit=11 if speech else 12, tag_style="h3", refresh=fresh_url)
-    direction = visual_description(shot["compiled_prompt"])
+    from app.services.dialogue_window import visual_instruction, prompt_instruction
+    if speech:
+        # The tested exact-audio endpoint pins the approved waveform to the
+        # soundtrack and uses the accepted shot preview as its opening frame.
+        # Its contract has no additional image-reference array.
+        direction = visual_instruction(result, shot, "the supplied image")
+        cast = shot.get("characters_in_shot") or []
+        speaker = ("the off-screen narrator" if is_voiceover(shot) else
+                   shot.get("speaker_label") or (cast[0] if len(cast) == 1 else None))
+        prompt = (
+            "One continuous shot. The supplied image is the exact opening frame; "
+            "preserve its people, setting, product, wardrobe and screen positions.\n"
+            + direction + "\n"
+            + prompt_instruction(shot, duration, "the supplied soundtrack", exact_audio=True, speaker=speaker)
+        )
+        request = {"prompt": prompt, "image_url": fresh_url(shot["still_frame_url"]),
+                   "target_audio_url": fresh_url(shot["dialogue_audio_url"]),
+                   "duration": duration, "resolution": "480P" if quality == "480p" else "768P",
+                   "prompt_expansion_mode": "disabled", "enable_safety_checker": True}
+        return {"provider": "fal", "model": "minimax/h3-max/image-to-video",
+                "request": request, "audio_model": "h3_max_fal",
+                "reference_manifest": [], "warnings": [], "mode_risk_terms": [],
+                "constraints": "", "mode": "exact_audio"}
+
+    refs = video_references.build(result, shot, limit=12, tag_style="h3", refresh=fresh_url)
+    direction = visual_instruction(result, shot, "Image 1", speaking=False)
     def replace_url(match):
         raw = match.group().rstrip('.,;)')
         tag = refs["lookup"].get(video_references.identity(raw))
@@ -46,16 +69,7 @@ def translate(result, shot):
                "prompt_expansion_mode": "disabled", "enable_safety_checker": True}
     if request["aspect_ratio"] not in {"16:9", "9:16"}:
         raise ValueError("Choose landscape 16:9 or portrait 9:16")
-    if speech:
-        speaker = shot.get("speaker_label") or (", ".join(shot.get("characters_in_shot", [])) if is_onscreen_speech(shot) else "off-screen narrator") or "the speaker"
-        request["reference_audio_urls"] = [fresh_url(shot["dialogue_audio_url"])]
-        request["prompt"] += ("\nAudio 1 is off-screen narration. No visible person speaks; do not animate lips."
-                              if is_voiceover(shot) else f"\nAudio 1 belongs exclusively to {speaker}. Only this character speaks; other characters remain silent.")
-        request["prompt"] += approved_speech_text(result, shot, speaker)
-        from app.services.dialogue_window import prompt_instruction
-        request["prompt"] += "\n" + prompt_instruction(shot, duration, "Audio 1")
-    else:
-        request["prompt"] += "\nAmbient sound only; no speech or music."
+    request["prompt"] += "\nAmbient sound only; no speech or music."
     video_references.check_prompt(request["prompt"], refs["manifest"])
     return {"provider": "fal", "model": "minimax/h3-max/reference-to-video", "request": request,
             **({"audio_model": "h3_max_fal"} if speech else {}),

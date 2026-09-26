@@ -29,6 +29,18 @@ class AutomaticVideoTests(unittest.TestCase):
         self.assertEqual(result, self.result)
         self.assertEqual(shot, self.shot)
 
+    def test_directed_silent_shot_uses_approved_beats_not_second_prose_action(self):
+        shot={**self.shot, 'direction_version':1,
+              'compiled_prompt':'The parachute is already open before the jump.',
+              'description':'Kabir jumps, falls, then deploys the canopy.',
+              'shot_direction':{'action_beats':['Kabir jumps.', 'Kabir falls.',
+                                               'The canopy deploys.'],
+                                'critical_outcome':'Canopy opens after freefall.'}}
+        prompt=video.translate(self.result,shot)['request']['prompt']
+        self.assertIn('1) Kabir jumps.',prompt)
+        self.assertIn('3) The canopy deploys.',prompt)
+        self.assertNotIn('already open before the jump',prompt)
+
     def test_both_speech_modes_include_audio_reference_on_mini(self):
         for mode in ['onscreen', 'voiceover']:
             with self.subTest(mode=mode):

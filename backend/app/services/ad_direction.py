@@ -7,6 +7,9 @@ import hashlib
 import json
 import re
 
+_SPEECH_CUE = re.compile(r'\b(says?|speaks?|asks?|answers?|replies?|whispers?|shouts?|calls?|utters?|delivers?|announces?|narrates?|voice[- ]?over|line)\b', re.I)
+_DEFERRED_SPEECH = re.compile(r'\b(?:only\s+)?after\b|\bbefore\b.+\b(?:speaks?|says?|line)\b', re.I)
+
 AD_FIELDS = ("takeaway", "visual_approach", "pacing", "sound_direction")
 SHOT_FIELDS = ("purpose", "performance", "product_props", "edit_intent")
 # These are authored by the Director and copied verbatim into still/video
@@ -67,6 +70,15 @@ def problems(shot):
                     or (speaks and isinstance(beats, list) and not 1 <= dialogue_index <= len(beats))
                     or (not speaks and dialogue_index != 0)):
                 found.append('shot_direction.dialogue_beat_index must identify the speaking action beat, or be 0 for silence')
+            elif speaks and isinstance(beats, list):
+                speaking_beat = beats[dialogue_index - 1]
+                if not _SPEECH_CUE.search(speaking_beat):
+                    found.append('the dialogue beat must explicitly describe delivery of the approved line')
+                if _DEFERRED_SPEECH.search(speaking_beat):
+                    found.append('actions required before speech need their own earlier action beat; the dialogue beat is delivery only')
+                other_speech = [beat for i, beat in enumerate(beats) if i != dialogue_index - 1 and _SPEECH_CUE.search(beat)]
+                if other_speech:
+                    found.append('only the selected dialogue beat may direct speech')
         spatial = ('entry_exit_paths', 'support_and_contact', 'spatial_invariants', 'forbidden_geometry')
         # Older reviewed plans remain editable/regenerable. Fresh Director-v2
         # output is schema-required to provide the complete spatial contract.

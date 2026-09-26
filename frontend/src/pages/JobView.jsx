@@ -422,7 +422,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     ) : null}
 
                     {isEditing ? (
-                      <><Alert severity="info" sx={{ mb: 2 }} data-testid="shot-plan-edit-impact">{approved || result.plan_edited_shots?.length ? "Saving reopens plan approval. This shot’s voice, preview and clip must be prepared again; other shots are kept. Nothing is generated until you approve." : "Save your changes, then approve the plan before creating previews."}</Alert><DirectorPlanEditor cast={(result.continuity?.characters || []).map(character => character.name)} speaking={shot.has_dialogue && shot.speech_mode !== "voiceover"} value={editValues} onChange={setEditValues} shotNumber={shot.shot_number} /></>
+                      <><Alert severity="info" sx={{ mb: 2 }} data-testid="shot-plan-edit-impact">{approved || result.plan_edited_shots?.length ? "Saving updates this shot’s direction and asks you to approve the change. Its voice, preview and clip will then be remade; other shots are kept." : "Save your changes, then approve the plan before creating previews."}</Alert><DirectorPlanEditor cast={(result.continuity?.characters || []).map(character => character.name)} issue={shot.video_status === "review_required" ? videoReviewGuidance(shot).message : ""} value={editValues} onChange={setEditValues} shotNumber={shot.shot_number} /></>
                     ) : (
                       <>
                         <p className="shot-description">{shot.description}</p>
@@ -475,7 +475,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       <span><Clock3 size={12} /> {Number(shot.duration_sec.toFixed(1))}s · {shot.lighting}</span>
                     </div>
 
-                    {(shot.video_url || ["error", "failed"].includes(shot.video_status) || (shot.video_status === "review_required" && !lockedAudioReview(shot))) && (
+                    {!isEditing && (shot.video_url || ["error", "failed"].includes(shot.video_status)) && (
                       <div className="my-3 text-xs">
                         <label className="block">{shot.video_status === "review_required" ? "Anything else you’d like to change? (optional)" : "What would you like to change? (optional)"}
                           <textarea aria-label={`Regeneration change for shot ${shot.shot_number}`} maxLength={1000} value={videoHints[shot.shot_number] || ""} onChange={(event) => setVideoHints((current) => ({ ...current, [shot.shot_number]: event.target.value }))} className="block w-full rounded-md p-2 mt-1" style={{ background: COLORS.field, color: COLORS.text }} placeholder="For example: keep both people inside the cabin and make the lighting warmer" />
@@ -487,14 +487,14 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     <div className="shot-card-actions">
                       {isEditing ? (
                         <>
-                          <Button type="button" onClick={() => saveEdit(shot.shot_number)} disabled={savingShot === shot.shot_number} className="card-action card-action--primary">
-                            {savingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Save plan changes
+                          <Button type="button" onClick={() => saveEdit(shot.shot_number)} disabled={savingShot === shot.shot_number || !editValues?.description?.trim() || (editValues?.speech_mode !== "none" && !editValues?.dialogue_text?.trim())} className="card-action card-action--primary">
+                            {savingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Save this shot
                           </Button>
                           <Button type="button" onClick={() => setEditingShot(null)} className="card-action">Cancel</Button>
                         </>
                       ) : (
                         <>
-                          <Button type="button" disabled={previews.busy || videoBusy || editBlocksApproval || shots.some(s => s.video_status === "submission_unknown" || s.preview_replacement?.status === "working")} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot plan ${shot.shot_number}`}><Pencil size={13} /> Edit shot plan</Button>
+                          <Button type="button" disabled={previews.busy || videoBusy || editBlocksApproval || shots.some(s => s.video_status === "submission_unknown" || s.preview_replacement?.status === "working")} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot ${shot.shot_number}`}><Pencil size={13} /> Edit this shot</Button>
                           {(shot.video_url || ["error", "failed"].includes(shot.video_status) || (shot.video_status === "review_required" && !lockedAudioReview(shot))) && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={editBlocksApproval || shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {shot.video_status === "review_required" ? "Regenerate corrected video" : "Regenerate video"}
                           </Button>}

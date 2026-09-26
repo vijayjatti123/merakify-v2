@@ -21,6 +21,22 @@ class SeedanceReferenceTests(unittest.TestCase):
         self.audio_preflight.stop()
     saved = test_audio_video.AudioVideoTests.saved
 
+    def test_h3_exact_audio_places_unmodified_line_once_in_full_shot(self):
+        source = wav(2.0)
+        aligned, facts = refs.align_exact_audio(source, 2.0, 1.5, 5)
+        with wave.open(io.BytesIO(source)) as original, wave.open(io.BytesIO(aligned)) as result:
+            speech = original.readframes(original.getnframes())
+            before = result.readframes(round(1.5 * 24000))
+            actual = result.readframes(original.getnframes())
+            after = result.readframes(result.getnframes() - result.tell())
+            self.assertEqual(set(before), {0})
+            self.assertEqual(actual, speech)
+            self.assertEqual(set(after), {0})
+            self.assertEqual(result.getnframes() / result.getframerate(), 5)
+        self.assertEqual((facts['leading_silence_sec'], facts['trailing_silence_sec']), (1.5, 1.5))
+        with self.assertRaisesRegex(ValueError, 'does not fit'):
+            refs.align_exact_audio(source, 2.0, 4.0, 5)
+
     def test_real_short_pcm_is_preserved_exactly_with_only_trailing_silence(self):
         source = wav(26624 / 24000)
         padded, facts = refs.inspect_and_pad(source, 26624 / 24000)

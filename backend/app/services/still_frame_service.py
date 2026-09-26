@@ -185,7 +185,7 @@ def _still_contract(value):
             "global_rules": ["Generate and verify one opening frame only."]}, False
 
 
-def _google(parts, *, aspect_ratio=None, verification=False):
+def _google(parts, *, aspect_ratio=None, verification=False, response_schema=None):
     if sum("inlineData" in part for part in parts) > MAX_REQUEST_IMAGES:
         raise StillFrameError("Internal still-frame image budget exceeded")
     if not settings.google_ai_api_key.strip():
@@ -198,7 +198,7 @@ def _google(parts, *, aspect_ratio=None, verification=False):
     model = settings.gemini_image_model
     if verification:
         model = settings.gemini_preview_check_model
-        config["responseSchema"] = {"type": "OBJECT", "properties": {
+        config["responseSchema"] = response_schema or {"type": "OBJECT", "properties": {
             "approved": {"type": "BOOLEAN"}, "reason": {"type": "STRING"},
             "visible_entities": {"type": "ARRAY", "items": {"type": "STRING"}},
             "spatially_grounded": {"type": "BOOLEAN"},

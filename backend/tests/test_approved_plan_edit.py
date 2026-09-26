@@ -15,6 +15,8 @@ class ApprovedPlanEditTests(unittest.TestCase):
     def setUp(self):
         test_module_f.ModuleFTests.setUp(self)
         self.client=TestClient(app)
+        self.refresh = patch('app.routes.jobs.refresh_edited_shot_direction', side_effect=lambda shots, *_: shots)
+        self.refresh_mock = self.refresh.start()
         with self.sessions() as db:
             job=jobs.get_job(db,self.job_id)
             result=jobs.job_result(job)
@@ -26,6 +28,7 @@ class ApprovedPlanEditTests(unittest.TestCase):
                 jobs.claim_video(db,self.job_id,s["shot_number"],{"video_status":"done","video_task_id":str(s["shot_number"]),"video_url":"https://example.com/video.mp4","video_source_hash":source_fingerprint(s)})
                 jobs.update_video(db,self.job_id,s["shot_number"],video_status="done")
     def tearDown(self):
+        self.refresh.stop()
         self.client.close()
         test_module_f.ModuleFTests.tearDown(self)
 
@@ -39,6 +42,7 @@ class ApprovedPlanEditTests(unittest.TestCase):
         with patch("app.agents.director.call_agent",side_effect=AssertionError("No provider on save")):
             response=self.client.post(f"/api/jobs/{self.job_id}/revise",json=self.payload())
         self.assertEqual(response.status_code,200,response.text)
+        self.refresh_mock.assert_called_once()
         result=response.json()["result"]
         self.assertFalse(result["generation_approved"])
         self.assertEqual(result["plan_edited_shots"],[2])
@@ -56,6 +60,7 @@ class ApprovedPlanEditTests(unittest.TestCase):
         with self.sessions() as db:jobs.update_video(db,self.job_id,1,video_status="processing")
         response=self.client.post(f"/api/jobs/{self.job_id}/revise",json=self.payload())
         self.assertEqual(response.status_code,409)
+        self.refresh_mock.assert_not_called()
         with self.sessions() as db:
             self.assertEqual(db.query(VideoTask).filter_by(job_id=self.job_id).count(),3)
             self.assertTrue(jobs.job_result(jobs.get_job(db,self.job_id))["generation_approved"])

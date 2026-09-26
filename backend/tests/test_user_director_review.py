@@ -131,11 +131,12 @@ class ReviewApiTests(unittest.TestCase):
                 self.assertFalse(revised.result['generation_approved'])
 
     def test_edit_persists_without_generation_then_approval_queues_once(self):
-        with patch.object(director,"call_agent",side_effect=AssertionError("No model call")):
+        with patch('app.routes.jobs.refresh_edited_shot_direction', side_effect=lambda shots, *_: shots) as refresh:
             with self.sessions() as db:
                 revised = revise_job(self.job_id,JobRevise(shots=[dict(shot_number=1,
                     description="Hand sets down the cup", dialogue_text="Keep my exact words.",
                     lighting="Soft evening light",duration_sec=6)]),db)
+                refresh.assert_called_once()
                 self.assertEqual(revised.result["shots"][0]["lighting"],"Soft evening light")
                 self.assertFalse(revised.result["generation_approved"])
                 with patch.object(job_service,"queue_pipeline_task") as queue:
@@ -146,14 +147,15 @@ class ReviewApiTests(unittest.TestCase):
                     revise_job(self.job_id,JobRevise(shots=[]),db)
                 self.assertEqual(error.exception.status_code,409)
 
-    def test_invalid_edit_is_saved_but_approval_cannot_generate(self):
+    def test_invalid_duration_is_rejected_before_rebuilding_or_saving(self):
         with self.sessions() as db:
-            revised = revise_job(self.job_id,JobRevise(shots=[dict(shot_number=1,
-                description="Hand lifts cup",dialogue_text="Look here.",duration_sec=-1)]),db)
-            self.assertFalse(revised.result["qa"]["approved"])
-            with patch.object(job_service,"queue_pipeline_task") as queue:
-                with self.assertRaises(HTTPException) as error: approve_job(self.job_id,BackgroundTasks(),db)
+            with patch('app.routes.jobs.refresh_edited_shot_direction') as refresh:
+                with self.assertRaises(HTTPException) as error:
+                    revise_job(self.job_id,JobRevise(shots=[dict(shot_number=1,
+                        description="Hand lifts cup",dialogue_text="Look here.",duration_sec=-1)]),db)
                 self.assertEqual(error.exception.status_code,422)
-                queue.assert_not_called()
+                refresh.assert_not_called()
+            self.assertEqual(job_service.job_result(job_service.get_job(db,self.job_id))['shots'][0],
+                             self.plan['shots'][0])
 
 if __name__ == "__main__": unittest.main()

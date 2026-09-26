@@ -61,8 +61,9 @@ class AudioVideoTests(unittest.TestCase):
                     self.assertEqual(r['audio_url'],self.shot['dialogue_audio_url'])
                     self.assertNotIn('duration',r);self.assertNotIn('resolution',r)
                 elif model=='h3_max_fal':
-                    self.assertEqual(r['reference_image_urls'], [self.shot['still_frame_url'], 'https://example.com/portrait.jpg'])
-                    self.assertEqual(r['reference_audio_urls'], [self.shot['dialogue_audio_url']])
+                    self.assertEqual(r['image_url'], self.shot['still_frame_url'])
+                    self.assertEqual(r['target_audio_url'], self.shot['dialogue_audio_url'])
+                    self.assertNotIn('reference_image_urls', r)
                     self.assertEqual(r['resolution'], '768P')
                     self.assertEqual(r['duration'], 5)
                 elif model=='kling_voice_fal':

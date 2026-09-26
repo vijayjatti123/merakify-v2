@@ -144,7 +144,7 @@ def apply_patch_response(shots, response, permissions):
                     raise ValueError('Opening cast must be drawn from the existing shot cast.')
             elif field == 'shot_direction':
                 from app.services.ad_direction import SHOT_FIELDS, EXECUTION_FIELDS
-                if (not isinstance(value, dict) or set(value) != set(SHOT_FIELDS) | set(EXECUTION_FIELDS)):
+                if (not isinstance(value, dict) or set(value) != set(SHOT_FIELDS) | set(EXECUTION_FIELDS) | {'dialogue_beat_index'}):
                     raise ValueError('Planning correction returned incomplete shot direction.')
                 probe = {**by_number[number], 'shot_direction': value, 'direction_version': 1}
                 from app.services.ad_direction import problems

@@ -159,7 +159,10 @@ export async function reviseJob(jobId, shots, expectedPlanRevision) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ shots, expected_plan_revision: expectedPlanRevision }),
   });
-  if (!res.ok) throw new Error("Failed to revise job");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(typeof body.detail === "string" ? body.detail : "We couldn't save this shot. Your previous version is unchanged.");
+  }
   return res.json();
 }
 

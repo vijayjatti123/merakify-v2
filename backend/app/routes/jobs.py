@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File, Form
@@ -14,6 +15,7 @@ from app.agents.director import (
     SHOT_STATUS_PENDING,
     _attach_voice_refs,
     run_pipeline,
+    refresh_edited_shot_direction,
     validate_and_correct,
 )
 from app.db import SessionLocal, get_db
@@ -475,6 +477,7 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="edited shot_number was not found in this job")
 
     changed_numbers = set()
+    direction_refresh_numbers = set()
     merged_shots = []
     for shot in result["shots"]:
         merged = dict(shot)
@@ -483,6 +486,11 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
             fields = edit.model_dump(exclude_unset=True, exclude_none=True)
             if any(shot.get(k) != v for k, v in fields.items()):
                 changed_numbers.add(shot["shot_number"])
+                if 'shot_direction' not in fields and any(
+                    k in fields and shot.get(k) != fields[k] for k in
+                    ('description', 'dialogue_text', 'speaker_name', 'speech_mode',
+                     'characters_in_shot', 'duration_sec')):
+                    direction_refresh_numbers.add(shot['shot_number'])
             merged.update(fields)
             # All direction fields are shown together for explicit human review.
             # Invalidate the previous approval stamp, never silently rewrite them.
@@ -493,8 +501,32 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
 
     if not changed_numbers:
         return _job_out(job, result)
+    for shot in merged_shots:
+        if shot['shot_number'] not in changed_numbers:
+            continue
+        duration = shot.get('duration_sec')
+        if (not isinstance(duration, (int, float)) or isinstance(duration, bool)
+                or not math.isfinite(duration) or not 5 <= duration <= 15):
+            raise HTTPException(status_code=422, detail='This shot needs a duration between 5 and 15 seconds.')
+        if not str(shot.get('description') or '').strip():
+            raise HTTPException(status_code=422, detail='Describe what happens in this shot before saving.')
+        if shot.get('has_dialogue') and not str(shot.get('dialogue_text') or '').strip():
+            raise HTTPException(status_code=422, detail='Enter the exact words spoken before saving this shot.')
+    try:
+        job_service.assert_plan_revision_idle(db, job_id, result)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     continuity = result["continuity"]
     target_duration_sec = result["format"]["duration_target_sec"]
+    try:
+        for number in sorted(direction_refresh_numbers):
+            merged_shots = refresh_edited_shot_direction(
+                merged_shots, number, continuity, result.get('script'))
+    except Exception as error:
+        # A failed text-model call cannot partially save a user edit. Never
+        # expose provider details or raw planning context to the browser.
+        raise HTTPException(status_code=502,
+            detail='We could not update this shot safely. Your saved plan is unchanged; try again.') from error
     validated = validate_and_correct(
         merged_shots,
         continuity["characters"],

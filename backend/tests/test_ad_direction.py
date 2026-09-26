@@ -24,6 +24,52 @@ def directed():
 
 
 class AdDirectionTests(unittest.TestCase):
+    def test_simple_description_edit_refreshes_only_that_shot(self):
+        direction = dict(purpose='Show the cup', performance='A hand moves calmly',
+            product_props='Blue cup', edit_intent='Hold on the cup',
+            blocking='Cup stays on the table.',
+            action_beats=['Hand approaches the cup.', 'Hand lifts the cup.'],
+            dialogue_beat_index=0, critical_outcome='Cup is lifted visibly.',
+            entry_exit_paths=['Hand: frame edge -> table -> cup'],
+            support_and_contact='Cup starts on the table and ends in the hand.',
+            spatial_invariants=['Cup stays in the room.'], forbidden_geometry=['Cup never floats.'])
+        shot = dict(shot_number=1, scene_number=1, description='A hand lifts a blue cup.',
+            dialogue_text='', has_dialogue=False, speech_mode='none', speaker_name='',
+            characters_in_shot=[], opening_characters=[], duration_sec=5,
+            camera_angle='eye-level close-up', camera_direction=dict(movement='hold',
+                direction='none', speed='none', stabilization='locked'), lens='50mm',
+            lighting='Soft window light', composition_note='Cup centered',
+            state_at_shot_start='Cup on table, hand beside it.',
+            state_at_shot_end='Cup in hand above table.', transition_after='cut',
+            direction_version=1, shot_direction=direction)
+        sibling = {**shot, 'shot_number': 2, 'description': 'A woman smiles.',
+                   'state_at_shot_start': 'Woman sits indoors.',
+                   'state_at_shot_end': 'Woman smiles indoors.'}
+        revised = {**shot, 'description': 'The hand sets the cup down gently.'}
+        refreshed = {**direction, 'action_beats': ['Hand holds the cup.', 'Hand sets the cup on the table.'],
+            'critical_outcome': 'Cup rests on the table.',
+            'support_and_contact': 'Hand supports the cup until it rests on the table.'}
+        changes = {'shot_direction': refreshed, 'state_at_shot_start': 'Cup in hand above table.',
+                   'state_at_shot_end': 'Cup rests on table.', 'opening_characters': []}
+        with patch.object(director, 'call_agent', return_value={'changes':changes}) as model:
+            output = director.refresh_edited_shot_direction([revised, sibling], 1,
+                {'characters': []}, {'scenes':[{'scene_number':1,'description':'Cup moves'}]})
+        self.assertEqual(output[1], sibling)
+        self.assertEqual(output[0]['description'], revised['description'])
+        self.assertEqual(output[0]['shot_direction']['action_beats'], refreshed['action_beats'])
+        self.assertEqual(output[0]['state_at_shot_end'], 'Cup rests on table.')
+        self.assertNotIn('http', model.call_args.args[1])
+
+    def test_simple_edit_never_saves_an_incomplete_direction(self):
+        shot = directed()['shots'][0]
+        shot.pop('direction_source', None)
+        with patch.object(director, 'call_agent', return_value={
+                'changes':{'state_at_shot_start':'Still at table.'}}) as model:
+            with self.assertRaisesRegex(ValueError, 'previous version is unchanged'):
+                director.refresh_edited_shot_direction([shot], 1,
+                    {'characters': []}, {'scenes': []})
+        self.assertEqual(model.call_count, 2)
+
     def test_execution_contract_is_all_or_none_and_legacy_remains_usable(self):
         shot = directed()['shots'][0]
         self.assertEqual(ad_direction.problems(shot), [])
@@ -34,6 +80,21 @@ class AdDirectionTests(unittest.TestCase):
         self.assertEqual(ad_direction.problems(shot), [])
         shot['shot_direction']['action_beats'] = ['']
         self.assertTrue(ad_direction.problems(shot))
+
+    def test_dialogue_delivery_has_one_authoritative_beat(self):
+        shot = directed()['shots'][0]
+        shot.update(speech_mode='onscreen', has_dialogue=True)
+        shot.pop('direction_source', None)
+        shot['shot_direction'].update(
+            blocking='Speaker remains beside the table.',
+            critical_outcome='The listener hears the complete line.',
+            action_beats=['Listener accepts the cup.', 'Speaker says the approved line.', 'Listener reacts.'],
+            dialogue_beat_index=2)
+        self.assertEqual(ad_direction.problems(shot), [])
+        shot['shot_direction']['action_beats'][1] = 'Speaker says the approved line only after the listener drinks.'
+        self.assertIn('actions required before speech', ' '.join(ad_direction.problems(shot)))
+        shot['shot_direction']['action_beats'] = ['Speaker whispers early.', 'Speaker says the approved line.', 'Listener reacts.']
+        self.assertIn('only the selected dialogue beat', ' '.join(ad_direction.problems(shot)))
 
     def test_ordered_execution_reaches_final_video_request_not_opening_preview(self):
         from app.services import video_generation_service, director_review

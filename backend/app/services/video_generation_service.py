@@ -16,6 +16,7 @@ from urllib.error import HTTPError
 from app.config import settings
 from app.video_models import AUTOMATIC, validate_selection
 from app.services.speech_mode import is_voiceover, is_onscreen_speech
+from app.services.dialogue_window import from_shot as dialogue_window_from_shot
 from app.services import job_service, storage_service, render_compliance_service, video_references
 from app.services.still_frame_service import match_entities, visual_description
 
@@ -115,6 +116,12 @@ def _translate(result, shot, *, audio_model=None):
     if duration != planned:
         warnings.append(f"Provider bills {duration}s (whole seconds); planned duration remains {planned:g}s.")
     visual = visual_description(shot["compiled_prompt"])
+    if not shot.get("has_dialogue") and shot.get("direction_version") == 1:
+        # Directed shots already have an approved, ordered execution contract.
+        # Sending the prose Compiler recap as a second action authority can
+        # reintroduce an earlier/later-state contradiction at the video model.
+        from app.services.dialogue_window import visual_instruction
+        visual = visual_instruction(result, shot, "@image1", speaking=False)
     if is_voiceover(shot):
         # The spoken text belongs to post-production, never a visible performance.
         visual = re.split(r"Performance reference —|\nDialogue:", visual, maxsplit=1)[0].strip()
@@ -297,7 +304,7 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
                            "video_audio_model": translated.get("audio_model"),
                            "video_audio_reference_url": shot.get("dialogue_audio_url") if is_onscreen_speech(shot) else None,
                            "video_onscreen_speech": is_onscreen_speech(shot),
-                           "video_dialogue_timing": shot.get("dialogue_timing") if is_onscreen_speech(shot) else None,
+                           "video_dialogue_timing": dialogue_window_from_shot(shot, require=True) if is_onscreen_speech(shot) else None,
                            "video_source_hash": source_fingerprint(shot), "video_submitted_at": datetime.now(timezone.utc).isoformat(),
                            "video_warnings": translated["warnings"], "video_mode": translated.get("mode", "reference_to_video"),
                            "video_compliance_expected": render_compliance_service.snapshot(db, job_id, shot),
@@ -313,13 +320,17 @@ def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=Non
         from app.services import seedance_audio_reference
         audio_evidence = seedance_audio_reference.prepare(translated, shot, job_id)
         if audio_evidence:
+            prepared = translated['request'].get('target_audio_url') or (
+                translated['request'].get('audio_urls') or
+                translated['request'].get('reference_audio_urls') or [None])[0]
             job_service.update_video(db, job_id, number,
                 video_audio_reference_validation=audio_evidence,
-                video_audio_reference_url=(translated['request'].get('audio_urls') or translated['request']['reference_audio_urls'])[0],
+                video_audio_reference_url=prepared,
                 video_retry_request=translated['request'])
             job_service.append_event(db, job_id, 'video_generation',
                 f"Shot {number}: audio reference checked; speech {audio_evidence['source_duration_sec']:.6f}s, "
                 f"reference {audio_evidence['reference_duration_sec']:.6f}s, "
+                f"leading silence {audio_evidence['leading_silence_sec']:.6f}s, "
                 f"trailing silence {audio_evidence['trailing_silence_sec']:.6f}s. Approved speech unchanged.")
     except Exception as error:
         db.rollback()

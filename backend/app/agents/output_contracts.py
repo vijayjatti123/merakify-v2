@@ -37,6 +37,11 @@ def contracts():
     visual = {k: TEXT for k in ('camera_angle', 'lens', 'lighting', 'composition_note',
                                'description', 'state_at_shot_start', 'state_at_shot_end')}
     visual.update(camera_direction=cam, duration_sec=NUMBER, opening_characters=array(TEXT), shot_direction=direction)
+    edit_fields = {k: visual[k] for k in ('camera_angle', 'camera_direction', 'lens', 'lighting',
+        'composition_note', 'duration_sec', 'state_at_shot_start', 'state_at_shot_end',
+        'opening_characters', 'shot_direction')}
+    edit_fields['shot_direction'] = copy.deepcopy(edit_fields['shot_direction'])
+    edit_fields['shot_direction']['required'] = list(direction['properties'])
     shot = obj(dict(shot_number=INTEGER, scene_number=INTEGER, **visual,
                     characters_in_shot=array(TEXT), has_dialogue=BOOLEAN,
                     speech_mode={'type': 'string', 'enum': ['none', 'onscreen', 'voiceover']}, speaker_name=TEXT, transition_after={'type':'string','enum':['cut','crossfade','match cut']}, dialogue_text=TEXT))
@@ -56,6 +61,7 @@ def contracts():
                           shot_checks=array(obj(dict(shot_number=INTEGER, consistent=BOOLEAN, evidence=TEXT))),
                           issues=array(scoped_issue))),
         'patch-v1': obj(dict(patches=array(obj(dict(shot_number=INTEGER, changes=obj(visual, [])))))),
+        'shot-edit-v1': obj(dict(changes=obj(edit_fields))),
         'patch-insert-v1': obj(dict(patches=array(obj(dict(shot_number=INTEGER, changes=obj(visual, [])))),
             insertions=array(obj(dict(after_shot_number=INTEGER,
                 shot=obj({k:v for k,v in shot['properties'].items() if k != 'shot_number'})))))),
@@ -80,7 +86,8 @@ def contract_for(system, content):
     # in the first live audit; local semantic/reference checks remain mandatory.
     insert_contract = system == prompts.CINEMATOGRAPHY_PATCH and '\nallowed_insert_after:' in content
     required_evidence = (isinstance(payload, dict) and bool(payload.get('requirements'))) or insert_contract
-    required_director = system in (prompts.CINEMATOGRAPHY_AGENT, prompts.CINEMATOGRAPHY_PATCH)
+    required_director = system in (prompts.CINEMATOGRAPHY_AGENT, prompts.CINEMATOGRAPHY_PATCH,
+                                   prompts.CINEMATOGRAPHY_EDIT)
     if not settings.planning_structured_outputs and not required_evidence and not required_director:
         return None, None
     name = None
@@ -88,6 +95,8 @@ def contract_for(system, content):
         name = 'director-v2'
     elif system == prompts.CINEMATOGRAPHY_PATCH:
         name = 'patch-insert-v1' if insert_contract else 'patch-v1'
+    elif system == prompts.CINEMATOGRAPHY_EDIT:
+        name = 'shot-edit-v1'
     elif system == prompts.QA_AGENT:
         try:
             payload = json.loads(content)

@@ -91,10 +91,25 @@ class ComplianceTests(unittest.TestCase):
         with patch.object(gate,'frames',return_value=[(0,{'inlineData':{}})]), patch.object(gate,'_google',return_value={'candidates':[{'content':{'parts':[{'inlineData':{'data':'image'}}]}}]}):
             with self.assertRaises(ValueError):gate.inspect(io.BytesIO(),{'visual_style':'Cartoon / Anime'})
     def test_missing_still_cannot_produce_a_scale_rejection(self):
-        raw={'candidates':[{'content':{'parts':[{'text':json.dumps(verdict(scale='mismatch')['verdict'])}]}}]}
+        response={**verdict(scale='mismatch')['verdict'],
+                  'frame_observations':[{'frame_index':1,'observed':'person waiting',
+                                         'later_beat_already_visible':False,'reason':'opening frame'}]}
+        raw={'candidates':[{'content':{'parts':[{'text':json.dumps(response)}]}}]}
         with patch.object(gate,'frames',return_value=[(0,{'inlineData':{}})]),patch.object(gate,'_google',return_value=raw):
             result=gate.inspect(io.BytesIO(),{'visual_style':'Cartoon / Anime'})
             self.assertEqual(result['verdict']['scale']['status'],'unverified')
+    def test_early_later_beat_forces_staging_mismatch(self):
+        response={**verdict()['verdict'], 'frame_observations':[
+            {'frame_index':1,'observed':'jumper at door','later_beat_already_visible':False,'reason':'opening'},
+            {'frame_index':2,'observed':'deployed canopy','later_beat_already_visible':True,'reason':'early payoff'}]}
+        raw={'candidates':[{'content':{'parts':[{'text':json.dumps(response)}]}}]}
+        with patch.object(gate,'frames',return_value=[(0,{'inlineData':{}}),(2,{'inlineData':{}})]), \
+             patch.object(gate,'_google',return_value=raw) as checker:
+            result=gate.inspect(io.BytesIO(),{'staging':{'action_beats':['jump','freefall','deploy'],
+                                                         'planned_duration_sec':6}})
+        self.assertEqual(result['verdict']['staging']['status'],'mismatch')
+        self.assertTrue(checker.call_args.kwargs['verification'])
+        self.assertEqual(result['model'],gate.settings.gemini_preview_check_model)
     def test_snapshot_uses_real_job_field_not_result_prose(self):
         value=gate.snapshot(self.db,self.job.id,{'camera_angle':'eye-level close-up'})
         self.assertEqual(value['visual_style'],'Cartoon / Anime')

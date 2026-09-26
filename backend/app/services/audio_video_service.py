@@ -28,6 +28,7 @@ MODELS = {
     "kling_voice_fal": ("fal", "fal-ai/kling-video/v3/4k/image-to-video"),
     "kling_avatar_fal": ("fal", "fal-ai/kling-video/ai-avatar/v2/pro"),
 }
+H3_EXACT_AUDIO_MODEL = "minimax/h3-max/image-to-video"
 
 
 class FalResultError(ValueError):
@@ -97,7 +98,8 @@ def translate(result, shot, choice=None):
     if performance > 15:
         raise ValueError("Planned performance and speech must fit within 15 seconds; revise the shot without cutting dialogue")
     image, audio = fresh_url(shot["still_frame_url"]), fresh_url(shot["dialogue_audio_url"])
-    direction = visual_description(shot["compiled_prompt"])
+    from app.services.dialogue_window import visual_instruction
+    direction = visual_instruction(result, shot, "the accepted scene reference")
     # The preview establishes composition; separately labelled identities can
     # establish characters who enter later. The recording binds the speaker.
     import re
@@ -175,7 +177,7 @@ def fal_request(method, url, body=None):
 
 
 def submit(model, request):
-    if model not in {m for p, m in MODELS.values() if p == "fal"}:
+    if model not in ({m for p, m in MODELS.values() if p == "fal"} | {H3_EXACT_AUDIO_MODEL}):
         raise ValueError("Unsupported fal audio-reference endpoint")
     raw = fal_request("POST", "https://queue.fal.run/" + model, request)
     # Retain provider-returned URLs: subpath endpoint queue URLs need not match
