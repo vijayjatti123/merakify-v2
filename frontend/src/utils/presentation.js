@@ -52,8 +52,12 @@ export function videoReviewWarnings(shot) {
   if (!shot.video_url || shot.video_status !== 'done') return [];
   const result = [];
   const speechStatus = shot.video_speech_check?.status;
-  if (speechStatus === 'mismatch') result.push("The generated speech does not match your approved dialogue. Automatic correction did not resolve it; review the clip before using it.");
-  if (speechStatus === 'unverified') result.push("Your video is saved, but we couldn't verify its spoken words. Please listen before using it.");
+  if (speechStatus === 'mismatch') result.push(shot.has_dialogue
+    ? "The generated speech does not match your approved dialogue. Automatic correction did not resolve it; review the clip before using it."
+    : "This shot was meant to have no speech, but the video contains an unexpected voice.");
+  if (speechStatus === 'unverified') result.push(shot.has_dialogue
+    ? "Your video is saved, but we couldn't verify its spoken words. Please listen before using it."
+    : "Your video is saved, but we couldn't verify that this shot has no speech. Please listen before using it.");
   if (!['mismatch', 'unverified'].includes(speechStatus) && (shot.experimental_audio_sync || (shot.video_warnings || []).some(w => /^Audio-guided generation is experimental\./.test(w)))) result.push('Listen to the dialogue before approving: AI-generated speech may vary in pronunciation or mouth timing.');
   for (const warning of shot.video_warnings || []) {
     if (speechStatus && /Render compliance:.*speech/i.test(warning)) continue;
@@ -66,6 +70,11 @@ export function videoReviewWarnings(shot) {
 export function videoReviewGuidance(shot) {
   const error = String(shot?.video_error || '');
   const hasVisualFinding = /staging|position|placement|inside|outside|style|appearance|identity|scale|framing|composition/i.test(error);
+  if (!shot?.has_dialogue && /unexpected speech in a silent shot/i.test(error)) return {
+    title: 'This shot added an unwanted voice',
+    message: 'The video model spoke even though this shot has no dialogue. The automatic correction also failed the audio check.',
+    action: 'Choose Regenerate corrected video to try the saved silent-shot direction again. You do not need to edit dialogue.',
+  };
   if (/speech|dialogue|spoken/i.test(error) && !hasVisualFinding) return {
     title: 'Your approved dialogue is safe',
     message: 'The automatic listener could not confirm the words. The saved voice recording is applied directly, so you do not need to rewrite or control the speech.',

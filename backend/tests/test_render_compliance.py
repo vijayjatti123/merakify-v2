@@ -23,6 +23,7 @@ class ComplianceTests(unittest.TestCase):
             'characters_in_shot': [], 'speech_mode': 'none'})
         self.assertIn('Workshop light', expected['visual_style']['lighting_motif'])
         self.assertNotIn('Yamaraj', str(expected['visual_style']))
+        self.assertEqual(expected['speech'], {'mode': 'none'})
 
     def test_product_only_retry_is_concise_and_does_not_repeat_character_ban(self):
         expected={'visible_characters': [], 'staging': {

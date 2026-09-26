@@ -34,6 +34,19 @@ If masking, unfamiliar language or ambiguity prevents confident assessment, retu
 Only return mismatch for clear audible evidence, with confidence >= 0.9 and timestamped issues.
 Return pass only if the complete line occurs once and there is no extra speech.
 This is transcript verification, not proof of speaker identity or lip sync."""
+SILENT_RULE = (
+    "This shot has NO approved spoken words. No character, narrator, crowd, or off-screen voice "
+    "speaks, mumbles, whispers, sings words, or makes speech-like gibberish at any time. "
+    "Keep mouths at rest. Only non-vocal scene ambience is allowed."
+)
+SILENT_RULES = """Listen to the COMPLETE generated audio. This shot has no approved dialogue or narration.
+Return mismatch only for clearly audible speech, muttering, sung words, or speech-like gibberish,
+including off-screen voices. Mark each occurrence as extra_speech with its actual time and
+concrete evidence. Do not invent a transcript for gibberish. Breathing, laughter, wind, tools,
+engines, music without words, and other non-speech sounds are allowed.
+Return pass with an empty transcript and no issues when no speech is audible. If masking or
+ambiguity prevents a confident decision, return unverified. Mismatch requires confidence >= 0.9.
+Return only the requested structured JSON."""
 
 ITEM = {"type":"OBJECT","properties":{
     "kind":{"type":"STRING","enum":["extra_speech","missing_words","wrong_words","repeated_line","wrong_timing"]},
@@ -87,7 +100,7 @@ def extract_audio(media):
         media.seek(0)
 
 
-def parse(raw, duration):
+def parse(raw, duration, *, expect_silence=False):
     text = "".join(p.get("text", "") for c in raw.get("candidates", [])
                    for p in c.get("content", {}).get("parts", []) if not p.get("thought"))
     v = json.loads(text)
@@ -106,23 +119,29 @@ def parse(raw, duration):
         start, end = issue.get("start_sec"), issue.get("end_sec")
         if any(type(x) not in (int, float) or not math.isfinite(x) for x in (start, end)) or not 0 <= start <= end <= duration + .25:
             raise ValueError("Invalid speech timestamps")
-    if v["status"] == "pass" and (v["issues"] or not v["transcript"].strip()):
+    if v["status"] == "pass" and (v["issues"] or (not expect_silence and not v["transcript"].strip())
+                                      or (expect_silence and v["transcript"].strip())):
         raise ValueError("Contradictory speech pass")
     if v["status"] == "mismatch" and not v["issues"]:
         raise ValueError("Speech mismatch lacks evidence")
+    if expect_silence and v["status"] == "mismatch" and any(
+            issue["kind"] != "extra_speech" for issue in v["issues"]):
+        raise ValueError("Silent-shot mismatch must identify extra speech")
     if confidence < .9:
         v["status"] = "unverified"
     return v
 
 
 def inspect_audio(audio, duration, expected):
-    if not expected.get("dialogue_text", "").strip():
+    expect_silence = expected.get("mode") == "none"
+    if not expect_silence and not expected.get("dialogue_text", "").strip():
         raise ValueError("Missing approved speech snapshot")
     if not settings.google_ai_api_key.strip():
         raise ValueError("Speech verification credentials unavailable")
     model = settings.gemini_preview_check_model
     body = {"contents":[{"parts":[
-        {"text":RULES + "\nApproved transcript context: " + json.dumps(expected, ensure_ascii=False)},
+        {"text":(SILENT_RULES if expect_silence else RULES + "\nApproved transcript context: "
+                 + json.dumps(expected, ensure_ascii=False))},
         {"inlineData":{"mimeType":"audio/wav","data":base64.b64encode(audio).decode()}}]}],
         "generationConfig":{"responseMimeType":"application/json","responseSchema":SCHEMA,
                             "temperature":0,"maxOutputTokens":2500}}
@@ -130,10 +149,10 @@ def inspect_audio(audio, duration, expected):
                       data=json.dumps(body).encode(), headers={"Content-Type":"application/json","x-goog-api-key":settings.google_ai_api_key}, method="POST")
     started = time.monotonic()
     with urlopen(request, timeout=60) as response:
-        verdict = parse(json.load(response), duration)
+        verdict = parse(json.load(response), duration, expect_silence=expect_silence)
     # A checker must not turn an equivalent contraction into a costly retry.
     # Extra/repeated speech still changes the token sequence and remains caught.
-    if (verdict["status"] == "mismatch"
+    if (not expect_silence and verdict["status"] == "mismatch"
             and all(issue["kind"] == "wrong_words" for issue in verdict["issues"])
             and normalized_words(verdict["transcript"]) == normalized_words(expected["dialogue_text"])):
         verdict.update(status="pass", confidence=1.0, issues=[],

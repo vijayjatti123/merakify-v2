@@ -19,6 +19,16 @@ def raw(v):
 
 
 class SpeechParseTests(unittest.TestCase):
+    def test_silent_audio_accepts_no_words_and_rejects_gibberish(self):
+        clear = {"status":"pass", "confidence":.98, "transcript":"",
+                 "reason":"Only room tone is audible.", "issues":[]}
+        self.assertEqual(speech.parse(raw(clear), 5, expect_silence=True)["status"], "pass")
+        self.assertEqual(speech.parse(raw({**finding(), "transcript":""}), 5,
+                                      expect_silence=True)["status"], "mismatch")
+        with self.assertRaisesRegex(ValueError, "Silent-shot mismatch"):
+            speech.parse(raw({**finding(), "issues":[{"kind":"wrong_words", "start_sec":0,
+                "end_sec":1, "evidence":"unapproved line"}]}), 5, expect_silence=True)
+
     def test_equivalent_contractions_normalize_without_hiding_extra_speech(self):
         self.assertEqual(speech.normalized_words("You've got this."),
                          speech.normalized_words("You have got this"))
@@ -37,6 +47,17 @@ class SpeechParseTests(unittest.TestCase):
                 'dialogue_text': "Drink this, Kabir. You've got this.", 'language':'English'})
         self.assertEqual(checked['verdict']['status'], 'pass')
         self.assertEqual(checked['verdict']['issues'], [])
+
+    def test_silent_checker_receives_no_dialogue_contract(self):
+        clear = {"status":"pass", "confidence":.98, "transcript":"",
+                 "reason":"Only non-vocal ambience is audible.", "issues":[]}
+        with patch.object(speech, 'urlopen', return_value=io.BytesIO(json.dumps(raw(clear)).encode())) as call, \
+             patch.object(speech.settings, 'google_ai_api_key', 'test'):
+            checked = speech.inspect_audio(b'wav', 5, {'mode':'none'})
+        self.assertEqual(checked['verdict']['status'], 'pass')
+        body = json.loads(call.call_args.args[0].data)
+        self.assertIn('speech-like gibberish', body['contents'][0]['parts'][0]['text'])
+        self.assertNotIn('Approved transcript context', body['contents'][0]['parts'][0]['text'])
 
     def test_evidence_required_and_low_confidence_never_retries(self):
         self.assertEqual(speech.parse(raw(finding()),6)["status"],"mismatch")
@@ -121,3 +142,21 @@ class SpeechGateTests(unittest.TestCase):
             saved=self.data()
             self.assertEqual(saved["video_speech_check"]["status"],"pass")
             self.assertEqual(saved["video_speech_check"]["method"],"approved_audio_lock")
+
+    def test_silent_shot_gibberish_triggers_one_silent_correction(self):
+        jobs.update_video(self.db, self.job.id, 1, video_compliance_expected={
+            "visual_style":"Natural", "speech":{"mode":"none"}})
+        self.shot.update(has_dialogue=False, speech_mode="none")
+        with patch.object(speech, "inspect_audio", return_value={"verdict":finding()}) as checker, \
+             patch.object(audio, "submit", return_value={"id":"second"}) as submit:
+            self.assertFalse(self.check())
+            self.assertEqual(checker.call_args.args[2], {"mode":"none"})
+            prompt = submit.call_args.args[1]["prompt"]
+            self.assertIn("No character, narrator", prompt)
+            self.assertNotIn("Follow this approved transcript", prompt)
+            self.shot["video_task_id"] = "second"
+            self.assertFalse(self.check())
+            submit.assert_called_once()
+        saved = self.data()
+        self.assertEqual(saved["video_status"], "review_required")
+        self.assertIn("Unexpected speech", saved["video_error"])

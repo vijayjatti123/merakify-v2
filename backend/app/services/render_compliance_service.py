@@ -79,6 +79,8 @@ def snapshot(db, job_id, shot):
                               "language": job.language, "speaker": shot.get("speaker_label"),
                               **({"start_sec": timing["start_sec"], "end_sec": timing["end_sec"]}
                                  if timing else {})}
+    elif not is_voiceover(shot) and not is_onscreen_speech(shot):
+        expected["speech"] = {"mode": "none"}
     return expected
 
 
@@ -219,7 +221,8 @@ def inspect_all(media, expected):
     check["speech_check"] = speech_check
     check["verdict"]["speech"] = {**speech_check["verdict"],
         "observed": speech_check["verdict"].get("transcript", ""),
-        "reason": "Approved dialogue does not match generated speech." if speech_check["verdict"]["status"] == "mismatch"
+        "reason": ("Unexpected speech in a silent shot." if expected["speech"].get("mode") == "none"
+                   else "Approved dialogue does not match generated speech.") if speech_check["verdict"]["status"] == "mismatch"
                   else speech_check["verdict"]["reason"]}
     return check
 
@@ -331,13 +334,16 @@ def accept(db, job_id, shot, media, *, check_cache=None):
         if correction:
             request["prompt"] = request.get("prompt", "") + "\n" + correction
     if verdict.get("speech", {}).get("status") == "mismatch":
-        from app.services.speech_compliance_service import SPEECH_RULE
+        from app.services.speech_compliance_service import SPEECH_RULE, SILENT_RULE
         # Never feed the checker's garbled transcription back into generation.
         speech_contract = (data.get("video_compliance_expected") or {}).get("speech") or {}
-        request["prompt"] = (request.get("prompt", "") + "\nSpeech correction: " + SPEECH_RULE
-            + " Follow this approved transcript, speaker and timing contract exactly: "
-            + json.dumps(speech_contract, ensure_ascii=False) + ". Generate the voice and visible articulation "
-              "together; do not overlay or replace audio after generating the video.")
+        if speech_contract.get("mode") == "none":
+            request["prompt"] = request.get("prompt", "") + "\nSilent-shot correction: " + SILENT_RULE
+        else:
+            request["prompt"] = (request.get("prompt", "") + "\nSpeech correction: " + SPEECH_RULE
+                + " Follow this approved transcript, speaker and timing contract exactly: "
+                + json.dumps(speech_contract, ensure_ascii=False) + ". Generate the voice and visible articulation "
+                  "together; do not overlay or replace audio after generating the video.")
     # Do not replay a legacy paid request containing an uploaded Vault portrait.
     if data.get("video_provider") == "hedra" and data.get("video_reference_source") != "module_o_still":
         from app.services.hedra_video_service import MediaValidationError
