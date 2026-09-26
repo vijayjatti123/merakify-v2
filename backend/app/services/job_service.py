@@ -703,6 +703,40 @@ def video_was_stopped(db, job_id, number):
     return bool(row and json.loads(row.data_json).get("video_stop_requested"))
 
 
+def resume_saved_label_video(db, job_id, number, expected_attempt):
+    """Finish an already-paid clip whose only visual objection was package text."""
+    from app.services.render_compliance_service import label_only_staging_mismatch
+    row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).populate_existing().one_or_none()
+    if row is None:
+        raise LookupError("Saved video attempt not found")
+    old_json = row.data_json
+    data = json.loads(old_json)
+    task = data.get("video_task_id")
+    if not task or task != expected_attempt or row.status != "review_required":
+        raise ValueError("This video attempt changed. Refresh before continuing.")
+    check = (data.get("video_compliance_checks") or {}).get(task) or {}
+    verdict = check.get("verdict") or {}
+    if not label_only_staging_mismatch(verdict.get("staging") or {}):
+        raise ValueError("This video needs a different correction; the saved result cannot be accepted for lettering alone.")
+    if any(value.get("status") == "mismatch" for key, value in verdict.items()
+           if key in {"style", "scale", "speech"} and isinstance(value, dict)):
+        raise ValueError("This video has another failed check besides lettering.")
+    from datetime import datetime, timezone
+    lease_until = (data.get("video_worker_lease") or {}).get("until")
+    if lease_until and datetime.fromisoformat(lease_until) > datetime.now(timezone.utc):
+        raise ValueError("The previous video worker is still stopping. Try again shortly.")
+    data.pop("video_stop_requested", None)
+    data.pop("video_worker_lease", None)
+    data.update(video_status="processing", video_phase="recovering_saved_video", video_error=None)
+    changed = db.query(VideoTask).filter(VideoTask.id == row.id, VideoTask.data_json == old_json).update(
+        {VideoTask.data_json: json.dumps(data), VideoTask.status: "processing"}, synchronize_session=False)
+    if changed != 1:
+        db.rollback()
+        raise ValueError("This video attempt changed. Refresh before continuing.")
+    db.commit()
+    append_event(db, job_id, "video_generation", f"Shot {number}: resuming saved provider video after advisory-only product lettering finding; no new render submitted.")
+
+
 
 def _recoverable_locked_audio_review(data):
     if data.get("video_stop_requested"):

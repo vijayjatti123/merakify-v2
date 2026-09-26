@@ -156,6 +156,20 @@ def stop_video(job_id: str, shot_number: int, payload: VideoStopRequest, db: Ses
     return {"status": "stopped" if stopped else "already_finished"}
 
 
+@router.post("/{job_id}/shots/{shot_number}/video/finish-saved", status_code=202)
+def finish_saved_label_video(job_id: str, shot_number: int, payload: VideoStopRequest, db: Session = Depends(get_db)):
+    try:
+        _, shot = job_service.video_source(db, job_id, shot_number)
+        if shot.get("video_source_changed"):
+            raise ValueError("This video used an older shot image. Regenerate from the current image instead.")
+        job_service.resume_saved_label_video(db, job_id, shot_number, payload.expected_attempt)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"status": "finishing_saved_video"}
+
+
 @router.post("/{job_id}/shots/{shot_number}/video/regenerate", status_code=202)
 def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     from app.services import video_generation_service as video

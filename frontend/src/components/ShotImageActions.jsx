@@ -42,9 +42,9 @@ export default function ShotImageActions({ jobId, shot, aspectRatio, disabled, o
   }
   return <Box sx={{ my: 2 }} data-testid={`image-actions-${shot.shot_number}`}>
     {repairMarkings && !pending && !ready && <Alert severity="warning" sx={{ mb: 1 }}>
-      The product lettering did not hold up in the video. We can make a corrected image for this shot while keeping the others and the saved voice.
+      Exact product lettering is optional for this shot. You can keep the current image, or try a replacement if the package text matters to you.
       <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1} sx={{ mt: 1 }}>
-        <Button variant="contained" disabled={disabled || busy} onClick={() => act("replacement", { expected_key: shot.still_frame_key || "", hint: markingHint })} data-testid={`fix-product-image-${shot.shot_number}`}>Fix product image for me</Button>
+        <Button variant="outlined" disabled={disabled || busy} onClick={() => act("replacement", { expected_key: shot.still_frame_key || "", hint: markingHint })} data-testid={`fix-product-image-${shot.shot_number}`}>Try another product image</Button>
         <Button disabled={disabled || busy} onClick={() => { setError(""); setMode("upload"); }}>Upload a product image</Button>
       </Stack>
     </Alert>}

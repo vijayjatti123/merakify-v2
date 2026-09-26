@@ -407,12 +407,12 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
     parts = [{"text": (
         "Check this single opening-frame preview against the compiled visual description and any "
         "locked character references. Reject clear identity/outfit changes, wrong subject or framing, "
-        + ("collages, invented captions, changed product branding/shape/packaging, or a later completed action. Existing text/logos on approved product packaging are required and must NOT be rejected as readable text. " if product_reference
+        + ("collages, invented captions, changed product shape/material/color, or a later completed action. Existing text/logos on approved product packaging are allowed and must NOT be rejected as readable text. " if product_reference
            else "collages, invented captions or unrequested readable text, or a later completed action instead of the described opening. ") +
-        "For a named branded product, inspect the actual visible package lettering. Reject a "
-        "misspelled, duplicated, partial, or invented brand name; quote the letters you can read "
-        "in props_contact evidence. Do not claim correct branding from shape or placement alone. "
-        "If lettering is too small or obscured to judge, mark this check uncertain. "
+        "Package-letter spelling is advisory: do not reject an otherwise correct opening frame "
+        "solely for distorted, partial, unreadable or misspelled printed letters. The user can "
+        "replace the image if exact lettering matters. Still check product presence, count, "
+        "shape, materials, color, placement and contact. "
         "Ignore motion/audio requirements that cannot be depicted in a still. Treat explicit "
         "spatial requirements as hard acceptance criteria. Compare inside/outside placement and "
         "support against the specified opening, respecting intentionally airborne/fantastical subjects. "

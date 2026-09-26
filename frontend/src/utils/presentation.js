@@ -68,8 +68,17 @@ export function videoReviewWarnings(shot) {
 }
 
 export function productLabelIssue(shot) {
-  const reasons = Object.values(shot?.video_compliance_checks || {}).map(check => check?.verdict?.staging?.reason || '');
+  const checks = shot?.video_compliance_checks || {};
+  const current = checks[shot?.video_task_id];
+  const reasons = (current ? [current] : Object.values(checks)).map(check => check?.verdict?.staging?.reason || '');
   return /misspell|label markings|brand markings|packaging (?:text|markings)|printed (?:text|label)/i.test([shot?.video_error, ...reasons].join(' '));
+}
+
+export function canFinishSavedLabelVideo(shot) {
+  const verdict = shot?.video_compliance_checks?.[shot?.video_task_id]?.verdict || {};
+  return productLabelIssue(shot) && verdict.staging?.status === 'mismatch' &&
+    !/\b(?:rotat\w*|position\w*|plac\w*|support\w*|contact|inside|outside|enter\w*|exit\w*|moving|motion|duplicate objects?|wrong object|missing product)\b/i.test(verdict.staging.reason || '') &&
+    !['style', 'scale', 'speech'].some(key => verdict[key]?.status === 'mismatch');
 }
 
 export function videoReviewGuidance(shot) {
@@ -77,13 +86,13 @@ export function videoReviewGuidance(shot) {
   if (shot?.video_stop_requested) return {
     title: 'This shot is stopped',
     message: 'We stopped checking and retrying this video. An already-submitted provider task may still finish or incur a charge.',
-    action: productLabelIssue(shot) ? 'The bucket label also needs repair. Use Fix product image for me above before making another video.' : 'Your plan, image, and saved speech remain available. Restart this shot only when you choose to.',
+    action: productLabelIssue(shot) ? 'The lettering finding is advisory. Choose Finish saved video below to use the existing clip without another render, or replace the image if exact text matters to you.' : 'Your plan, image, and saved speech remain available. Restart this shot only when you choose to.',
   };
   const hasVisualFinding = /staging|position|placement|inside|outside|style|appearance|identity|scale|framing|composition/i.test(error);
   if (productLabelIssue(shot)) return {
-    title: 'The product label needs a closer look',
-    message: shot.video_source_changed ? 'The previous video used the older shot image. Your new image is ready.' : 'The video checker found a problem with the printed markings on the product. This is unrelated to the voice-over.',
-    action: shot.video_source_changed ? 'Use Regenerate corrected video below to make this shot with the new image.' : 'Use Fix product image for me above. Review the corrected image, then regenerate this shot’s video. You can upload a real product image if the lettering remains wrong.',
+    title: 'Review the product lettering',
+    message: shot.video_source_changed ? 'The previous video used the older shot image. Your new image is ready.' : 'The checker noticed imperfect printed lettering. This does not make the clip unusable.',
+    action: shot.video_source_changed ? 'Use Regenerate video below to make this shot with the new image.' : 'Use Finish saved video below without buying another render. Replacing the image is optional if exact package text matters to you.',
   };
   if (!shot?.has_dialogue && /unexpected speech in a silent shot/i.test(error)) return {
     title: 'This shot added an unwanted voice',

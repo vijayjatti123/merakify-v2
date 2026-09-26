@@ -235,6 +235,16 @@ export async function stopShotVideo(jobId, shot) {
   return data;
 }
 
+export async function finishSavedShotVideo(jobId, shot) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shot.shot_number}/video/finish-saved`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_attempt: shot.video_task_id }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not finish the saved clip. You can regenerate this shot instead.");
+  return data;
+}
+
 export async function retryShotPreview(jobId, shot) {
   const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shot.shot_number}/preview/retry`, {
     method: "POST", headers: { "Content-Type": "application/json" },

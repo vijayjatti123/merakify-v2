@@ -97,16 +97,29 @@ class ComplianceTests(unittest.TestCase):
             self.shot['video_task_id']='second'
             self.assertFalse(self.check());self.assertEqual(api.call_count,1)
             self.assertEqual(self.data()['video_status'], 'review_required')
-    def test_misspelled_product_label_stops_before_paid_video_retry(self):
+    def test_misspelled_product_label_is_advisory_without_paid_video_retry(self):
         check = verdict()
         check['verdict']['staging'] = {'status':'mismatch', 'observed':'bucket lettering',
                                        'reason':'Violates forbidden geometry rule against misspelled brand markings'}
         with patch.object(gate, 'inspect', return_value=check), patch.object(video, 'provider') as api:
-            self.assertFalse(self.check())
+            self.assertTrue(self.check())
             api.assert_not_called()
-        self.assertEqual(self.data()['video_status'], 'review_required')
+        self.assertEqual(self.data()['video_status'], 'processing')
         self.assertEqual(self.data()['video_compliance_retries'], 0)
-        self.assertIn('Product label needs image repair', self.data()['video_error'])
+        self.assertIn('Product lettering may be inaccurate', self.data()['video_warnings'][0])
+    def test_saved_label_video_can_resume_without_a_new_render(self):
+        check = verdict()
+        check['verdict']['staging'] = {'status':'mismatch', 'observed':'bucket lettering',
+                                       'reason':'Violates forbidden geometry rule against misspelled brand markings'}
+        jobs.video_check_state(self.db, self.job.id, 1, 'first', check=check)
+        jobs.stop_video(self.db, self.job.id, 1, 'first')
+        jobs.resume_saved_label_video(self.db, self.job.id, 1, 'first')
+        self.assertEqual(self.data()['video_status'], 'processing')
+        self.assertFalse(self.data().get('video_stop_requested'))
+        with patch.object(gate, 'inspect', side_effect=AssertionError('reuse saved verdict')), \
+             patch.object(video, 'provider') as api:
+            self.assertTrue(self.check())
+            api.assert_not_called()
     def test_user_stop_prevents_later_worker_updates_and_retries(self):
         self.assertTrue(jobs.stop_video(self.db, self.job.id, 1, 'first'))
         self.assertEqual(self.data()['video_status'], 'review_required')

@@ -9,10 +9,10 @@ import ActionProgress from "../components/ActionProgress";
 import ShotImageActions from "../components/ShotImageActions";
 import { AdDirectionPlan, ShotDirectionPlan } from "../components/AdDirectionPlan";
 import ShotPreviewImage from "../components/ShotPreviewImage";
-import { friendlyMessage, progressMessage, productLabelIssue, videoReviewGuidance, videoReviewWarnings } from "../utils/presentation";
+import { canFinishSavedLabelVideo, friendlyMessage, progressMessage, productLabelIssue, videoReviewGuidance, videoReviewWarnings } from "../utils/presentation";
 import { retryFailedJob, retryShotPreview, retryPreviewPreparation } from "../api/client";
 import { previewState, previewSummary } from "../utils/previewState";
-import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, stopShotVideo, assembleFinalVideo } from "../api/client";
+import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, stopShotVideo, finishSavedShotVideo, assembleFinalVideo } from "../api/client";
 import FaceEnhancement, { ShotVideo } from "../components/FaceEnhancement";
 import { CAMERA_VOCABULARY } from "../utils/cameraVocabulary";
 
@@ -85,6 +85,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
   const [savingShot, setSavingShot] = useState(null);
   const [regeneratingShot, setRegeneratingShot] = useState(null);
   const [stoppingShot, setStoppingShot] = useState(null);
+  const [finishingSavedShot, setFinishingSavedShot] = useState(null);
   const [shotStatuses, setShotStatuses] = useState({});
   const [assembling, setAssembling] = useState(false);
   const [streamCycle, setStreamCycle] = useState(0);
@@ -303,6 +304,19 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
     }
   }
 
+  async function handleFinishSavedVideo(shot) {
+    setFinishingSavedShot(shot.shot_number);
+    setShotActionError((current) => ({ ...current, [shot.shot_number]: null }));
+    try {
+      await finishSavedShotVideo(jobId, shot);
+      setFinal(await getJob(jobId));
+    } catch (finishError) {
+      setShotActionError((current) => ({ ...current, [shot.shot_number]: finishError.message }));
+    } finally {
+      setFinishingSavedShot(null);
+    }
+  }
+
   return (
     <>
       <section className="generation-area storyboard-progress">
@@ -482,7 +496,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         {statusRefreshing === shot.shot_number ? "Checking…" : "Check status"}
                       </Button>}
                     </Stack>}
-                    {(videoSubmitting === shot.shot_number || regeneratingShot === shot.shot_number || ["submitting", "processing"].includes(shot.video_status)) && <ActionProgress label={shot.video_phase === "preparing_voice" ? `Preparing the saved voice for shot ${shot.shot_number}…` : shot.video_phase === "correcting" ? `Correcting shot ${shot.shot_number} automatically…` : shot.video_status === "processing" && shot.video_error ? `Finishing the saved video for shot ${shot.shot_number}…` : `Generating video for shot ${shot.shot_number}…`} />}
+                    {(videoSubmitting === shot.shot_number || regeneratingShot === shot.shot_number || ["submitting", "processing"].includes(shot.video_status)) && <ActionProgress label={shot.video_phase === "recovering_saved_video" ? `Finishing saved video for shot ${shot.shot_number} without another render…` : shot.video_phase === "preparing_voice" ? `Preparing the saved voice for shot ${shot.shot_number}…` : shot.video_phase === "correcting" ? `Correcting shot ${shot.shot_number} automatically…` : shot.video_status === "processing" && shot.video_error ? `Finishing the saved video for shot ${shot.shot_number}…` : `Generating video for shot ${shot.shot_number}…`} />}
                     {["submitting", "processing", "submission_unknown"].includes(shot.video_status) && <Button size="small" variant="outlined" color="warning" disabled={stoppingShot === shot.shot_number || !shot.video_task_id && !shot.video_submitted_at} onClick={() => handleStopVideo(shot)} data-testid={`stop-video-${shot.shot_number}`}>{stoppingShot === shot.shot_number ? "Stopping…" : "Stop this shot"}</Button>}
                     {savingShot === shot.shot_number && <ActionProgress label="Saving your changes and checking the shot…" />}
                     {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
@@ -498,6 +512,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     })() : shot.video_status === "processing" && shot.video_error
                       ? <Alert severity="info" data-testid={`video-recovery-${shot.shot_number}`}>Checking the saved video task. You don’t need to retry or change this shot.</Alert>
                       : shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
+                    {shot.video_status === "review_required" && !shot.video_source_changed && canFinishSavedLabelVideo(shot) && <Button variant="contained" sx={{ my: 1 }} disabled={finishingSavedShot === shot.shot_number || regeneratingShot !== null || videoSubmitting !== null} onClick={() => handleFinishSavedVideo(shot)} data-testid={`finish-saved-video-${shot.shot_number}`}>{finishingSavedShot === shot.shot_number ? "Finishing saved video…" : "Finish saved video · no new render"}</Button>}
                     {videoReviewWarnings(shot).map((warning) => <Alert severity={["mismatch", "unverified"].includes(shot.video_speech_check?.status) ? "warning" : "info"} key={warning} data-testid={`video-review-note-${shot.shot_number}`}>{warning}</Alert>)}
                     {approved && !errored && (shot.has_dialogue || result.video_model || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && shot.still_frame_url && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
                       <Button id={`generate-video-${shot.shot_number}`} type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={editBlocksApproval || shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
@@ -524,7 +539,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       ) : (
                         <>
                           <Button type="button" disabled={previews.busy || videoBusy || editBlocksApproval || shots.some(s => s.video_status === "submission_unknown" || s.preview_replacement?.status === "working")} onClick={() => beginEdit(shot)} className="card-action" aria-label={`Edit shot ${shot.shot_number}`}><Pencil size={13} /> Edit this shot</Button>
-                          {(shot.video_url || ["error", "failed"].includes(shot.video_status) || (shot.video_status === "review_required" && !lockedAudioReview(shot))) && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={editBlocksApproval || shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url || (!shot.video_source_changed && productLabelIssue(shot))} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
+                          {(shot.video_url || ["error", "failed"].includes(shot.video_status) || (shot.video_status === "review_required" && !lockedAudioReview(shot))) && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={editBlocksApproval || shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {shot.video_status === "review_required" ? "Regenerate corrected video" : "Regenerate video"}
                           </Button>}
                         </>
