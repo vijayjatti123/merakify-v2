@@ -181,17 +181,7 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
                     }]
                 }
             if system_prompt == prompts.QA_AGENT:
-                draft_result = set_result.call_args.args[2]
-                self.assertEqual(draft_result['planning_draft']['shots'][0]['description'], 'Ravi enters')
-                self.assertNotIn('shots', draft_result)
-                self.assertNotIn('generation_approved', draft_result)
-                self.assertNotIn('voice_refs', draft_result['planning_draft']['shots'][0])
-                return {"approved": True, "issues": [],
-                    "requirement_coverage": [
-                        {"requirement_id":"s1:heading:1","shot_numbers":[1],"covered":True,"evidence":"Cafe shown"},
-                        {"requirement_id":"s1:description:1","shot_numbers":[1],"covered":True,"evidence":"Ravi enters"}],
-                    "shot_checks": [{"shot_number":1,"consistent":True,"evidence":"Path and support are explicit"}],
-                    "scene_coverage": [{"scene_number":1,"shot_numbers":[1],"covered":True,"evidence":"Ravi enters"}]}
+                raise AssertionError('A semantic QA call must not block user review')
             if system_prompt == prompts.SHOT_ASSEMBLER:
                 return {"total_duration_sec": 5, "transitions": []}
             raise AssertionError("unexpected prompt")
@@ -209,6 +199,12 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
         ):
             run_pipeline(object(), job.id)
 
+        draft_result = next(call.args[2] for call in set_result.call_args_list
+                            if 'planning_draft' in call.args[2])
+        self.assertEqual(draft_result['planning_draft']['shots'][0]['description'], 'Ravi enters')
+        self.assertNotIn('shots', draft_result)
+        self.assertNotIn('generation_approved', draft_result)
+        self.assertNotIn('voice_refs', draft_result['planning_draft']['shots'][0])
         return calls, set_result.call_args.args[2]
 
     def test_has_script_uses_preservation_prompt_and_returns_source_text(self) -> None:

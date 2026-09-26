@@ -1048,8 +1048,9 @@ def run_pipeline(db: Session, job_id: str) -> None:
             f"{cutaway_shots} silent cutaway/reaction shot(s).",
         )
 
-        # 5-7. Both initial runs and user revisions use this one QA/duration
-        # self-correction implementation so their behavior cannot diverge.
+        # The customer reviews creative story coverage. Check execution facts
+        # locally before review; an expensive semantic model pass must not keep
+        # an otherwise editable Director plan in a running/error state.
         # Display-only snapshot: never put unreviewed shots in result.shots.
         # Running/error jobs cannot be approved; final persistence replaces this.
         job_service.set_result(db, job_id, {'planning_draft': {
@@ -1070,7 +1071,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             minimum_shot_seconds=minimum_shot_seconds,
             ad_direction_plan=directed_ad,
             approved_story=script,
-            semantic_review=True,
+            semantic_review=False,
         )
         cine["shots"] = _attach_voice_refs(
             validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")
