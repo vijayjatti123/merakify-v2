@@ -243,6 +243,47 @@ class AdDirectionTests(unittest.TestCase):
         self.assertIn('Spirit',payload['shots'][0]['characters_in_shot'])
         self.assertEqual(payload['shots'][0]['opening_characters'],['Carpenter'])
 
+    def test_absent_character_style_never_leaks_into_preview_or_video(self):
+        from app.services.dialogue_window import visual_instruction
+        result = directed()
+        result['continuity']['characters'] = [{'name': 'Yamaraj', 'description': 'A deity'}]
+        result['continuity']['visual_style'] = {
+            'rendering': 'Natural live action, lifelike skin texture, crisp fabric product detail',
+            'lighting_motif': 'Warm workshop light, golden glow around Yamaraj',
+        }
+        result['ad_direction']['visual_approach'] = 'Warm workshop light, Yamaraj behind the bucket'
+        shot = result['shots'][0]
+        opening = preview_plan.preview_input(result, shot)
+        video = visual_instruction(result, shot, 'the accepted preview', speaking=False)
+        self.assertIn('Warm workshop light', opening['visual_style']['lighting_motif'])
+        self.assertIn('Warm workshop light', video)
+        self.assertIn('crisp fabric product detail', video)
+        for forbidden in ('Yamaraj', 'skin texture'):
+            self.assertNotIn(forbidden, preview_plan.generation_prompt(preview_plan.visual_contract(opening)))
+            self.assertNotIn(forbidden, video)
+
+    def test_ordered_beats_are_only_action_source_for_silent_video(self):
+        from app.services.dialogue_window import visual_instruction
+        result = directed()
+        shot = result['shots'][0]
+        shot['description'] = 'The cup has already been lifted.'
+        shot['shot_direction']['action_beats'] = ['Hand reaches for cup.', 'Hand lifts cup.']
+        prompt = visual_instruction(result, shot, 'the accepted preview', speaking=False)
+        self.assertNotIn('already been lifted', prompt)
+        self.assertLess(prompt.index('Hand reaches for cup.'), prompt.index('Hand lifts cup.'))
+
+    def test_character_entering_later_is_not_in_opening_look(self):
+        result = directed()
+        result['continuity']['characters'] = [{'name': 'Yamaraj', 'description': 'A deity'}]
+        result['continuity']['visual_style'] = {'lighting_motif':
+            'Warm workshop light, golden glow around Yamaraj'}
+        shot = result['shots'][0]
+        shot['characters_in_shot'] = ['Yamaraj']
+        shot.pop('direction_source', None)
+        opening = preview_plan.preview_input(result, shot)
+        self.assertNotIn('Yamaraj', str(opening['visual_style']))
+        self.assertIn('Yamaraj', str(ad_direction.shot_visual_style(result, shot)))
+
 
 
 

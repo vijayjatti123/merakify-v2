@@ -84,6 +84,29 @@ class StillFramesTests(unittest.TestCase):
         invalidate_changed_stills(result)
         self.assertEqual(shot['still_frame_url'], 'https://example/image.jpg')
 
+    def test_new_style_projection_keeps_old_preview_but_detects_real_style_edits(self):
+        from app.services.still_frame_service import invalidate_changed_stills, shot_fingerprint
+        from app.services.preview_plan import preview_input
+        from test_ad_direction import directed
+        result = directed()
+        result['continuity']['characters'] = [{'name': 'Yamaraj'}]
+        result['continuity']['visual_style'] = {
+            'rendering': 'Natural live action',
+            'lighting_motif': 'Workshop light, glow around Yamaraj'}
+        result['ad_direction']['visual_approach'] = 'Workshop light, Yamaraj beside the bucket'
+        shot = result['shots'][0]
+        shot['preview_input'] = preview_input(result, shot)
+        shot['preview_input']['visual_style'] = result['continuity']['visual_style'].copy()
+        shot['preview_input']['ad_visual_direction'] = {
+            'visual_approach': result['ad_direction']['visual_approach']}
+        shot.update(still_frame_url='https://example/image.jpg', still_frame_key='image.jpg')
+        shot['still_frame_source_hash'] = shot_fingerprint(shot)
+        invalidate_changed_stills(result)
+        self.assertEqual(shot['still_frame_url'], 'https://example/image.jpg')
+        result['continuity']['visual_style']['lighting_motif'] = 'Cool studio light'
+        invalidate_changed_stills(result)
+        self.assertIsNone(shot['still_frame_url'])
+
     def test_visual_review_feedback_improves_user_requested_regeneration(self):
         rejected = self.checked_verdict()
         rejected.update(approved=False, reason='Opening state advanced to the ending')

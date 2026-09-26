@@ -35,7 +35,8 @@ def preview_input(result, shot):
         if url and "x-amz-signature=" in url.lower():
             parsed = urlsplit(url)
             character["image_url"] = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
-    facts["visual_style"] = result.get("continuity", {}).get("visual_style", {})
+    from app.services.ad_direction import shot_visual_style
+    facts["visual_style"] = shot_visual_style(result, shot, opening=True) or {}
     from app.commercial import OPENING_REQUIREMENTS
     ad_type = result.get("ad_type", result.get("script", {}).get("production_context", {}).get("commercial", {}).get("ad_type", "character"))
     facts["ad_type"] = ad_type
@@ -46,7 +47,9 @@ def preview_input(result, shot):
         from app.services.ad_direction import visual_direction
         facts['direction_version'] = 1
         direction = visual_direction(result)
-        facts['ad_visual_direction'] = {'visual_approach': direction['visual_approach']} if direction else None
+        from app.services.ad_direction import shot_visual_text
+        facts['ad_visual_direction'] = {'visual_approach': shot_visual_text(
+            result, shot, direction['visual_approach'], opening=True)} if direction else None
         facts['characters_in_shot'] = opening_cast(shot)
         # state_at_shot_start is deliberately the sole physical staging source
         # for the still. shot_direction describes the complete performance;

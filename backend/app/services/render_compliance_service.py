@@ -57,7 +57,11 @@ CHECK_SCHEMA = {"type": "OBJECT", "properties": {**{key: {"type": "OBJECT", "pro
 def snapshot(db, job_id, shot):
     job = job_service.get_job(db, job_id)
     from app.services.speech_mode import is_onscreen_speech, is_voiceover
-    expected = {"visual_style": job.visual_style, "camera_angle": shot.get("camera_angle"),
+    # Use the same shot-specific look as video prompting. A character who
+    # enters later belongs in this check, but absent project characters do not.
+    from app.services.ad_direction import shot_visual_style
+    style = shot_visual_style(job_service.job_result(job) or {}, shot)
+    expected = {"visual_style": style or job.visual_style, "camera_angle": shot.get("camera_angle"),
                 "visible_characters": shot.get("characters_in_shot") or [],
                 "shot_scale": shot.get("shot_scale"), "still_frame_url": shot.get("still_frame_url")}
     direction = shot.get('shot_direction') or {}

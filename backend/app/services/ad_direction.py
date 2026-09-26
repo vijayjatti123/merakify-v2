@@ -23,6 +23,36 @@ def opening_cast(shot):
     return shot.get('opening_characters', []) if shot.get('direction_version') == 1 else shot.get('characters_in_shot', [])
 
 
+def shot_visual_text(result, shot, text, *, opening=False):
+    """Drop project-wide appearance clauses about subjects absent from this shot."""
+    from app.services.video_references import mentions
+
+    cast = opening_cast(shot) if opening else (shot.get('characters_in_shot') or [])
+    visible = {name.casefold() for name in cast}
+    absent = [character.get('name', '') for character in
+              (result.get('continuity') or {}).get('characters', [])
+              if character.get('name') and character['name'].casefold() not in visible]
+    def keep(clause):
+        return (not any(mentions(clause, name) for name in absent)
+                and (visible or not re.search(
+                    r'\b(?:skin tones?|lifelike skin|wardrobe|people|person|human|faces?|hair|divine elements)\b',
+                    clause, re.I)))
+    return ', '.join(part.strip() for part in re.split(r'[,;]\s*', text)
+                     if part.strip() and keep(part))
+
+
+def shot_visual_style(result, shot, *, opening=False):
+    """Keep the project look without introducing subjects absent from this frame/clip."""
+    style = (result.get('continuity') or {}).get('visual_style') or result.get('visual_style')
+    if isinstance(style, dict):
+        return {key: (shot_visual_text(result, shot, value, opening=opening)
+                      if isinstance(value, str) else value)
+                for key, value in style.items()}
+    if isinstance(style, str):
+        return shot_visual_text(result, shot, style, opening=opening)
+    return style
+
+
 def validate_ad(value):
     if not isinstance(value, dict) or set(value) != set(AD_FIELDS):
         raise ValueError("Ad direction is incomplete. Retry planning; no media has been generated.")

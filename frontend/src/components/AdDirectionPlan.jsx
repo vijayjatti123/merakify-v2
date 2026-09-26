@@ -11,9 +11,9 @@ export function AdDirectionPlan({ direction }) {
   </Box>;
 }
 
-export function ShotDirectionPlan({ shot, expanded = false }) {
+export function ShotDirectionPlan({ shot }) {
   if (!shot.shot_direction) return null;
-  return <Box component="details" open={expanded || undefined} data-testid={`shot-direction-${shot.shot_number}`} sx={{ my: 1.5 }}>
+  return <Box component="details" data-testid={`shot-direction-${shot.shot_number}`} sx={{ my: 1.5 }}>
     <Typography component="summary" variant="body2" sx={{ cursor: "pointer", color: "primary.main" }}>What happens in this shot</Typography>
     {[["Speaker", shot.has_dialogue ? (shot.speech_mode === "voiceover" ? "Narrator · off screen" : shot.speaker_name || "Choose a speaker before approval") : "No speech"], ["Transition", shot.transition_after || "cut"], ["Framing", shot.camera_angle], ["Camera movement", shot.camera_movement], ["Lens", shot.lens], ["Lighting", shot.lighting], ["Planned duration", `${shot.duration_sec}s`], ["Why this shot", shot.shot_direction.purpose], ["Starts with", shot.state_at_shot_start],
       ...(Array.isArray(shot.opening_characters) ? [["Visible at the start", shot.opening_characters.join(', ') || 'No visible characters']] : []),

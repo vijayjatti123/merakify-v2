@@ -125,9 +125,15 @@ def invalidate_changed_stills(result, shot_numbers=None):
             # shared facts: newly added facts and deliberately retired inputs do
             # not invalidate old pixels. Actual edits to still-relevant facts do.
             current_input = preview_input(result, shot) or {}
+            old_project_style = (result.get("continuity") or {}).get("visual_style") or result.get("visual_style")
+            old_ad_look = {'visual_approach': (result.get('ad_direction') or {}).get('visual_approach')}
             source_changed = source_changed or any(
-                current_input[key] != value for key, value in stored_input.items()
-                if key in current_input
+                current_input[key] != value
+                # Earlier previews stored the unfiltered project look. A new
+                # shot-specific projection alone must not discard their image.
+                and not (key == "visual_style" and value == old_project_style)
+                and not (key == "ad_visual_direction" and value == old_ad_look)
+                for key, value in stored_input.items() if key in current_input
             )
         if source_changed:
             shot["still_frame_url"] = None

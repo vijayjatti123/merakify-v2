@@ -71,7 +71,7 @@ class H3Tests(unittest.TestCase):
         for cue in ('Yamaraj', 'skin tones', 'people, setting', 'wardrobe', 'mouths', 'characters entering frame'):
             self.assertNotIn(cue, prompt)
         self.assertIn('Bucket alone on workbench', prompt)
-        self.assertIn('product-only composition', prompt)
+        self.assertIn("approved opening's subjects and setting", prompt)
         self.assertIn('"Hello there."', prompt)
 
     def test_duration_and_missing_inputs_fail_before_submission(self):

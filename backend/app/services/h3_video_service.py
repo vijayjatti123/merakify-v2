@@ -38,12 +38,8 @@ def translate(result, shot):
         cast = shot.get("characters_in_shot") or []
         speaker = ("the off-screen narrator" if is_voiceover(shot) else
                    shot.get("speaker_label") or (cast[0] if len(cast) == 1 else None))
-        opening_contract = ("preserve its people, setting, product, wardrobe and screen positions." if cast else
-                            "preserve its product, setting, lighting and screen positions throughout the clip.")
         prompt = (
-            "One continuous shot. The supplied image is the exact opening frame; "
-            + opening_contract + "\n"
-            + direction + "\n"
+            "One continuous shot.\n" + direction + "\n"
             + prompt_instruction(shot, duration, "the supplied soundtrack", exact_audio=True, speaker=speaker)
         )
         request = {"prompt": prompt, "image_url": fresh_url(shot["still_frame_url"]),

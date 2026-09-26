@@ -4,11 +4,11 @@
 
 The existing Cinematography planning and FIX/PATCH/TRIM stages use
 `DIRECTOR_MODEL=google/gemini-3.8-flash` via server-side `OPEN_ROUTER_API_KEY`,
-an explicit user-approved exception to direct-provider routing. Independent
-semantic QA remains on Claude Sonnet 5 for every story; no unproven complexity
-classifier downgrades QA. Other stages, including the video-prompt Compiler,
-keep their existing models. The same QA/correction loop, validators and stage
-deadlines remain. Missing credentials or provider errors stop with Retry rather
+an explicit user-approved exception to direct-provider routing. The current
+user-review path validates the Director plan in code and asks the customer to
+approve its creative story; it does not call semantic QA on every new job.
+The independent semantic QA/correction loop remains available for paths that
+invoke it. Missing credentials or provider errors stop with Retry rather
 than silently changing models. Creative checkpoints include provider/model;
 unchanged Anthropic-stage checkpoints remain compatible. This addresses the
 core planning/QA milestone; it adds no separate Director or media generation.
@@ -24,12 +24,13 @@ platform is here on purpose. See the "What's deliberately not here" section.
    away with a job id — no client ever blocks on the full pipeline run.
 2. The frontend opens `GET /api/jobs/{id}/stream` (Server-Sent Events) and
    renders each agent's progress live, instead of a spinner.
-3. Six agents run in sequence: Format Classifier → Script Architect →
-   Visual Continuity → Cinematography → Continuity QA → Shot Assembler.
-   QA can send work back to Cinematography once, autonomously, if it finds
-   a continuity or film-grammar problem — no human approves that step.
-4. The final shot list, scenes, and QA verdict are stored on the job row
-   and streamed to the client as a `final` SSE event.
+3. Format Classifier → Script Architect → Visual Continuity → Cinematography
+   produce the written shot plan. Code checks required fields and execution
+   constraints; the customer approves the creative plan before paid previews.
+4. Each approved shot record is the source for its opening-image request,
+   video action and speech request, and output checks. Ordered action beats,
+   not the card synopsis, govern video motion. The image sees only the opening
+   state. A shot edit refreshes that shot's direction and media.
 
 ## Running it locally
 

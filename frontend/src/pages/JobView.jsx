@@ -1,7 +1,7 @@
 import { AD_TYPES } from "../components/CommercialIntake";
 import PreviewLightbox from "../components/PreviewLightbox";
 import DirectorPlanEditor, { editablePlan } from "../components/DirectorPlanEditor";
-import { AlertTriangle, Check, Clapperboard, Clock3, Loader2, Pencil, RefreshCw, Save, X } from "lucide-react";
+import { AlertTriangle, Check, Clapperboard, Loader2, Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Alert, AlertTitle, Button, Card, Stepper, Step, StepLabel, Box, Stack, Typography, Chip } from "@mui/material";
 import StoryboardDraft from "../components/StoryboardDraft";
@@ -433,12 +433,12 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       </>
                     )}
 
-                    {!isEditing && <ShotDirectionPlan shot={shot} expanded={!approved} />}
+                    {!isEditing && <ShotDirectionPlan shot={shot} />}
                     {visualStatus === "error" && shot.error_message && <Alert severity="error">{friendlyMessage(shot.error_message, "This shot could not be completed. Please try again.")}</Alert>}
-                    <div className="shot-characters">
+                    {!!shot.characters_in_shot?.length && <div className="shot-characters">
                       <span>{shot.direction_version === 1 ? "Characters in this clip" : "Characters present"}</span>
-                      <p>{shot.characters_in_shot?.length ? shot.characters_in_shot.join(", ") : "None"}</p>
-                    </div>
+                      <p>{shot.characters_in_shot.join(", ")}</p>
+                    </div>}
                     {approved && (shot.still_frame_url || shot.preview_input || shot.compiled_prompt) && <ShotImageActions jobId={jobId} shot={shot} aspectRatio={result.aspect_ratio || final.aspect_ratio} disabled={previews.busy || editBlocksApproval || result.final_video?.status === "running" || ["submitting", "processing", "submission_unknown"].includes(shot.video_status)} onRefresh={async () => setFinal(await getJob(jobId))} />}
                     {shot.still_frame_status === "generating" ? <ActionProgress label={shot.still_frame_candidate ? `Verifying the saved preview for shot ${shot.shot_number}…` : `Creating and checking the preview for shot ${shot.shot_number}…`} /> : previewState(shot).key === "failed" && <Alert severity="warning" sx={{ my: 2 }}>
                       <AlertTitle>{shot.still_frame_error_kind === "verification" ? "Your image is saved — verification is unavailable" : shot.still_frame_error_kind === "mismatch" ? "We couldn't make a reliable preview automatically" : "This preview couldn't be created"}</AlertTitle>
@@ -476,11 +476,6 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate speaking video" : `Generate video · ${Math.max(5, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
                       </Button>
                     )}
-                    <div className="shot-technical">
-                      <span><Clapperboard size={12} /> {shot.camera_angle} · {shot.camera_movement}</span>
-                      <span><Clock3 size={12} /> {Number(shot.duration_sec.toFixed(1))}s · {shot.lighting}</span>
-                    </div>
-
                     {!isEditing && (shot.video_url || ["error", "failed"].includes(shot.video_status)) && (
                       <div className="my-3 text-xs">
                         <label className="block">{shot.video_status === "review_required" ? "Anything else you’d like to change? (optional)" : "What would you like to change? (optional)"}

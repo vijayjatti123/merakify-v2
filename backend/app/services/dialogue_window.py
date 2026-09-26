@@ -152,22 +152,11 @@ def prompt_instruction(shot, duration=None, reference_label="Audio 1", *, exact_
 def visual_instruction(result, shot, opening_label, *, speaking=True):
     """Compact shot direction from approved physical facts and ordered beats."""
     direction = shot.get("shot_direction") or {}
-    style = (result.get("continuity") or {}).get("visual_style") or result.get("visual_style")
+    from app.services.ad_direction import shot_visual_style
+    style = shot_visual_style(result, shot)
     if isinstance(style, dict):
         style = "; ".join(str(style.get(key) or "").strip() for key in
                           ("rendering", "palette", "lighting_motif", "texture_grain") if style.get(key))
-    # The global style bible can mention characters from other shots. In a
-    # product-only hero shot those names and human appearance cues become
-    # unwanted subjects for image-to-video models, even beside an exclusion.
-    if isinstance(style, str):
-        from app.services.video_references import mentions
-        cast = {name.casefold() for name in shot.get("characters_in_shot") or []}
-        absent = [character.get("name", "") for character in (result.get("continuity") or {}).get("characters", [])
-                  if character.get("name") and character["name"].casefold() not in cast]
-        parts = re.split(r"(?<=[^\s])[,;]\s*", style)
-        style = ", ".join(part for part in parts if part.strip() and
-                          not any(mentions(part, name) for name in absent) and
-                          (cast or not re.search(r"\b(?:skin|fabric|wardrobe|people|person|human|faces?|hair|divine elements)\b", part, re.I)))
     camera = [str(shot.get(key) or "").strip() for key in ("camera_angle", "camera_movement")]
     if shot.get("lens"):
         camera.append(f"lens {shot['lens']}")
@@ -189,13 +178,15 @@ def visual_instruction(result, shot, opening_label, *, speaking=True):
     if paths:
         parts.append(sentence("Entry/exit path", " ".join(paths)))
     if not speaking:
-        action = shot.get("description") or ""
-        if not action and shot.get("compiled_prompt"):
+        beats = _beats(shot)
+        # Ordered Director beats own the action. The card synopsis may use a
+        # different tense or mention the ending, so never send both as orders.
+        action = "" if beats else shot.get("description") or ""
+        if not action and not beats and shot.get("compiled_prompt"):
             from app.services.still_frame_service import visual_description
             action = visual_description(shot["compiled_prompt"])
         if action:
             parts.append(sentence("Action", action))
-        beats = _beats(shot)
         if beats:
             parts.append("Ordered visible beats: " + " ".join(f"{i}) {beat}" for i, beat in enumerate(beats, 1)))
         if direction.get("performance"):
@@ -208,7 +199,7 @@ def visual_instruction(result, shot, opening_label, *, speaking=True):
     forbidden = direction.get("forbidden_geometry") or []
     if not shot.get("characters_in_shot"):
         forbidden = [rule for rule in forbidden if not re.search(r"\b(?:human|people|person|characters?|hands?)\b", rule, re.I)]
-        parts.append("Every frame keeps the approved opening's product-only composition and workshop setting.")
+        parts.append("Every frame keeps the approved opening's subjects and setting.")
     if invariants:
         parts.append("Keep throughout: " + " ".join(invariants))
     if forbidden:

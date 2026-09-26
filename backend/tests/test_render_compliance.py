@@ -14,6 +14,16 @@ def verdict(style='pass', scale='pass'):
 
 
 class ComplianceTests(unittest.TestCase):
+    def test_video_checker_uses_the_same_shot_specific_look_as_generation(self):
+        jobs.set_result(self.db, self.job.id, {'continuity': {
+            'characters': [{'name': 'Yamaraj'}],
+            'visual_style': {'rendering': 'Natural live action, lifelike skin texture',
+                             'lighting_motif': 'Workshop light, glow around Yamaraj'}}})
+        expected = gate.snapshot(self.db, self.job.id, {
+            'characters_in_shot': [], 'speech_mode': 'none'})
+        self.assertIn('Workshop light', expected['visual_style']['lighting_motif'])
+        self.assertNotIn('Yamaraj', str(expected['visual_style']))
+
     def test_product_only_retry_is_concise_and_does_not_repeat_character_ban(self):
         expected={'visible_characters': [], 'staging': {
             'start':'Bucket alone on a workbench', 'critical_outcome':'Bucket label stays visible',
