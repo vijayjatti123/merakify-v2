@@ -33,6 +33,23 @@ class ComplianceTests(unittest.TestCase):
             self.assertTrue(self.check());self.assertTrue(self.check())
             vision.assert_called_once();api.assert_not_called()
 
+    def test_persisted_frame_observations_do_not_block_completed_video(self):
+        check = verdict()
+        check['verdict']['frame_observations'] = [
+            {'frame_index': 1, 'observed': 'carpenter on stool',
+             'later_beat_already_visible': False, 'reason': 'opening position'},
+            {'frame_index': 2, 'observed': 'carpenter falling',
+             'later_beat_already_visible': False, 'reason': 'action advances'},
+        ]
+        # Reproduce the production recovery path: the check was already saved
+        # before the completion worker failed, so polling must reuse it.
+        jobs.video_check_state(self.db, self.job.id, 1, 'first', check=check)
+        with patch.object(gate, 'inspect', side_effect=AssertionError('must reuse saved check')), \
+             patch.object(video, 'provider') as api:
+            self.assertTrue(self.check())
+        api.assert_not_called()
+        self.assertEqual(self.data()['video_compliance_checks']['first'], check)
+
     def test_computed_check_survives_exhausted_database_save_retries(self):
         from sqlalchemy.orm import Query
         original = Query.update

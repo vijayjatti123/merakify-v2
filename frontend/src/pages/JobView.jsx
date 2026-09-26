@@ -452,7 +452,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         {statusRefreshing === shot.shot_number ? "Checking…" : "Check status"}
                       </Button>}
                     </Stack>}
-                    {(videoSubmitting === shot.shot_number || regeneratingShot === shot.shot_number || ["submitting", "processing"].includes(shot.video_status)) && <ActionProgress label={shot.video_phase === "preparing_voice" ? `Preparing the saved voice for shot ${shot.shot_number}…` : shot.video_phase === "correcting" ? `Correcting shot ${shot.shot_number} automatically…` : `Generating video for shot ${shot.shot_number}…`} />}
+                    {(videoSubmitting === shot.shot_number || regeneratingShot === shot.shot_number || ["submitting", "processing"].includes(shot.video_status)) && <ActionProgress label={shot.video_phase === "preparing_voice" ? `Preparing the saved voice for shot ${shot.shot_number}…` : shot.video_phase === "correcting" ? `Correcting shot ${shot.shot_number} automatically…` : shot.video_status === "processing" && shot.video_error ? `Finishing the saved video for shot ${shot.shot_number}…` : `Generating video for shot ${shot.shot_number}…`} />}
                     {savingShot === shot.shot_number && <ActionProgress label="Saving your changes and checking the shot…" />}
                     {shot.video_source_changed && <p className="audio-warning">This video belongs to an earlier version of the shot plan.</p>}
                     {shot.video_status === "review_required" ? (() => {
@@ -463,7 +463,9 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         {guidance.detail && <p style={{ margin: '6px 0 0', fontWeight: 600 }}>{guidance.detail}</p>}
                         <p style={{ margin: '6px 0 0' }}>{guidance.action}</p>
                       </Alert>;
-                    })() : shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
+                    })() : shot.video_status === "processing" && shot.video_error
+                      ? <Alert severity="info" data-testid={`video-recovery-${shot.shot_number}`}>Checking the saved video task. You don’t need to retry or change this shot.</Alert>
+                      : shot.video_error && <Alert severity="error">{friendlyMessage(shot.video_error, "This video could not be completed. Please try again.")}</Alert>}
                     {videoReviewWarnings(shot).map((warning) => <Alert severity={["mismatch", "unverified"].includes(shot.video_speech_check?.status) ? "warning" : "info"} key={warning} data-testid={`video-review-note-${shot.shot_number}`}>{warning}</Alert>)}
                     {approved && !errored && (shot.has_dialogue || result.video_model || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && shot.still_frame_url && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
                       <Button id={`generate-video-${shot.shot_number}`} type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={editBlocksApproval || shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>

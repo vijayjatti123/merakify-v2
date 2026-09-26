@@ -252,7 +252,13 @@ def accept(db, job_id, shot, media, *, check_cache=None):
     if check.get("unverified"):
         warning(db, job_id, number, task, data, f"not verified ({check['error']}); accepting video for user review.")
         return True
-    verdict = {key: dict(value) for key, value in check["verdict"].items()}
+    # The structured vision response also includes frame_observations, a list
+    # of evidence rows. Keep it in the saved check, but only decision objects
+    # belong in the per-dimension verdict used for acceptance. Converting the
+    # evidence list with dict() made every otherwise-approved clip loop in
+    # completion with a ValueError after its provider task had finished.
+    verdict = {key: dict(value) for key, value in check["verdict"].items()
+               if key in {"style", "scale", "staging", "speech"}}
     locked_speech = _approved_audio_verdict(data)
     if locked_speech:
         # Recover cached speech-only mismatches produced before this rule.
