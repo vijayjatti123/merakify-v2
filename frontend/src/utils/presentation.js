@@ -70,6 +70,11 @@ export function videoReviewWarnings(shot) {
 export function videoReviewGuidance(shot) {
   const error = String(shot?.video_error || '');
   const hasVisualFinding = /staging|position|placement|inside|outside|style|appearance|identity|scale|framing|composition/i.test(error);
+  if (/misspell|label markings|packaging (?:text|markings)|printed (?:text|label)/i.test(error)) return {
+    title: 'The product label needs a closer look',
+    message: 'The video checker found a problem with the printed markings on the product. This is unrelated to the voice-over.',
+    action: 'Check the opening image first. If its label is already wrong, regenerate or upload a corrected image before trying the video again.',
+  };
   if (!shot?.has_dialogue && /unexpected speech in a silent shot/i.test(error)) return {
     title: 'This shot added an unwanted voice',
     message: 'The video model spoke even though this shot has no dialogue. The automatic correction also failed the audio check.',
