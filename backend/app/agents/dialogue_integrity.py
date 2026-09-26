@@ -5,18 +5,74 @@ from collections import Counter
 from copy import deepcopy
 
 
-def _normalized_words(value):
-    value = unicodedata.normalize("NFKC", value or "").casefold()
-    value = value.replace("'", "").replace("’", "")
-    return " ".join(re.findall(r"\w+", value))
+def _normalized_spoken(value):
+    # Keep Indic vowel/consonant marks: Python's \w silently drops combining
+    # marks, which would make distinct spoken words look identical.
+    value = unicodedata.normalize('NFKC', value or '').casefold()
+    return ' '.join(''.join(ch if unicodedata.category(ch)[0] in 'LMN' else ' '
+                            for ch in value).split())
+
+
+def explicit_final_line(brief):
+    """Lock only a clearly labelled, quoted final spoken line in a brief.
+
+    General desired outcomes and unquoted marketing copy are not dialogue.
+    A pasted screenplay already has its separate verbatim protection path.
+    """
+    if not isinstance(brief, str):
+        return None
+    label = re.compile(r"(?im)^\s*(?:[-*]\s*)?(?:(?:spoken\s+)?cta|final\s+(?:spoken\s+)?"
+                       r"(?:voice[ -]?over|vo|narration|tagline|line))"
+                       r"(?:\s*\([^\n)]*\))?\s*:\s*(?:\"([^\"\n]+)\"|“([^”\n]+)”|'([^'\n]+)'|‘([^’\n]+)’)\s*$")
+    matches = label.findall(brief)
+    return next((text.strip() for text in matches[-1] if text), None) if matches else None
+
+
+def contains_exact_line(value, line):
+    words = _normalized_spoken(line)
+    return bool(words and f" {words} " in f" {_normalized_spoken(value)} ")
+
+
+def lock_final_line_in_story(story, line):
+    """Keep an explicit CTA in the last scene even if Script Architect translates it."""
+    if not line or not story.get('scenes'):
+        return story
+    final = story['scenes'][-1]
+    if contains_exact_line(final.get('dialogue_or_vo'), line):
+        return story
+    for scene in story['scenes'][:-1]:
+        if _normalized_spoken(scene.get('dialogue_or_vo')) == _normalized_spoken(line):
+            scene['dialogue_or_vo'] = ''
+    existing = (final.get('dialogue_or_vo') or '').strip()
+    final['dialogue_or_vo'] = f"{existing}\n{line}" if existing else line
+    return story
+
+
+def lock_final_line_in_shots(shots, line, final_scene_number, final_scene_dialogue):
+    """Correct a translated CTA on the final speaking shot without touching staging.
+
+    A missing speaking shot is a structural omission for the existing QA/FIX
+    loop; code must not silently turn a silent shot into an invented narrator.
+    """
+    if (not line or any(contains_exact_line(s.get('dialogue_text'), line) and
+                        s.get('scene_number') == final_scene_number for s in shots)
+            or _normalized_spoken(final_scene_dialogue) != _normalized_spoken(line)):
+        return shots
+    candidates = [s for s in shots if s.get('scene_number') == final_scene_number
+                  and s.get('has_dialogue') and (s.get('dialogue_text') or '').strip()]
+    if len(candidates) != 1:
+        return shots
+    candidate = candidates[0]
+    candidate['dialogue_text'] = line
+    return shots
 
 
 def protected_dialogue(shots, source_script_text):
-    source = " " + _normalized_words(source_script_text) + " "
+    source = " " + _normalized_spoken(source_script_text) + " "
     return {
         shot["shot_number"]: deepcopy(shot)
         for shot in shots
-        if (line := _normalized_words(shot.get("dialogue_text"))) and f" {line} " in source
+        if (line := _normalized_spoken(shot.get("dialogue_text"))) and f" {line} " in source
     } if source_script_text else {}
 
 

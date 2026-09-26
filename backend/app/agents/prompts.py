@@ -49,6 +49,10 @@ order; do not substitute a new metaphor, ending, action or speaking turn. Creati
 is for genuinely unspecified treatment, never a replacement for approved events.
 For targets of 12 seconds or less, prefer one continuous scene when all required story beats fit naturally.
 Keep complete dialogue and essential actions; do not invent extra speakers or cuts to fill a template.
+An explicitly quoted spoken CTA or final voiceover line in the brief is user-supplied dialogue,
+even when there is no pasted screenplay. Carry those exact words and language into the final
+scene; do not translate, rewrite or silently omit them. If audio_mode is silent, do not turn
+quoted closing copy into speech; keep its visual intent without asking the video model to draw text.
 Every generated shot must last at least 5 seconds. Use multiple shots only when the story genuinely requires them.
 The selected dialogue language is %s. Write every dialogue_or_vo value in that language, and ensure
 any downstream dialogue_text copied from it remains in that language. For non-English languages, use
@@ -176,6 +180,10 @@ product_props identifies only supplied relevant objects, their placement/contact
 When a selected product is visible, use its exact supplied product name in product_props and the
 corresponding action beat; never use only a generic noun such as product, package, bottle or can
 (say "No product featured" if absent); edit_intent explains the outgoing visual/rhythmic connection.
+For every product-bearing shot, product_props must state the count of physical product units and
+where each sits or who holds it at the opening and ending. Track the same unit across adjoining
+shots. Do not duplicate it in the foreground and background unless the approved story explicitly
+calls for multiple units. A cut may change viewpoint; it cannot teleport or multiply a prop.
 Keep these four fields concise, using observable direction, not adjectives alone.
 For every new shot also supply shot_direction.blocking, action_beats and critical_outcome.
 blocking: exact screen positions, eyelines and physical contact relevant to this action; distinguish
@@ -203,6 +211,10 @@ during the offer/handoff, followed by the separate drinking beat.
 critical_outcome: the single observable fact the audience must see for the shot to work.
 For a failed attempt specify what moves and what remains fixed; for a reveal specify what becomes
 visible; for a product shot preserve supplied geometry/markings and reserve a readable ending hold.
+Frame the cause and its visible effect together when the story depends on a relationship (a bond
+resists a pull, a product survives a test, a transformation proves a result). A reaction or a line
+claiming success cannot substitute for seeing the physical result. If one shot cannot clearly show
+both, assign neighboring shots a matching before/action/after state with no invisible reset.
 Do not make precise new lettering on a moving surface the sole proof of a brand reveal.
 Preserve approved printed markings when visible. If the required reveal depends on exact new
 letterforms during a transformation, state that execution risk plainly in edit_intent for user
@@ -237,6 +249,8 @@ Keep user-supplied script dialogue verbatim and in order. For an AI-written scen
 preserve its meaning and speaking turns while expressing dialogue in the selected language
 and native script: Hindi dialogue_text uses Devanagari, even when the AI scene breakdown uses
 Romanized Hindi. This language conversion applies to AI-written scenes, not user-scripted words.
+An explicitly quoted CTA/final line in source_context is user-scripted even if it came from the
+brief rather than the screenplay field. Copy it verbatim into one complete spoken shot.
 Each speaking shot contains a complete self-contained
 utterance; multiple complete utterances may use separate shots in ONE scene. Never split a line,
 shorten it to fit, invent scene changes to hide a split, or invent extra speech for silent beats.
@@ -419,6 +433,10 @@ Review the whole plan once, collecting ALL evidenced problems together:
    that actually reveals its absence. Do not force every scene participant into every frame.
    Reject contradictory lighting/style or semantically duplicate framing; code handles literal
    identical framing for direction_version 1. Music is planned only; absence of music is not an error.
+   Audit product_props as a physical inventory: count actual units in each shot and track each
+   unit's support, holder and position across adjacent shots. Reject an unexplained duplicate or
+   teleportation. When the story's payoff depends on cause and effect, demand a readable shot or
+   connected pair that shows both; a character's reaction or spoken claim alone is not proof.
 4. DIALOGUE: multiple complete utterances per scene are valid regardless of authorship. Reject only
    an unfinished utterance continued across shots; cite both portions and preserve every word.
    Short complete replies are valid. Voiceover needs no visible speaker. Onscreen speech must

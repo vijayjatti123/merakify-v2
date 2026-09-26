@@ -26,6 +26,15 @@ STAGING: compare all sampled frames with the supplied physical staging contract.
 inside/outside zones, entry/exit path, body/object support and contact, spatial invariants, forbidden
 geometry, and visible start-to-end progression. First fill frame_observations for EVERY supplied
 VIDEO frame. In each, name concrete visible objects and actions; do not infer an unseen event.
+Product_props is the approved physical inventory, not mere branding copy. When it specifies a
+count and placement of units, compare that count and placement with each sampled frame. A second
+identical package in the same frame when only one is specified is a staging mismatch, even if both
+packages look attractive. Do not infer a duplicate from separate views across time. When the
+count is unspecified or partly obscured, return unverified rather than guessing.
+For a critical_outcome involving cause and effect, cite visible evidence for both the cause and
+the result in frame_observations. If the sampled frames clearly contradict the required result,
+return mismatch. If the decisive instant falls between samples, return unverified; do not claim a
+pass because the prompt requested the outcome or a character reacts to it.
 The ordered action_beats occupy successive equal portions of the planned shot unless explicit
 timing says otherwise. Mark later_beat_already_visible true when an action/result assigned to a
 later beat is clearly already happening or complete in this frame. A deployed canopy while the
@@ -71,6 +80,7 @@ def snapshot(db, job_id, shot):
     direction = shot.get('shot_direction') or {}
     expected['staging'] = {"start": shot.get('state_at_shot_start'), "end": shot.get('state_at_shot_end'),
         "blocking": direction.get('blocking'), "entry_exit_paths": direction.get('entry_exit_paths'),
+        "product_props": direction.get('product_props'),
         "support_and_contact": direction.get('support_and_contact'),
         "spatial_invariants": direction.get('spatial_invariants'),
         "forbidden_geometry": direction.get('forbidden_geometry'), "action_beats": direction.get('action_beats'),
@@ -108,6 +118,8 @@ def visual_retry_instruction(expected, mismatches, *, visible_characters=None):
             instructions.append(f"Maintain this approved placement: {staging['blocking']}.")
         if staging.get("critical_outcome"):
             instructions.append(f"Show this outcome clearly: {staging['critical_outcome']}.")
+        if staging.get("product_props") and staging['product_props'].strip().casefold() != 'no product featured':
+            instructions.append(f"Keep the approved number and placement of product units: {staging['product_props']}.")
     return "Automatic corrective retry: " + " ".join(instructions) if instructions else ""
 
 

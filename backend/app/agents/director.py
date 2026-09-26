@@ -15,7 +15,8 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.agents import prompts
-from app.agents.dialogue_integrity import protected_dialogue, restore_protected, screen_issues, warn_dialogue_loss
+from app.agents.dialogue_integrity import (protected_dialogue, restore_protected, screen_issues,
+    warn_dialogue_loss, explicit_final_line, lock_final_line_in_story, lock_final_line_in_shots)
 from app.agents.llm_client import call_agent, cinematography_token_budget
 from app.agents.execution import checkpointed_planning
 from app.services import asset_service, character_service, job_service, storage_service, voice_generation_service
@@ -455,7 +456,7 @@ def validate_and_correct(
         current_shots = render_camera_summaries(shots)
         verdict = review(current_shots, characters, minimum_shot_seconds,
             (approved_story or {}).get("production_context", {}).get("commercial"),
-            shot_numbers=review_shot_numbers)
+            shot_numbers=review_shot_numbers, approved_story=approved_story)
         for shot in current_shots:
             shot["review_mode"] = "user"
         if verdict["approved"]:
@@ -1016,6 +1017,12 @@ def run_pipeline(db: Session, job_id: str) -> None:
                 prompts.SCRIPT_ARCHITECT % language,
                 f"Brief: {brief}\nFormat: {fmt['format']}\nStructure: {fmt['structure']}\nNumber of scenes: {fmt['num_scenes']}" + direction_note,
             )
+        # The scene breakdown is a model summary, not authority to translate an
+        # explicitly quoted final line in the user's brief. A pasted screenplay
+        # continues through its separate verbatim dialogue path.
+        silent_ad = commercial_context['ad_brief'].get('audio_mode') == 'silent'
+        final_line = None if source_script or silent_ad else explicit_final_line(brief)
+        lock_final_line_in_story(script, final_line)
         emit("script", f"Logline locked: \"{script['logline']}\"")
         # Preserve authoritative context with the saved story for initial QA AND
         # later edit/retry paths. No separate requirement-extraction model call.
@@ -1023,6 +1030,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
         script['production_context'] = {
             'commercial': commercial_context,
             'original_brief': brief, 'source_script': source_script,
+            'explicit_final_line': final_line,
             'reviewed_direction': planning_direction(direction),
             'products': [{'name': p['name'], 'approved_views': [{'angle': v['angle'], 'provenance': v['provenance']} for v in p.get('views', [])]} for p in job_references(db, job_id)],
         }
@@ -1103,6 +1111,10 @@ def run_pipeline(db: Session, job_id: str) -> None:
             truncation_retry_tokens=min(32768, token_budget * 2),
             on_response=record_cinematography_usage,
         )
+        if final_line:
+            final_scene = script['scenes'][-1]
+            lock_final_line_in_shots(cine['shots'], final_line,
+                final_scene['scene_number'], final_scene.get('dialogue_or_vo'))
         directed_ad = ad_direction.validate_ad(cine.get('ad_direction'))
         for shot in cine['shots']:
             shot['direction_version'] = 1
@@ -1147,7 +1159,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             continuity["characters"],
             fmt["duration_target_sec"],
             narrator_voice_ref=continuity.get("narrator_voice_ref"),
-            source_script_text=source_script,
+            source_script_text=source_script or final_line,
             emit=emit,
             minimum_shot_seconds=minimum_shot_seconds,
             ad_direction_plan=directed_ad,

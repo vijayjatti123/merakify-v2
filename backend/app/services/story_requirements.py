@@ -88,5 +88,19 @@ def check_review(verdict, shots, story):
                        by_number[i['shot_number']].get('scene_number') == requirement['scene_number']
                        for i in verdict.get('issues', [])):
                 raise ValueError('Story review found an omission without a repair target. Retry planning.')
-    return {**verdict, 'approved': bool(verdict.get('approved')) and
-            all(r['covered'] for r in rows) and all(c['consistent'] for c in checks) and not verdict.get('issues')}
+    issues = list(verdict.get('issues', []))
+    final_line = (story or {}).get('production_context', {}).get('explicit_final_line')
+    if final_line:
+        from app.agents.dialogue_integrity import contains_exact_line
+        final_scene = (story or {}).get('scenes', [])[-1]['scene_number']
+        matches = [shot for shot in shots if contains_exact_line(shot.get('dialogue_text'), final_line)]
+        if len(matches) != 1 or matches[0].get('scene_number') != final_scene:
+            candidates = [shot for shot in shots if shot.get('scene_number') == final_scene]
+            if candidates and not any(issue.get('code') == 'missing_exact_final_line' for issue in issues):
+                issues.append({'shot_number': candidates[-1]['shot_number'],
+                    'code': 'missing_exact_final_line',
+                    'problem': 'The explicit final spoken line from the brief is missing, changed, repeated or placed before the ending.',
+                    'fix_instruction': 'Deliver the exact user-provided line once in the final scene; preserve all other dialogue and story beats.',
+                    'requirement_id': '', 'repair_kind': 'structural', 'repair_fields': []})
+    return {**verdict, 'issues': issues, 'approved': bool(verdict.get('approved')) and
+            all(r['covered'] for r in rows) and all(c['consistent'] for c in checks) and not issues}

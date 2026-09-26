@@ -5,7 +5,7 @@ from app.services.camera_direction import check_plan as check_camera
 from app.services import ad_direction
 
 
-def review(shots, characters, minimum=None, commercial=None, shot_numbers=None):
+def review(shots, characters, minimum=None, commercial=None, shot_numbers=None, approved_story=None):
     verdict = check_mechanics(check_camera({"approved": True, "issues": []}, shots), shots, characters, minimum)
     targets = set(shot_numbers) if shot_numbers is not None else None
     issues = [finding for finding in verdict["issues"]
@@ -46,6 +46,16 @@ def review(shots, characters, minimum=None, commercial=None, shot_numbers=None):
                 issue(n, "Choose the visible character who speaks this line.")
         if s.get("transition_after", "cut") not in ("cut", "crossfade", "match cut"):
             issue(n, "Choose a supported transition.")
+    final_line = (approved_story or {}).get('production_context', {}).get('explicit_final_line')
+    scenes = (approved_story or {}).get('scenes') or []
+    if final_line and scenes:
+        from app.agents.dialogue_integrity import contains_exact_line
+        final_scene = scenes[-1]['scene_number']
+        matches = [s for s in shots if contains_exact_line(s.get('dialogue_text'), final_line)]
+        if len(matches) != 1 or matches[0].get('scene_number') != final_scene:
+            endings = [s for s in shots if s.get('scene_number') == final_scene]
+            issue(endings[-1]['shot_number'] if endings else 0,
+                  'The exact final line from your brief must be spoken once in the ending scene.')
     labels = {"duration_sec must be a finite positive number": "Enter a duration greater than zero seconds",
         "characters_in_shot": "Visible characters", "opening_characters": "Opening characters",
         "has_dialogue": "Speech setting", "dialogue_text": "Spoken line",

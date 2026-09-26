@@ -25,6 +25,17 @@ class ComplianceTests(unittest.TestCase):
         self.assertNotIn('Yamaraj', str(expected['visual_style']))
         self.assertEqual(expected['speech'], {'mode': 'none'})
 
+    def test_product_inventory_reaches_video_checker_and_corrective_prompt(self):
+        expected = gate.snapshot(self.db, self.job.id, {
+            'characters_in_shot': [], 'speech_mode': 'none',
+            'shot_direction': {'product_props': 'One Bluewater bottle on the workbench; same unit held at end.',
+                               'critical_outcome': 'The bottle stays intact after the drop.'}})
+        self.assertEqual(expected['staging']['product_props'],
+            'One Bluewater bottle on the workbench; same unit held at end.')
+        correction = gate.visual_retry_instruction(expected, ['staging'])
+        self.assertIn('approved number and placement', correction)
+        self.assertIn('One Bluewater bottle', correction)
+
     def test_product_only_retry_is_concise_and_does_not_repeat_character_ban(self):
         expected={'visible_characters': [], 'staging': {
             'start':'Bucket alone on a workbench', 'critical_outcome':'Bucket label stays visible',
