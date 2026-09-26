@@ -704,7 +704,7 @@ def video_was_stopped(db, job_id, number):
 
 
 def resume_saved_label_video(db, job_id, number, expected_attempt):
-    """Finish an already-paid clip whose only visual objection was package text."""
+    """Finish an already-paid clip with a recoverable advisory or silent-audio issue."""
     from app.services.render_compliance_service import label_only_staging_mismatch
     row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).populate_existing().one_or_none()
     if row is None:
@@ -716,11 +716,16 @@ def resume_saved_label_video(db, job_id, number, expected_attempt):
         raise ValueError("This video attempt changed. Refresh before continuing.")
     check = (data.get("video_compliance_checks") or {}).get(task) or {}
     verdict = check.get("verdict") or {}
-    if not label_only_staging_mismatch(verdict.get("staging") or {}):
-        raise ValueError("This video needs a different correction; the saved result cannot be accepted for lettering alone.")
-    if any(value.get("status") == "mismatch" for key, value in verdict.items()
-           if key in {"style", "scale", "speech"} and isinstance(value, dict)):
-        raise ValueError("This video has another failed check besides lettering.")
+    label_only = label_only_staging_mismatch(verdict.get("staging") or {}) and not any(
+        value.get("status") == "mismatch" for key, value in verdict.items()
+        if key in {"style", "scale", "speech"} and isinstance(value, dict))
+    silent_speech_only = (not data.get("video_audio_cleanup_failed") and
+        (data.get("video_compliance_expected") or {}).get("speech", {}).get("mode") == "none" and (
+        verdict.get("speech") or {}).get("status") == "mismatch" and not any(
+        (verdict.get(key) or {}).get("status") == "mismatch" for key in ("style", "scale", "staging")) and
+        bool((check.get("speech_check") or {}).get("verdict", {}).get("issues")))
+    if not (label_only or silent_speech_only):
+        raise ValueError("The saved video needs a different correction; another render may be required.")
     from datetime import datetime, timezone
     lease_until = (data.get("video_worker_lease") or {}).get("until")
     if lease_until and datetime.fromisoformat(lease_until) > datetime.now(timezone.utc):
@@ -734,7 +739,8 @@ def resume_saved_label_video(db, job_id, number, expected_attempt):
         db.rollback()
         raise ValueError("This video attempt changed. Refresh before continuing.")
     db.commit()
-    append_event(db, job_id, "video_generation", f"Shot {number}: resuming saved provider video after advisory-only product lettering finding; no new render submitted.")
+    reason = "advisory product lettering" if label_only else "located unwanted speech"
+    append_event(db, job_id, "video_generation", f"Shot {number}: resuming saved provider video after {reason} finding; no new render submitted.")
 
 
 

@@ -312,9 +312,56 @@ def accept(db, job_id, shot, media, *, check_cache=None):
     label_advisory = label_only_staging_mismatch(verdict['staging'])
     if label_advisory:
         verdict['staging'] = {**verdict['staging'], 'status': 'unverified'}
+    # H3 can invent speech even when the shot has no dialogue. A third paid
+    # render with the same request is a poor remedy. For a speech-only failure,
+    # remove the checker-located words from the saved clip, then verify its
+    # repaired soundtrack. The video frames are copied byte-for-byte.
+    speech_contract = (data.get("video_compliance_expected") or {}).get("speech") or {}
+    visual_failed = any(verdict.get(key, {}).get("status") == "mismatch"
+                        for key in ("style", "scale", "staging"))
+    if (speech_contract.get("mode") == "none" and not visual_failed
+            and verdict.get("speech", {}).get("status") == "mismatch"):
+        from app.services import speech_compliance_service as speech
+        original = check.get("speech_check", {}).get("verdict") or {}
+        issues = original.get("issues") or []
+        saved_cleanup = data.get("video_audio_cleanup") or {}
+        try:
+            if saved_cleanup.get("task_id") == task:
+                if not (check_cache or {}).get("_silent_cleaned"):
+                    cleaned = speech.remove_unwanted_speech(media, saved_cleanup["issues"])
+                    media.seek(0); media.truncate(); media.write(cleaned); media.seek(0)
+                    if check_cache is not None:
+                        check_cache["_silent_cleaned"] = True
+                repaired = saved_cleanup["speech_verdict"]
+            else:
+                candidate = speech.remove_unwanted_speech(media, issues)
+                import io
+                audio, duration = speech.extract_audio(io.BytesIO(candidate))
+                repaired = speech.inspect_audio(audio, duration, speech_contract)["verdict"]
+                if repaired.get("status") != "pass":
+                    raise ValueError("Unwanted speech remains after local audio correction")
+                if not job_service.update_video(db, job_id, number, expected_task_id=task,
+                        video_audio_cleanup={"task_id": task, "issues": issues, "speech_verdict": repaired}):
+                    raise ValueError("This video attempt changed during audio repair")
+                media.seek(0); media.truncate(); media.write(candidate); media.seek(0)
+                if check_cache is not None:
+                    check_cache["_silent_cleaned"] = True
+                job_service.append_event(db, job_id, "render_compliance",
+                    f"Shot {number}: removed located unwanted speech from saved video; no new render.")
+            verdict["speech"] = {**repaired, "observed": repaired.get("transcript", "")}
+        except Exception as error:
+            # A repeated H3 request is not a reliable audio fix. Keep the
+            # already-paid result recoverable, with no automatic paid retry.
+            job_service.append_event(db, job_id, "render_compliance",
+                f"Shot {number}: local silent-audio repair unavailable ({type(error).__name__}).")
+            job_service.update_video(db, job_id, number, expected_task_id=task,
+                video_status="review_required",
+                video_audio_cleanup_failed=type(error).__name__,
+                video_error="The saved clip contains unwanted speech; automatic audio repair could not verify a clean result.")
+            return False
     if "speech" in verdict:
         job_service.update_video(db, job_id, number, expected_task_id=task,
-                                 video_speech_check=check["speech_check"]["verdict"])
+                                 video_speech_check=verdict["speech"])
     dimensions = ("style", "scale", "staging", "speech") if "speech" in verdict else ("style", "scale", "staging")
     mismatches = [f"{key}: {verdict[key]['reason']}" for key in dimensions if verdict[key]["status"] == "mismatch"]
     unknown = [key for key in dimensions if verdict[key]["status"] == "unverified"]

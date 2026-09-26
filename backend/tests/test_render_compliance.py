@@ -119,7 +119,54 @@ class ComplianceTests(unittest.TestCase):
         with patch.object(gate, 'inspect', side_effect=AssertionError('reuse saved verdict')), \
              patch.object(video, 'provider') as api:
             self.assertTrue(self.check())
+        api.assert_not_called()
+
+    def test_silent_speech_is_removed_from_saved_video_before_paid_retry(self):
+        check = verdict()
+        issue = {'kind': 'extra_speech', 'start_sec': 3.0, 'end_sec': 4.9,
+                 'evidence': 'invented words'}
+        check['speech_check'] = {'verdict': {'status': 'mismatch', 'confidence': .95,
+                                             'transcript': 'invented words', 'reason': 'extra voice',
+                                             'issues': [issue]}}
+        check['verdict']['speech'] = {'status': 'mismatch', 'observed': 'invented words',
+                                       'reason': 'Unexpected speech in a silent shot.'}
+        jobs.update_video(self.db, self.job.id, 1,
+                          video_compliance_expected={'speech': {'mode': 'none'}},
+                          video_compliance_retries=1)
+        jobs.video_check_state(self.db, self.job.id, 1, 'first', check=check)
+        jobs.update_video(self.db, self.job.id, 1, video_status='review_required')
+        jobs.resume_saved_label_video(self.db, self.job.id, 1, 'first')
+        media = io.BytesIO(b'original')
+        with patch('app.services.speech_compliance_service.remove_unwanted_speech', return_value=b'cleaned') as repair, \
+             patch('app.services.speech_compliance_service.extract_audio', return_value=(b'audio', 5.0)), \
+             patch('app.services.speech_compliance_service.inspect_audio', return_value={
+                 'verdict': {'status': 'pass', 'confidence': 1.0, 'transcript': '',
+                             'reason': 'no speech', 'issues': []}}), \
+             patch.object(video, 'provider') as api:
+            self.assertTrue(gate.accept(self.db, self.job.id, self.shot, media, check_cache={}))
             api.assert_not_called()
+        self.assertEqual(media.getvalue(), b'cleaned')
+        self.assertEqual(self.data()['video_speech_check']['status'], 'pass')
+        self.assertEqual(self.data()['video_audio_cleanup']['issues'], [issue])
+        repair.assert_called_once()
+
+    def test_failed_silent_cleanup_stops_without_another_paid_render(self):
+        check = verdict()
+        check['speech_check'] = {'verdict': {'status': 'mismatch', 'confidence': .95,
+            'transcript': 'unexpected', 'reason': 'extra voice', 'issues': [
+                {'kind': 'extra_speech', 'start_sec': 3, 'end_sec': 4, 'evidence': 'word'}]}}
+        check['verdict']['speech'] = {'status': 'mismatch', 'reason': 'Unexpected speech in a silent shot.'}
+        jobs.update_video(self.db, self.job.id, 1,
+                          video_compliance_expected={'speech': {'mode': 'none'}})
+        jobs.video_check_state(self.db, self.job.id, 1, 'first', check=check)
+        with patch('app.services.speech_compliance_service.remove_unwanted_speech',
+                   side_effect=ValueError('cannot repair')), patch.object(video, 'provider') as api:
+            self.assertFalse(self.check())
+            api.assert_not_called()
+        self.assertEqual(self.data()['video_status'], 'review_required')
+        self.assertEqual(self.data()['video_compliance_retries'], 0)
+        with self.assertRaisesRegex(ValueError, 'different correction'):
+            jobs.resume_saved_label_video(self.db, self.job.id, 1, 'first')
     def test_user_stop_prevents_later_worker_updates_and_retries(self):
         self.assertTrue(jobs.stop_video(self.db, self.job.id, 1, 'first'))
         self.assertEqual(self.data()['video_status'], 'review_required')

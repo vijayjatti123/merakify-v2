@@ -486,6 +486,14 @@ def _finish_completed(db, job_id, shot, response, cache):
         if not accepted:
             job_service.append_event(db, job_id, "video_timing", f"Shot {number}: completion deferred by compliance; " + json.dumps(timings))
             return
+        # Compliance may remove unwanted speech from a silent shot while
+        # preserving its picture. Hash the bytes actually sent to storage.
+        if cache.checks.get("_silent_cleaned"):
+            video.seek(0)
+            digest, size = hashlib.sha256(), 0
+            for chunk in iter(lambda: video.read(1024 * 1024), b""):
+                digest.update(chunk); size += len(chunk)
+            cache.digest, cache.size = digest.hexdigest(), size
         phase = time.monotonic()
         video.seek(0)
         key = f"jobs/{job_id}/videos/{number}-{task}.mp4"

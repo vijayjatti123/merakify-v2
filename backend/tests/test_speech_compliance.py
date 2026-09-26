@@ -1,7 +1,10 @@
 import copy
 import io
 import json
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 import test_render_compliance as base
 from app.services import speech_compliance_service as speech, render_compliance_service as gate
@@ -19,6 +22,42 @@ def raw(v):
 
 
 class SpeechParseTests(unittest.TestCase):
+    def test_located_speech_cleanup_keeps_picture_and_earlier_audio(self):
+        from app.services.final_assembly_service import ffmpeg
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / 'source.mp4'
+            made = subprocess.run([ffmpeg(), '-nostdin', '-v', 'error', '-y',
+                '-f', 'lavfi', '-i', 'color=c=blue:s=64x64:r=24:d=5',
+                '-f', 'lavfi', '-i', 'sine=frequency=440:duration=5',
+                '-c:v', 'libx264', '-c:a', 'aac', '-shortest', str(source)],
+                capture_output=True, timeout=30)
+            self.assertEqual(made.returncode, 0, made.stderr.decode(errors='replace'))
+            original = io.BytesIO(source.read_bytes())
+            repaired = io.BytesIO(speech.remove_unwanted_speech(original, [
+                {'kind': 'extra_speech', 'start_sec': 3, 'end_sec': 4.9,
+                 'evidence': 'test tone'}]))
+            before, duration = speech.extract_audio(original)
+            after, cleaned_duration = speech.extract_audio(repaired)
+            self.assertAlmostEqual(duration, cleaned_duration, delta=.1)
+            import av
+            def picture_frames(media):
+                media.seek(0)
+                with av.open(media) as movie:
+                    return [frame.to_ndarray().tobytes() for frame in movie.decode(video=0)]
+            self.assertEqual(picture_frames(original), picture_frames(repaired))
+            import wave
+            with wave.open(io.BytesIO(before)) as wav:
+                first = wav.readframes(24000 * 2)
+            with wave.open(io.BytesIO(after)) as wav:
+                kept = wav.readframes(24000 * 2)
+                wav.readframes(24000)
+                muted = wav.readframes(24000)
+            from array import array
+            def energy(pcm):
+                return sum(abs(sample) for sample in array('h', pcm))
+            self.assertAlmostEqual(energy(first), energy(kept), delta=energy(first) * .1)
+            self.assertLess(energy(muted), energy(kept) // 10)
+
     def test_silent_audio_accepts_no_words_and_rejects_gibberish(self):
         clear = {"status":"pass", "confidence":.98, "transcript":"",
                  "reason":"Only room tone is audible.", "issues":[]}
@@ -143,20 +182,16 @@ class SpeechGateTests(unittest.TestCase):
             self.assertEqual(saved["video_speech_check"]["status"],"pass")
             self.assertEqual(saved["video_speech_check"]["method"],"approved_audio_lock")
 
-    def test_silent_shot_gibberish_triggers_one_silent_correction(self):
+    def test_silent_shot_gibberish_never_triggers_paid_audio_correction(self):
         jobs.update_video(self.db, self.job.id, 1, video_compliance_expected={
             "visual_style":"Natural", "speech":{"mode":"none"}})
         self.shot.update(has_dialogue=False, speech_mode="none")
         with patch.object(speech, "inspect_audio", return_value={"verdict":finding()}) as checker, \
+             patch.object(speech, "remove_unwanted_speech", side_effect=ValueError("unavailable")), \
              patch.object(audio, "submit", return_value={"id":"second"}) as submit:
             self.assertFalse(self.check())
             self.assertEqual(checker.call_args.args[2], {"mode":"none"})
-            prompt = submit.call_args.args[1]["prompt"]
-            self.assertIn("No character, narrator", prompt)
-            self.assertNotIn("Follow this approved transcript", prompt)
-            self.shot["video_task_id"] = "second"
-            self.assertFalse(self.check())
-            submit.assert_called_once()
+            submit.assert_not_called()
         saved = self.data()
         self.assertEqual(saved["video_status"], "review_required")
-        self.assertIn("Unexpected speech", saved["video_error"])
+        self.assertIn("unwanted speech", saved["video_error"])

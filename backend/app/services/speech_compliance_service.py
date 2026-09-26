@@ -5,9 +5,12 @@ import json
 import math
 import time
 import re
+import subprocess
+import tempfile
 import unicodedata
 import wave
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 
@@ -37,7 +40,8 @@ This is transcript verification, not proof of speaker identity or lip sync."""
 SILENT_RULE = (
     "This shot has NO approved spoken words. No character, narrator, crowd, or off-screen voice "
     "speaks, mumbles, whispers, sings words, or makes speech-like gibberish at any time. "
-    "Keep mouths at rest. Only non-vocal scene ambience is allowed."
+    "Keep mouths at rest except for explicitly directed nonverbal sounds such as a gasp. "
+    "Scene ambience and nonverbal sounds are allowed; no words are allowed."
 )
 SILENT_RULES = """Listen to the COMPLETE generated audio. This shot has no approved dialogue or narration.
 Return mismatch only for clearly audible speech, muttering, sung words, or speech-like gibberish,
@@ -98,6 +102,56 @@ def extract_audio(media):
         return output.getvalue(), count / 24000
     finally:
         media.seek(0)
+
+
+def remove_unwanted_speech(media, issues):
+    """Mute only checker-located speech; copy the picture without re-encoding it.
+
+    Return repaired MP4 bytes. The caller must verify its audio before accepting it.
+    No timestamp means no edit: a vague checker verdict must not erase a soundtrack.
+    """
+    from app.services.final_assembly_service import ffmpeg
+    spans = []
+    for issue in issues:
+        if issue.get("kind") != "extra_speech":
+            continue
+        start, end = issue.get("start_sec"), issue.get("end_sec")
+        if type(start) not in (int, float) or type(end) not in (int, float) or not 0 <= start < end <= 30:
+            raise ValueError("Unwanted speech needs a bounded timestamp")
+        spans.append((max(0, start - .12), min(30, end + .12)))
+    if not spans:
+        raise ValueError("No located unwanted speech to remove")
+    spans.sort()
+    merged = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    with tempfile.TemporaryDirectory() as folder:
+        source, target = (Path(folder) / name for name in ("original.mp4", "cleaned.mp4"))
+        media.seek(0)
+        source.write_bytes(media.read())
+        # Time expressions use the audio clock. Keep the original picture and
+        # all audio outside the reported speech spans, including earlier gasps.
+        filters = []
+        for start, end in merged:
+            # An 80 ms envelope avoids a hard audio cut. The reported words
+            # remain fully muted with 120 ms of safety padding on each side.
+            fade = .08
+            expression = (f"if(lt(t,{start - fade:.3f}),1,"
+                          f"if(lt(t,{start:.3f}),({start:.3f}-t)/{fade:.3f},"
+                          f"if(lt(t,{end:.3f}),0,"
+                          f"if(lt(t,{end + fade:.3f}),(t-{end:.3f})/{fade:.3f},1))))")
+            filters.append("volume='" + expression.replace(",", r"\,") + "':eval=frame")
+        filters = ",".join(filters)
+        command = [ffmpeg(), "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                   "-i", str(source), "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy",
+                   "-af", filters, "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(target)]
+        done = subprocess.run(command, capture_output=True, timeout=120)
+        if done.returncode or not target.exists():
+            raise ValueError("Could not remove unwanted speech from the saved clip")
+        return target.read_bytes()
 
 
 def parse(raw, duration, *, expect_silence=False):

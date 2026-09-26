@@ -81,6 +81,15 @@ export function canFinishSavedLabelVideo(shot) {
     !['style', 'scale', 'speech'].some(key => verdict[key]?.status === 'mismatch');
 }
 
+export function canRepairSavedSilentVideo(shot) {
+  const check = shot?.video_compliance_checks?.[shot?.video_task_id] || {};
+  const verdict = check.verdict || {};
+  return !shot?.has_dialogue && shot?.speech_mode === 'none' && !shot?.video_audio_cleanup_failed &&
+    verdict.speech?.status === 'mismatch' &&
+    (check.speech_check?.verdict?.issues || []).some(issue => issue.kind === 'extra_speech') &&
+    !['style', 'scale', 'staging'].some(key => verdict[key]?.status === 'mismatch');
+}
+
 export function videoReviewGuidance(shot) {
   const error = String(shot?.video_error || '');
   if (shot?.video_stop_requested) return {
@@ -94,10 +103,10 @@ export function videoReviewGuidance(shot) {
     message: shot.video_source_changed ? 'The previous video used the older shot image. Your new image is ready.' : 'The checker noticed imperfect printed lettering. This does not make the clip unusable.',
     action: shot.video_source_changed ? 'Use Regenerate video below to make this shot with the new image.' : 'Use Finish saved video below without buying another render. Replacing the image is optional if exact package text matters to you.',
   };
-  if (!shot?.has_dialogue && /unexpected speech in a silent shot/i.test(error)) return {
+  if (!shot?.has_dialogue && /unexpected speech in a silent shot|unwanted speech|added an unwanted voice/i.test(error)) return {
     title: 'This shot added an unwanted voice',
-    message: 'The video model spoke even though this shot has no dialogue. The automatic correction also failed the audio check.',
-    action: 'Choose Regenerate corrected video to try the saved silent-shot direction again. You do not need to edit dialogue.',
+    message: 'The video model added words to a shot without dialogue.',
+    action: canRepairSavedSilentVideo(shot) ? 'Choose Remove unwanted voice below. We will keep the saved picture and other sounds; no new video render is needed.' : 'The saved clip needs review before another video is generated.',
   };
   if (/speech|dialogue|spoken/i.test(error) && !hasVisualFinding) return {
     title: 'Your approved dialogue is safe',

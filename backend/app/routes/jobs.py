@@ -157,7 +157,7 @@ def stop_video(job_id: str, shot_number: int, payload: VideoStopRequest, db: Ses
 
 
 @router.post("/{job_id}/shots/{shot_number}/video/finish-saved", status_code=202)
-def finish_saved_label_video(job_id: str, shot_number: int, payload: VideoStopRequest, db: Session = Depends(get_db)):
+def finish_saved_video(job_id: str, shot_number: int, payload: VideoStopRequest, db: Session = Depends(get_db)):
     try:
         _, shot = job_service.video_source(db, job_id, shot_number)
         if shot.get("video_source_changed"):
