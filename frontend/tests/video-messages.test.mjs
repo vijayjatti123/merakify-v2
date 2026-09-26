@@ -43,5 +43,5 @@ test('stopped clips explain the cause and the user action in plain language', ()
   const staging = videoReviewGuidance({video_error:'staging: contradicts required support "Kabir left hand grips doorframe" during bottle receipt; speech: mismatch'});
   assert.match(staging.message, /positioned/);
   assert.equal(staging.detail, 'Required detail not maintained: Kabir left hand grips doorframe.');
-  assert.match(staging.action, /Describe the placement/);
+  assert.match(staging.action, /Edit this shot/);
 });
