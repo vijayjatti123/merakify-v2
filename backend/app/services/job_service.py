@@ -366,6 +366,20 @@ def job_result(job: Job) -> Optional[Any]:
                     # Reading a job must remain possible during storage outages.
                     shot["still_frame_url"] = None
                     shot["still_frame_warning"] = "Still frame temporarily unavailable: could not refresh image access."
+            elif shot.get("shot_number") in result.get("plan_edited_shots", []):
+                # The edit invalidates the current preview, but the archived
+                # image remains useful as a clearly labeled previous version.
+                # Renew its storage link on read rather than exposing an old
+                # signed URL that may expire before the user returns.
+                for revision in reversed(result.get("plan_revision_history", [])):
+                    previous = next((item for item in revision.get("shots", [])
+                                     if item.get("shot_number") == shot.get("shot_number")), None)
+                    if previous and previous.get("still_frame_key"):
+                        try:
+                            shot["previous_still_frame_url"] = storage_service.asset_url(previous["still_frame_key"])
+                        except Exception:
+                            pass
+                        break
         # Video attempts live separately: replanning must never lose a paid task.
         from sqlalchemy.orm import object_session
         db = object_session(job) if isinstance(job, Job) else None
@@ -1014,7 +1028,8 @@ def save_plan_revision(db, job_id, expected_json, result, changed_numbers):
         for key in list(shot):
             if key.startswith(("video_", "still_frame_", "still_retry_", "dialogue_audio_", "dialogue_timing")) or key in {
                     "compiled_prompt", "preview_input", "preview_dependencies", "preview_replacement",
-                    "face_enhancement", "error_message", "previous_still_frame_key"}:
+                    "face_enhancement", "error_message", "previous_still_frame_key",
+                    "previous_still_frame_url"}:
                 shot.pop(key, None)
         shot["status"] = "pending"
     revised["generation_approved"] = False

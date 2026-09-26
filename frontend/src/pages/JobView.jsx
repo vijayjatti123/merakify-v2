@@ -409,12 +409,13 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
               )}
               {shots.map((shot) => {
                 const isEditing = editingShot === shot.shot_number;
+                const editedAwaitingApproval = !approved && result.plan_edited_shots?.includes(shot.shot_number);
                 const [visualStatus, outputLabel] = shotOutputStatus(shot, shotStatuses[shot.shot_number] || shot.status);
                 return (
                   <Card component="article" className="shot-card" sx={isEditing ? { gridColumn: "1 / -1" } : undefined} key={shot.shot_number} data-shot-number={shot.shot_number}>
                     <div className="shot-card-title">
                       <span>{Math.round(shots.slice(0, shots.indexOf(shot)).reduce((sum, item) => sum + Math.max(0, Number(item.duration_sec) || 0), 0) * 10) / 10}s · Scene {shot.scene_number} · Shot {shot.shot_number} · {shot.has_dialogue ? "dialogue" : "silent"}</span>
-                      <span className={`shot-status shot-status--${visualStatus}`}>{!approved ? (result.qa.issues?.some(issue => issue.shot_number === shot.shot_number) ? "Needs correction" : "Ready to review") : outputLabel}</span>
+                      <span className={`shot-status shot-status--${visualStatus}`}>{!approved ? (result.qa.issues?.some(issue => issue.shot_number === shot.shot_number) ? "Needs correction" : editedAwaitingApproval ? "Edit saved · approve to remake" : "Ready to review") : outputLabel}</span>
                     </div>
 
                     {shot.still_frame_url ? (
@@ -422,7 +423,19 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                         <ShotPreviewImage shot={shot} onOpen={() => setExpandedPreview(shot)} />
                         <figcaption className="mt-1 text-xs" style={{ color: COLORS.muted }}>Opening preview · click to enlarge</figcaption>
                       </figure>
+                    ) : shot.previous_still_frame_url ? (
+                      <figure className="my-3" aria-label={`Previous opening preview for shot ${shot.shot_number}`}>
+                        <img src={shot.previous_still_frame_url} alt={`Previous version of shot ${shot.shot_number}'s opening frame`} className="w-full rounded-md" loading="lazy" />
+                        <figcaption className="mt-1 text-xs" style={{ color: COLORS.muted }}>{editedAwaitingApproval ? "Previous image · saved for reference; your edit needs a new preview" : "Previous image · your updated preview is being prepared"}</figcaption>
+                      </figure>
                     ) : null}
+
+                    {editedAwaitingApproval && !isEditing && <Alert severity="info" sx={{ my: 2 }}>
+                      Your edit is saved. Approve it to make a new image for this shot; the video button will appear when that image is ready.
+                      <Button variant="contained" data-testid={`approve-edited-shot-${shot.shot_number}`} sx={{ display: "block", mt: 1 }} disabled={approving || editBlocksApproval || !result.qa.approved} onClick={handleApprove}>
+                        {approving ? "Starting…" : "Approve edit & create new image"}
+                      </Button>
+                    </Alert>}
 
                     {isEditing ? (
                       <><Alert severity="info" sx={{ mb: 2 }} data-testid="shot-plan-edit-impact">{approved || result.plan_edited_shots?.length ? "Saving updates this shot’s direction and asks you to approve the change. Its voice, preview and clip will then be remade; other shots are kept." : "Save your changes, then approve the plan before creating previews."}</Alert><DirectorPlanEditor cast={(result.continuity?.characters || []).map(character => character.name)} issue={shot.video_status === "review_required" ? videoReviewGuidance(shot).message : ""} value={editValues} onChange={setEditValues} shotNumber={shot.shot_number} /></>

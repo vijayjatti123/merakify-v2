@@ -56,6 +56,17 @@ class ApprovedPlanEditTests(unittest.TestCase):
             self.assertEqual(db.query(VideoTask).filter_by(job_id=self.job_id).count(),2)
         self.assertEqual(self.client.post(f"/api/jobs/{self.job_id}/revise",json=self.payload()).status_code,409)
 
+    def test_edited_shot_exposes_archived_preview_only_as_previous_version(self):
+        with self.sessions() as db:
+            result = jobs.job_result(jobs.get_job(db, self.job_id))
+            result["shots"][1]["still_frame_key"] = "jobs/test/shot-2.webp"
+            jobs.set_result(db, self.job_id, result)
+        self.assertEqual(self.client.post(f"/api/jobs/{self.job_id}/revise", json=self.payload()).status_code, 200)
+        with patch('app.services.storage_service.asset_url', return_value='https://example.com/fresh.webp'):
+            shot = self.client.get(f"/api/jobs/{self.job_id}").json()["result"]["shots"][1]
+        self.assertNotIn("still_frame_url", shot)
+        self.assertEqual(shot["previous_still_frame_url"], "https://example.com/fresh.webp")
+
     def test_active_video_prevents_edit_without_losing_any_output(self):
         with self.sessions() as db:jobs.update_video(db,self.job_id,1,video_status="processing")
         response=self.client.post(f"/api/jobs/{self.job_id}/revise",json=self.payload())
