@@ -12,7 +12,7 @@ import ShotPreviewImage from "../components/ShotPreviewImage";
 import VideoPromptDisclosure from "../components/VideoPromptDisclosure";
 import { canFinishSavedLabelVideo, canRepairSavedSilentVideo, friendlyMessage, progressMessage, productLabelIssue, videoReviewGuidance, videoReviewWarnings } from "../utils/presentation";
 import { retryFailedJob, retryShotPreview, retryPreviewPreparation } from "../api/client";
-import { previewState, previewSummary } from "../utils/previewState";
+import { hardPreviewMismatch, previewState, previewSummary } from "../utils/previewState";
 import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, stopShotVideo, finishSavedShotVideo, assembleFinalVideo } from "../api/client";
 import FaceEnhancement, { ShotVideo } from "../components/FaceEnhancement";
 import { CAMERA_VOCABULARY } from "../utils/cameraVocabulary";
@@ -41,6 +41,7 @@ function shotOutputStatus(shot, audioStatus) {
   if (["error", "failed"].includes(shot.video_status)) return ["error", "Video generation failed"];
   if (videoReady(shot)) return ["done", "Video ready"];
   if (shot.still_frame_status === "generating") return ["generating", shot.still_frame_candidate ? "Verifying preview" : "Creating preview"];
+  if (hardPreviewMismatch(shot)) return ["error", "Image needs correction"];
   if (shot.still_frame_status === "failed" && !shot.still_frame_url) return ["error", shot.still_frame_error_kind === "verification" ? "Verification unavailable" : shot.still_frame_error_kind === "mismatch" ? "Preview needs adjustment" : "Preview failed"];
   if (shot.has_dialogue && audioStatus === "error") return ["error", "Audio preparation failed"];
   if (shot.still_frame_url) return ["done", "Preview ready"];
@@ -408,6 +409,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
         {result && shots.length > 0 && (
           <>
             {previews.failed > 0 && <Alert severity="warning" sx={{ m: 2 }}>{previews.failed} preview{previews.failed === 1 ? " is" : "s are"} missing. Your plan and completed speech are saved; use Create missing previews once. Existing previews are kept.</Alert>}
+            {previews.needsCorrection > 0 && <Alert severity="warning" sx={{ m: 2 }}>{previews.needsCorrection} image{previews.needsCorrection === 1 ? " has" : "s have"} a physical mismatch. Use Create corrected image on the affected shot before making its video.</Alert>}
             <div className="panel-logline">
               <span>The story in one sentence</span>
               <p>{result.script.logline}</p>
@@ -519,7 +521,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     {shot.video_status === "review_required" && !shot.video_source_changed && (canFinishSavedLabelVideo(shot) || canRepairSavedSilentVideo(shot)) && <Button variant="contained" sx={{ my: 1 }} disabled={finishingSavedShot === shot.shot_number || regeneratingShot !== null || videoSubmitting !== null} onClick={() => handleFinishSavedVideo(shot)} data-testid={`finish-saved-video-${shot.shot_number}`}>{finishingSavedShot === shot.shot_number ? "Finishing saved video…" : canRepairSavedSilentVideo(shot) ? "Remove unwanted voice · no new render" : "Finish saved video · no new render"}</Button>}
                     {videoReviewWarnings(shot).map((warning) => <Alert severity={["mismatch", "unverified"].includes(shot.video_speech_check?.status) ? "warning" : "info"} key={warning} data-testid={`video-review-note-${shot.shot_number}`}>{warning}</Alert>)}
                     {approved && !errored && (shot.has_dialogue || result.video_model || result.ai_model === "Seedance 2.0") && !shot.video_status && shot.compiled_prompt && shot.still_frame_url && !result.audio_assembly_pending && !result.assembly?.provisional && (!shot.has_dialogue || shot.dialogue_audio_url) && (
-                      <Button id={`generate-video-${shot.shot_number}`} type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={editBlocksApproval || shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
+                      <Button id={`generate-video-${shot.shot_number}`} type="button" variant="contained" fullWidth startIcon={<Clapperboard size={18} />} sx={{ my: 2, minHeight: 48 }} disabled={editBlocksApproval || hardPreviewMismatch(shot) || shot.still_frame_status === "generating" || videoSubmitting !== null || (!shot.has_dialogue && shot.duration_sec > 15)} onClick={() => handleVideo(shot.shot_number)}>
                         {videoSubmitting === shot.shot_number ? "Starting video…" : shot.has_dialogue ? "Generate speaking video" : `Generate video · ${Math.max(5, Math.ceil(shot.duration_sec))}s · ${result.quality || "720p"}`}
                       </Button>
                     )}

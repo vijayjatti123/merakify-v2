@@ -18,7 +18,7 @@ from app.video_models import AUTOMATIC, validate_selection
 from app.services.speech_mode import is_voiceover, is_onscreen_speech
 from app.services.dialogue_window import from_shot as dialogue_window_from_shot
 from app.services import job_service, storage_service, render_compliance_service, video_references
-from app.services.still_frame_service import match_entities, visual_description
+from app.services.still_frame_service import hard_preview_mismatch, match_entities, visual_description
 
 MODEL = "seedance-2.0-reference-to-video"
 BASE = "https://api.evolink.ai"
@@ -282,6 +282,8 @@ def regenerate_translation(result, shot, hint="", *, audio_model=None):
 
 def start(db, job_id, number, *, regenerate=False, hint="", expected_attempt=None, audio_model=None):
     result, shot = job_service.video_source(db, job_id, number)
+    if hard_preview_mismatch(shot):
+        raise ValueError("The opening image has a confirmed physical mismatch. Create and choose a corrected image for this shot before generating video.")
     if regenerate and not result.get("generation_approved"):
         raise ValueError("Approve the revised plan/audio before video regeneration")
     if regenerate and expected_attempt is None:

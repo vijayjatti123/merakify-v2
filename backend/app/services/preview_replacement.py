@@ -96,6 +96,10 @@ def decide(db, job_id, number, token, accept, acknowledge=False):
             shot["still_frame_verification"] = candidate["verification"]
         else:
             shot.pop("still_frame_verification", None)
+        if candidate.get("warning") and acknowledge:
+            shot["still_frame_user_approved"] = True
+        else:
+            shot.pop("still_frame_user_approved", None)
         shot.pop("still_frame_warning", None)
         shot.pop("preview_replacement", None)
         # Do not feed an obsolete accepted image to future shots. Existing siblings

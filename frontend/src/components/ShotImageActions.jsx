@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { RefreshCw, Upload } from "lucide-react";
 import { replaceShotPreview } from "../api/client";
+import { hardPreviewMismatch } from "../utils/previewState";
 
 export default function ShotImageActions({ jobId, shot, aspectRatio, disabled, onRefresh, repairMarkings = false }) {
   const [mode, setMode] = useState(null);
@@ -41,6 +42,12 @@ export default function ShotImageActions({ jobId, shot, aspectRatio, disabled, o
     return act("replacement", { expected_key: shot.still_frame_key || "", hint });
   }
   return <Box sx={{ my: 2 }} data-testid={`image-actions-${shot.shot_number}`}>
+    {hardPreviewMismatch(shot) && !pending && !ready && <Alert severity="warning" sx={{ mb: 1 }} data-testid={`physical-preview-mismatch-${shot.shot_number}`}>
+      This image has a physical mistake in the opening scene. It is saved, but should be corrected before making the video.
+      <Button sx={{ display: "block", mt: 1 }} variant="contained" disabled={disabled || busy} onClick={() => act("replacement", {
+        expected_key: shot.still_frame_key || "", hint: shot.still_frame_verification?.reason || "Correct the opening position and object count."
+      })}>Create corrected image</Button>
+    </Alert>}
     {repairMarkings && !pending && !ready && <Alert severity="warning" sx={{ mb: 1 }}>
       Exact product lettering is optional for this shot. You can keep the current image, or try a replacement if the package text matters to you.
       <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1} sx={{ mt: 1 }}>

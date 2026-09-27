@@ -32,6 +32,18 @@ class VideoTests(unittest.TestCase):
         self.shot.update(has_dialogue=True,speech_mode="onscreen", dialogue_text="Here is the cup.", dialogue_audio_duration_sec=4, dialogue_audio_url="https://example.com/real.wav")
         self.assertEqual(video.translate(self.result, self.shot)['provider'], 'evolink')
 
+    def test_confirmed_physical_preview_error_stops_before_paid_video(self):
+        self.shot['still_frame_verification'] = {'approved': False,
+            'visual_checks': {'props_contact': {'status': 'fail'}}}
+        with patch.object(video.job_service, 'video_source', return_value=(self.result, self.shot)), \
+             patch.object(video, 'provider') as provider:
+            with self.assertRaisesRegex(ValueError, 'corrected image'):
+                video.start(MagicMock(), 'synthetic-job', 1)
+            provider.assert_not_called()
+        self.shot['still_frame_user_approved'] = True
+        from app.services.still_frame_service import hard_preview_mismatch
+        self.assertFalse(hard_preview_mismatch(self.shot))
+
     def test_reference_priority_cap_and_url_rewrite(self):
         chars = [dict(name=f"Actor{n}", character_id=str(n), image_url=f"https://example.com/{n}.jpg") for n in range(10)]
         self.result['continuity']['characters'] = chars

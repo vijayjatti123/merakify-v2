@@ -600,6 +600,22 @@ def _continuous_pair(previous, shot, result):
                 re.search(r"later|time[- ]?(?:jump|passage)|flashback|next day", boundary.get("reason") or "", re.I))
 
 
+def hard_preview_mismatch(shot):
+    """A known physical opening error cannot silently become a video source.
+
+    Verification outages and optional lettering/style observations do not gate
+    video. A deliberately accepted replacement can override a false positive.
+    """
+    if shot.get("still_frame_user_approved"):
+        return False
+    verdict = shot.get("still_frame_verification") or {}
+    if verdict.get("approved") is not False:
+        return False
+    checks = verdict.get("visual_checks") or {}
+    return any((checks.get(key) or {}).get("status") == "fail" for key in
+               ("identity_wardrobe", "placement_support", "props_contact", "opening_state", "framing"))
+
+
 def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on_progress=None,
                                   feedback_by_shot=None, reference_cache=None, on_accepted=None,
                                   on_verification=None):
@@ -655,6 +671,7 @@ def _generate_still_frames_serial(result, *, job_id, emit, shot_numbers=None, on
         shot.pop("still_frame_warning", None)
         shot.pop("still_frame_error_kind", None)
         shot.pop("still_frame_verification", None)
+        shot.pop("still_frame_user_approved", None)
         shot["still_frame_status"] = "pending"
         if not shot.get("compiled_prompt") and not shot.get("preview_input"):
             continue  # Dialogue jobs wait for real post-approval compilation.
