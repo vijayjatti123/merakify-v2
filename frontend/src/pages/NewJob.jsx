@@ -103,7 +103,9 @@ export default function NewJob({ onSubmit, collapsed = false, submittedBrief = "
   const effectiveDuration = duration === "Custom" ? customDuration.trim() : duration;
   const knownFields = { duration: effectiveDuration, aspect_ratio: aspectRatio, content_type: contentType,
     color_grade: colorGrade, visual_style: visualStyle, quality, language: effectiveLanguage, ai_model: aiModel };
-  const clarificationContext = JSON.stringify([knownFields, scriptMode, products.map(p => p.id), adType, adBrief]);
+  // Match ClarifierPanel's inputMode value exactly. A boolean here made every
+  // accepted refinement appear stale and omitted its session from planning.
+  const clarificationContext = JSON.stringify([knownFields, scriptMode ? "script" : "idea", products.map(p => p.id), adType, adBrief]);
   const activeClarification = clarification?.brief === brief && clarification?.context === clarificationContext ? clarification : null;
   const clarificationPayload = activeClarification ? { clarifier_session_id: activeClarification.id, clarifier_revision: activeClarification.revision } : {};
   const modelError = videoModel === "automatic_omni_mini" && quality !== "720p"
