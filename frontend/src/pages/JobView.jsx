@@ -13,7 +13,7 @@ import VideoPromptDisclosure from "../components/VideoPromptDisclosure";
 import { canFinishSavedLabelVideo, canRepairSavedSilentVideo, friendlyMessage, progressMessage, productLabelIssue, videoReviewGuidance, videoReviewWarnings } from "../utils/presentation";
 import { retryFailedJob, retryShotPreview, retryPreviewPreparation } from "../api/client";
 import { hardPreviewMismatch, previewState, previewSummary } from "../utils/previewState";
-import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, stopShotVideo, finishSavedShotVideo, assembleFinalVideo } from "../api/client";
+import { approveJob, reviseJob, streamJob, getJob, generateShotVideo, regenerateShotVideo, useApprovedImageHold, stopShotVideo, finishSavedShotVideo, assembleFinalVideo } from "../api/client";
 import FaceEnhancement, { ShotVideo } from "../components/FaceEnhancement";
 import { CAMERA_VOCABULARY } from "../utils/cameraVocabulary";
 
@@ -294,6 +294,20 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
     }
   }
 
+  async function handleImageHold(shotNumber) {
+    setRegeneratingShot(shotNumber);
+    setShotActionError((current) => ({ ...current, [shotNumber]: null }));
+    try {
+      const shot = shots.find((item) => item.shot_number === shotNumber);
+      await useApprovedImageHold(jobId, shot);
+    } catch (error) {
+      setShotActionError((current) => ({ ...current, [shotNumber]: error.message }));
+    } finally {
+      try { setFinal(await getJob(jobId)); } catch (error) { setError(error.message); }
+      setRegeneratingShot(null);
+    }
+  }
+
   async function handleStopVideo(shot) {
     setStoppingShot(shot.shot_number);
     setShotActionError((current) => ({ ...current, [shot.shot_number]: null }));
@@ -548,6 +562,12 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                           {!canRepairSavedSilentVideo(shot) && (shot.video_url || ["error", "failed"].includes(shot.video_status) || (shot.video_status === "review_required" && !lockedAudioReview(shot))) && <Button type="button" onClick={() => handleRegenerate(shot.shot_number)} disabled={editBlocksApproval || shot.still_frame_status === "generating" || !approved || regeneratingShot !== null || videoSubmitting !== null || result.audio_assembly_pending || result.assembly?.provisional || ["submitting", "processing", "submission_unknown"].includes(shot.video_status) || !shot.compiled_prompt || !shot.still_frame_url} className="card-action card-action--primary" style={{ background: COLORS.marigold, color: COLORS.bg }} aria-label={`Regenerate shot ${shot.shot_number}`} title="Restart this shot only">
                             {regeneratingShot === shot.shot_number ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {shot.video_status === "review_required" ? "Regenerate corrected video" : "Regenerate video"}
                           </Button>}
+                          {shot.video_status === "review_required" && !shot.has_dialogue && !shot.characters_in_shot?.length && shot.still_frame_url && !hardPreviewMismatch(shot) && <div>
+                            <p>This image can become a steady silent clip. The product will stay exactly as pictured, with no generated movement.</p>
+                            <Button type="button" onClick={() => handleImageHold(shot.shot_number)} disabled={!approved || regeneratingShot !== null || videoSubmitting !== null || editBlocksApproval} className="card-action" aria-label={`Use approved image for shot ${shot.shot_number}`}>
+                              Use this image as the clip
+                            </Button>
+                          </div>}
                         </>
                       )}
                     </div>

@@ -43,6 +43,11 @@ def retry_details(error):
 
 def work(job_id, shot, response=None, completion=None):
     from app.services import video_generation_service as video
+    if shot.get("video_provider") == "editorial":
+        video.finish_editorial_hold(job_id, shot["shot_number"], shot["video_task_id"],
+            shot["video_editorial_image_key"], shot["video_editorial_duration"],
+            shot["video_editorial_aspect"])
+        return None
     with SessionLocal() as db:
         try:
             if response is None:

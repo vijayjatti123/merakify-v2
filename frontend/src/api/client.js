@@ -234,6 +234,16 @@ export async function regenerateShotVideo(jobId, shot, hint = "") {
   return data;
 }
 
+export async function useApprovedImageHold(jobId, shot) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shot.shot_number}/video/approved-image-hold`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_attempt: shot.video_task_id || shot.video_submitted_at }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not make the image hold");
+  return data;
+}
+
 export async function stopShotVideo(jobId, shot) {
   const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shot.shot_number}/video/stop`, {
     method: "POST", headers: { "Content-Type": "application/json" },

@@ -1,5 +1,6 @@
 import copy
 import json
+import io
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
@@ -43,6 +44,39 @@ class VideoTests(unittest.TestCase):
         self.shot['still_frame_user_approved'] = True
         from app.services.still_frame_service import hard_preview_mismatch
         self.assertFalse(hard_preview_mismatch(self.shot))
+
+    def test_editorial_hold_only_claims_reviewed_silent_person_free_image(self):
+        self.result.update(generation_approved=True, aspect_ratio='16:9')
+        self.shot.update(still_frame_key='jobs/test/preview.png', video_status='review_required', duration_sec=6)
+        with patch.object(video.job_service, 'video_source', return_value=(self.result, self.shot)), \
+             patch.object(video.job_service, 'claim_video') as claim, \
+             patch.object(video.job_service, 'append_event'):
+            started = video.start_editorial_hold(MagicMock(), 'synthetic-job', 1, 'old-task')
+            self.assertEqual(started['status'], 'processing')
+            self.assertEqual(claim.call_args.kwargs['replace_token'], 'old-task')
+            self.assertEqual(claim.call_args.args[3]['video_provider'], 'editorial')
+            self.shot['characters_in_shot'] = ['Anaya']
+            with self.assertRaisesRegex(ValueError, 'no visible character'):
+                video.start_editorial_hold(MagicMock(), 'synthetic-job', 1, 'old-task')
+
+    def test_editorial_hold_renders_silent_mp4_from_approved_image(self):
+        from PIL import Image
+        source = io.BytesIO()
+        Image.new('RGB', (320, 180), '#ad7441').save(source, format='PNG')
+        saved = {}
+        def upload(key, body, **kwargs):
+            saved['body'] = body
+            return {'url': 'https://example.com/hold.mp4'}
+        with patch('app.db.SessionLocal') as session, \
+             patch.object(video.storage_service, 'download_bytes', return_value=source.getvalue()), \
+             patch.object(video.storage_service, 'upload_bytes', side_effect=upload), \
+             patch.object(video.job_service, 'update_video') as update, \
+             patch.object(video.job_service, 'append_event'):
+            session.return_value.__enter__.return_value = MagicMock()
+            video.finish_editorial_hold('synthetic-job', 3, 'editorial-test', 'preview.png', 1, '16:9')
+        self.assertEqual(saved['body'][4:8], b'ftyp')
+        self.assertEqual(update.call_args.kwargs['video_status'], 'done')
+        self.assertEqual(update.call_args.kwargs['video_speech_check']['status'], 'pass')
 
     def test_reference_priority_cap_and_url_rewrite(self):
         chars = [dict(name=f"Actor{n}", character_id=str(n), image_url=f"https://example.com/{n}.jpg") for n in range(10)]

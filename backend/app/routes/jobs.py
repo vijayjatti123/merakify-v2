@@ -217,6 +217,18 @@ def regenerate_video(job_id: str, shot_number: int, payload: VideoRegenerateRequ
         raise HTTPException(502, "Video regeneration failed or is uncertain; inspect shot status before retrying") from error
 
 
+@router.post("/{job_id}/shots/{shot_number}/video/approved-image-hold", status_code=202)
+def approved_image_hold(job_id: str, shot_number: int, payload: VideoStopRequest,
+                        db: Session = Depends(get_db)):
+    from app.services import video_generation_service as video
+    try:
+        return video.start_editorial_hold(db, job_id, shot_number, payload.expected_attempt)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+
+
 def _recover_missing_still(job_id, number, token, expected_attempt, hint, generate_video=True, audio_model=None):
     from app.services import still_frame_service, video_generation_service
     with SessionLocal() as db:

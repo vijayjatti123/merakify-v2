@@ -1,11 +1,15 @@
 """Module R/S video path with Module T's one bounded compliance rerender."""
 import hashlib
+import io
 import json
 import math
 import logging
 import re
 import tempfile
 import time
+import subprocess
+from pathlib import Path
+from uuid import uuid4
 import httpx
 from contextlib import nullcontext
 from datetime import datetime, timezone
@@ -522,6 +526,74 @@ def _finish_completed(db, job_id, shot, response, cache):
                                   video_usage=response.get("usage"), video_error=None,
                                   video_stored_at=datetime.now(timezone.utc).isoformat())
     job_service.append_event(db, job_id, "video_generation", f"Shot {number}: video persisted to S3 ({size} bytes, SHA256 {cache.digest}); provider expiry no longer controls retention.")
+
+
+def start_editorial_hold(db, job_id, number, expected_attempt):
+    """Use an approved still as a silent clip after a faceless shot fails QA."""
+    result, shot = job_service.video_source(db, job_id, number)
+    if (shot.get("video_status") != "review_required" or shot.get("characters_in_shot")
+            or shot.get("has_dialogue") or shot.get("speech_mode") in {"onscreen", "voiceover"}
+            or not shot.get("still_frame_key") or hard_preview_mismatch(shot)):
+        raise ValueError("This option needs a reviewed, silent shot with no visible character and an accepted image.")
+    if shot.get("video_source_changed"):
+        raise ValueError("The shot image changed. Review the current image before making a clip.")
+    if not result.get("generation_approved"):
+        raise ValueError("Approve the shot plan first.")
+    duration = max(5, min(15, int(math.ceil(float(shot.get("duration_sec") or 5)))))
+    aspect = result.get("aspect_ratio", "16:9")
+    if aspect not in {"16:9", "9:16"}:
+        raise ValueError("Editorial still clips support 16:9 or 9:16.")
+    task = "editorial-" + uuid4().hex
+    job_service.claim_video(db, job_id, number, {
+        "video_status": "processing", "video_phase": "rendering_approved_image", "video_error": None,
+        "video_task_id": task, "video_provider": "editorial", "video_model": "approved_image_hold",
+        "video_mode": "approved_image_hold", "video_source_hash": source_fingerprint(shot),
+        "video_submitted_at": datetime.now(timezone.utc).isoformat(),
+        "video_editorial_image_key": shot["still_frame_key"],
+        "video_editorial_duration": duration, "video_editorial_aspect": aspect,
+        "video_warnings": ["This clip holds the approved image; it has no generated subject motion or speech."],
+    }, replace_token=expected_attempt)
+    job_service.append_event(db, job_id, "video_generation", f"Shot {number}: rendering a silent hold from its approved image.")
+    return {"shot_number": number, "status": "processing", "task_id": task}
+
+
+def finish_editorial_hold(job_id, number, task, image_key, duration, aspect):
+    from app.db import SessionLocal
+    from app.services.final_assembly_service import ffmpeg
+    from PIL import Image, ImageOps
+    with SessionLocal() as db:
+        try:
+            width, height = (1280, 720) if aspect == "16:9" else (720, 1280)
+            with tempfile.TemporaryDirectory() as folder:
+                source = Path(folder) / "approved-image.png"
+                output = Path(folder) / "hold.mp4"
+                with Image.open(io.BytesIO(storage_service.download_bytes(image_key))) as image:
+                    ImageOps.exif_transpose(image).convert("RGB").save(source, format="PNG")
+                command = [ffmpeg(), "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+                           "-loop", "1", "-framerate", "30", "-i", str(source),
+                           "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                           "-t", str(duration), "-vf",
+                           f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                           f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps=30",
+                           "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                           "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k",
+                           "-shortest", "-movflags", "+faststart", str(output)]
+                subprocess.run(command, check=True, timeout=90, capture_output=True)
+                data = output.read_bytes()
+            if data[4:8] != b"ftyp":
+                raise ValueError("Editorial hold did not produce a valid MP4.")
+            key = f"jobs/{job_id}/videos/{number}-{task}.mp4"
+            stored = storage_service.upload_bytes(key, data, content_type="video/mp4")
+            job_service.update_video(db, job_id, number, expected_task_id=task,
+                video_status="done", video_phase=None, video_url=stored["url"], video_key=key,
+                video_sha256=hashlib.sha256(data).hexdigest(), video_bytes=len(data),
+                video_error=None, video_speech_check={"status": "pass", "reason": "Silent editorial hold; no generated voice."})
+            job_service.append_event(db, job_id, "video_generation", f"Shot {number}: approved-image hold ready.")
+        except Exception:
+            logging.exception("Editorial hold failed for job %s shot %s", job_id, number)
+            job_service.update_video(db, job_id, number, expected_task_id=task,
+                video_status="review_required", video_phase=None,
+                video_error="The approved-image clip could not be prepared. Your image and previous attempts are saved.")
 
 
 def polling_loop(stop):
