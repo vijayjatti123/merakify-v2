@@ -221,6 +221,10 @@ def visual_instruction(result, shot, opening_label, *, speaking=True):
         sentence("Required outcome", direction.get("critical_outcome")),
         sentence("Ending state", shot.get("state_at_shot_end")),
     ])
+    if direction.get("critical_outcome") and shot.get("state_at_shot_end"):
+        parts.append("Final composition: keep every physical result and person explicitly named "
+                     "in the required outcome and ending state visible together at the final hold. "
+                     "Do not crop out one proof element while moving closer to another.")
     invariants = direction.get("spatial_invariants") or []
     forbidden = direction.get("forbidden_geometry") or []
     if not shot.get("characters_in_shot"):

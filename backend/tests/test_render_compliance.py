@@ -319,6 +319,34 @@ class ComplianceTests(unittest.TestCase):
              patch.object(gate, '_google', return_value=raw):
             result = gate.inspect(io.BytesIO(), {'staging': {'critical_outcome': 'The finished sketch is visible.'}})
         self.assertEqual(result['verdict']['staging']['status'], 'unverified')
+
+    def test_final_frame_proof_overrides_a_false_sequence_pass(self):
+        response = {**verdict()['verdict'], 'frame_observations': [
+            {'frame_index': 1, 'observed': 'person draws', 'later_beat_already_visible': False, 'reason': 'action'},
+            {'frame_index': 2, 'observed': 'person smiles', 'later_beat_already_visible': False, 'reason': 'ending'}],
+            'beat_evidence': [], 'outcome_evidence': {
+                'status': 'observed', 'observed': 'drawing completed', 'frame_indices': [2]}}
+        raw = {'candidates': [{'content': {'parts': [{'text': json.dumps(response)}]}}]}
+        proof = {'status': 'mismatch', 'observed': 'The page has only faint strokes.',
+                 'reason': 'No completed drawing is visible.', 'end_subject_status': 'not_required',
+                 'end_subject_observed': ''}
+        with patch.object(gate, 'frames', return_value=[(0, {'inlineData': {}}), (2, {'inlineData': {}})]), \
+             patch.object(gate, '_google', return_value=raw), \
+             patch.object(gate, 'inspect_finished_artifact', return_value=proof) as focused:
+            result = gate.inspect(io.BytesIO(), {'staging': {'critical_outcome': 'She completes the drawing.'}})
+        focused.assert_called_once()
+        self.assertEqual(result['verdict']['staging']['status'], 'mismatch')
+        self.assertEqual(result['verdict']['artifact_evidence'], proof)
+
+        proof = {**proof, 'status': 'pass', 'reason': 'Drawing visible.',
+                 'end_subject_status': 'mismatch', 'end_subject_observed': 'The face is cropped out.'}
+        with patch.object(gate, 'frames', return_value=[(0, {'inlineData': {}}), (2, {'inlineData': {}})]), \
+             patch.object(gate, '_google', return_value=raw), \
+             patch.object(gate, 'inspect_finished_artifact', return_value=proof):
+            result = gate.inspect(io.BytesIO(), {'staging': {
+                'critical_outcome': 'She completes the drawing.',
+                'end': 'She smiles beside the finished drawing.'}})
+        self.assertEqual(result['verdict']['staging']['status'], 'mismatch')
     def test_shape_change_is_saved_for_review_without_paid_retry(self):
         expected = {'staging': {'critical_outcome': 'His torso elongates and then recoils.'}}
         jobs.update_video(self.db, self.job.id, 1, video_compliance_expected=expected)

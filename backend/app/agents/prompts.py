@@ -372,7 +372,9 @@ state_at_shot_start/end and action_beats.
 Do not forbid an approved action while forbidding a visual mistake: if someone lifts a cup,
 forbid unsupported levitation or duplication, not the cup leaving the desk. If the outcome
 depends on a finished or changed object, require a clear final view of that object's changed
-state; the person's reaction or motion alone is not proof. For silent shots, describe visible
+state; the person's reaction or motion alone is not proof. If the end state also requires a
+person's reaction, choose a final camera composition that keeps the object and that reaction
+visible together; do not let a push-in or tilt crop either proof away. For silent shots, describe visible
 breathing or posture rather than inventing an audible sigh, gasp or exhale.
 If required_corrections are supplied, repair ONLY the identified violations; retain all other decisions.
 Do not include URLs, voice IDs or copied Vault/style metadata in the output; code attaches references.

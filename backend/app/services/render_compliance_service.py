@@ -115,6 +115,85 @@ CHECK_SCHEMA = {"type": "OBJECT", "properties": {**{key: {"type": "OBJECT", "pro
 
 
 NON_RIGID_CHANGE = re.compile(r"\b(?:stretch\w*|elongat\w*|deform\w*|morph\w*)\b", re.I)
+FINISHED_ARTIFACT = re.compile(
+    r"\b(?:complet\w*|finish\w*)\s+(?:the\s+|a\s+|an\s+|her\s+|his\s+|their\s+)?"
+    r"(?P<artifact>sketch|drawing|painting|illustration|design|poster|sculpture|"
+    r"model|craft|structure|construction|repair|product|object|piece|work)\b", re.I)
+
+ARTIFACT_SCHEMA = {"type": "OBJECT", "properties": {
+    "status": {"type": "STRING", "enum": ["pass", "mismatch", "unverified"]},
+    "observed": {"type": "STRING"}, "reason": {"type": "STRING"},
+    "end_subject_status": {"type": "STRING", "enum": ["pass", "mismatch", "unverified", "not_required"]},
+    "end_subject_observed": {"type": "STRING"}},
+    "required": ["status", "observed", "reason", "end_subject_status", "end_subject_observed"]}
+
+
+def finished_artifact(expected):
+    """A narrow, provider-neutral trigger for a visible finished physical result."""
+    staging = expected.get("staging") or {}
+    required = " ".join((str(staging.get("critical_outcome") or ""),
+                         str(staging.get("end") or "")))
+    found = FINISHED_ARTIFACT.search(required)
+    return found.group("artifact").lower() if found else None
+
+
+def inspect_finished_artifact(media, artifact, expected):
+    """Check final-frame pixels separately from the action narrative.
+
+    The broad sequence checker twice inferred a completed drawing from a hand
+    moving and a smile, even though the final page was nearly blank. This
+    focused check sees only the final frame and an enlarged detail.
+    """
+    media.seek(0)
+    with av.open(media) as container:
+        stream = container.streams.video[0]
+        duration = (float(stream.duration * stream.time_base) if stream.duration
+                    else float(container.duration or 0) / av.time_base)
+        container.seek(int(max(0, duration - 0.5) / stream.time_base), stream=stream)
+        last = None
+        for frame in container.decode(video=0):
+            last = frame.to_image().convert("RGB")
+    media.seek(0)
+    if last is None:
+        raise ValueError("Final video frame unavailable")
+    width, height = last.size
+    # Physical work usually sits near the action, but retain the full frame
+    # so an off-center object can still be judged rather than silently lost.
+    crop = last.crop((int(width * .1), int(height * .45), int(width * .9), height))
+    def enlarged(image):
+        image.thumbnail((1536, 1536))
+        output = io.BytesIO()
+        image.save(output, "JPEG", quality=92)
+        return {"inlineData": {"mimeType": "image/jpeg",
+                "data": base64.b64encode(output.getvalue()).decode()}}
+    end = (expected.get("staging") or {}).get("end") or ""
+    expression_required = bool(re.search(r"\b(?:smil\w*|grin\w*|facial|expression|gaze|eyes?)\b", end, re.I))
+    parts = [{"text": (
+        f"Inspect only these final-frame pixels for a completed {artifact}. "
+        "First describe concrete visible marks, shape, or construction on the object. "
+        "Do not infer completion from a person's motion, expression, the script, or a prompt. "
+        "Pass only when the completed object itself is clearly visible; mark mismatch "
+        "when it is visibly blank or unfinished, and unverified if too small or obscured. "
+        + ("The required ending also includes this visible person state: " + end + ". "
+           "Independently mark end_subject_status pass only if the person's face and named "
+           "expression are visible in this SAME final frame; mismatch if cropped out, "
+           "unverified if too small, never infer a smile from an earlier action."
+           if expression_required else "Return end_subject_status not_required.")
+    )}, {"text": "Full final video frame:"}, enlarged(last),
+        {"text": "Enlarged lower-center detail of the same frame:"}, enlarged(crop)]
+    raw = _google(parts, verification=True, response_schema=ARTIFACT_SCHEMA)
+    answer = "".join(part.get("text", "") for candidate in raw.get("candidates", [])
+                     for part in candidate.get("content", {}).get("parts", []))
+    result = json.loads(answer)
+    if (result.get("status") not in {"pass", "mismatch", "unverified"}
+            or not isinstance(result.get("observed"), str)
+            or not isinstance(result.get("reason"), str)
+            or result.get("end_subject_status") not in {"pass", "mismatch", "unverified", "not_required"}
+            or not isinstance(result.get("end_subject_observed"), str)):
+        raise ValueError("Invalid final-artifact verification response")
+    if not expression_required:
+        result["end_subject_status"] = "not_required"
+    return result
 
 
 def needs_shape_change_review(expected):
@@ -344,6 +423,23 @@ def inspect(media, expected):
             # or spending on an automatic rerender of uncertain benefit.
             verdict["staging"] = {"status": "unverified", "observed": verdict["staging"]["observed"],
                                   "reason": "Review the shape-change effect in playback; sparse frames cannot certify deformation."}
+        if artifact := finished_artifact(expected):
+            try:
+                proof = inspect_finished_artifact(media, artifact, expected)
+            except Exception as error:
+                proof = {"status": "unverified", "observed": "",
+                         "reason": "Final object could not be inspected (" + type(error).__name__ + ").",
+                         "end_subject_status": "unverified", "end_subject_observed": ""}
+            verdict["artifact_evidence"] = proof
+            if proof["status"] == "mismatch" or proof["end_subject_status"] == "mismatch":
+                detail = ("The required finished object is visibly absent: " + proof["reason"]
+                          if proof["status"] == "mismatch" else
+                          "The required person reaction is cropped from the final result.")
+                verdict["staging"] = {"status": "mismatch", "observed":
+                                      proof["observed"] + " " + proof["end_subject_observed"], "reason": detail}
+            elif (proof["status"] == "unverified" or proof["end_subject_status"] == "unverified") and verdict["staging"]["status"] == "pass":
+                verdict["staging"] = {"status": "unverified", "observed": proof["observed"],
+                                      "reason": "The final physical result or person reaction could not be verified."}
     except (ValueError, KeyError, TypeError) as error:
         raise ValueError("Vision response was not valid compliance JSON") from error
     if reference_error:
