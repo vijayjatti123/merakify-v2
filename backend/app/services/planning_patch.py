@@ -5,6 +5,8 @@ import re
 VISUAL_REPAIR_FIELDS = frozenset(('description', 'shot_direction', 'state_at_shot_start',
     'state_at_shot_end', 'opening_characters', 'camera_angle', 'camera_direction',
     'lens', 'lighting', 'composition_note', 'duration_sec'))
+PROTECTED_REPAIR_FIELDS = frozenset(('dialogue_text', 'has_dialogue', 'speech_mode',
+    'speaker_name', 'speaker_label', 'characters_in_shot', 'scene_number', 'shot_number'))
 
 
 def protect_unflagged(shots, revised, issues):
@@ -83,8 +85,17 @@ def patch_permissions(shots, issues):
         # supplied by the model. Speech/cast/scene identity cannot be patched.
         if issue.get('repair_kind') == 'visual_fields':
             fields = issue.get('repair_fields')
+            if isinstance(fields, list) and any(f in PROTECTED_REPAIR_FIELDS for f in fields):
+                raise ValueError('QA proposed a protected dialogue, cast or scene repair scope.')
+            if isinstance(fields, list):
+                from app.services.ad_direction import SHOT_FIELDS, EXECUTION_FIELDS
+                nested_direction_fields = set(SHOT_FIELDS) | set(EXECUTION_FIELDS) | {'dialogue_beat_index'}
+                fields = ['shot_direction' if f in nested_direction_fields else f for f in fields]
             if not isinstance(fields, list) or not fields or any(f not in VISUAL_REPAIR_FIELDS for f in fields):
-                raise ValueError('QA proposed an invalid visual repair scope. Retry planning.')
+                # An unknown model-supplied key must not stop the entire plan.
+                # The established full-plan path protects dialogue, scene
+                # identities and unflagged neighbors.
+                return None
             fields = set(fields)
             if 'description' in fields:
                 fields.update(('shot_direction', 'state_at_shot_start', 'state_at_shot_end', 'opening_characters'))

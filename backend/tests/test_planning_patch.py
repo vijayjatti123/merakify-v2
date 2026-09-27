@@ -35,6 +35,14 @@ class PlanningPatchTests(unittest.TestCase):
         for problem in ('Split utterance across shots', 'Boundary state mismatch', '180-degree axis crossing', 'Something unclear'):
             self.assertIsNone(patch_permissions(self.shots, [{'shot_number': 2, 'problem': problem}]))
 
+    def test_nested_qa_visual_scope_maps_to_authorized_parent(self):
+        issue = {'shot_number': 2, 'repair_kind': 'visual_fields',
+                 'repair_fields': ['product_props'],
+                 'problem': 'Knife inventory is missing in the next shot'}
+        self.assertEqual(patch_permissions(self.shots, [issue]), {2: ['shot_direction']})
+        self.assertIsNone(patch_permissions(self.shots,
+            [{**issue, 'repair_fields': ['unknown_visual_key']}]))
+
     def test_user_review_preserves_story_without_requesting_a_patch(self):
         for source in (None, 'Meera: Complete line 1. Meera: Complete line 2.'):
             with patch.object(director, 'call_agent', side_effect=AssertionError('No semantic QA or patch')) as call:
