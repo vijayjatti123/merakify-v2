@@ -125,6 +125,19 @@ class CommercialModesTests(unittest.TestCase):
             {"audience", "differentiator", "outcome", "execution", "constraints"}))
         self.assertNotIn("commercial_guidance", row.gathered["_context"])
 
+    def test_main_message_is_already_the_viewer_takeaway(self):
+        context = {"ad_type": "character", "ad_brief": {
+            "selling_point": "A quiet pause restores creative confidence."}}
+        assessment = {"confidence": .6, "understanding": "A quiet studio moment.", "coverage": {
+            topic: {"status": "missing", "evidence": "", "question": question}
+            for topic, question in clarifier_service.QUESTIONS.items()}}
+        with patch.object(clarifier_service, "call_agent", return_value=assessment):
+            row = clarifier_service.start(self.db, "A quiet studio moment", {}, context)
+        self.assertNotEqual(row.turns[0]["topic"], "outcome")
+        self.assertEqual(row.gathered["_assessment"]["coverage"]["outcome"], {
+            "status": "provided", "evidence": context["ad_brief"]["selling_point"],
+            "question": clarifier_service.QUESTIONS["outcome"]})
+
     def test_still_context_does_not_leak_future_transformation(self):
         result = {"ad_type": "cgi", "ad_brief": {"treatment": "Bottle explodes into stars"}}
         shot = {"description": "A bottle then explodes into stars", "state_at_shot_start": "An intact bottle on a table",

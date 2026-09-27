@@ -423,7 +423,8 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
               <Typography variant="body2">Check that every story moment and complete spoken line is included. You approve the creative direction; technical checks do not judge the story.</Typography>
               {result.qa.issues?.map((issue, index) => <Alert severity="warning" key={index} sx={{ mt: 1 }}>Shot {issue.shot_number}: {issue.problem}</Alert>)}
             </Box>}
-            <div className="shot-card-list" style={!approved ? { gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))" } : undefined}>
+            <div className="shot-card-list" style={{ gridTemplateColumns: shots.length === 1
+              ? "minmax(0, min(100%, 900px))" : "repeat(auto-fit, minmax(min(100%, 340px), 1fr))" }}>
               {result.continuity?.characters?.some((character) => character.style_variant_id || character.style_variant_warning) && (
                 <section className="shot-card shrink-0" aria-label="Character references for this style">
                   <p className="text-sm">Character references for this style</p>

@@ -369,6 +369,11 @@ directly under skids/rotors unless the source explicitly requires that dangerous
 forbidden_geometry must name the most plausible wrong interpretation of the shot, not generic
 phrases such as "keep realistic". These locked facts must agree with description, blocking,
 state_at_shot_start/end and action_beats.
+Do not forbid an approved action while forbidding a visual mistake: if someone lifts a cup,
+forbid unsupported levitation or duplication, not the cup leaving the desk. If the outcome
+depends on a finished or changed object, require a clear final view of that object's changed
+state; the person's reaction or motion alone is not proof. For silent shots, describe visible
+breathing or posture rather than inventing an audible sigh, gasp or exhale.
 If required_corrections are supplied, repair ONLY the identified violations; retain all other decisions.
 Do not include URLs, voice IDs or copied Vault/style metadata in the output; code attaches references.
 """

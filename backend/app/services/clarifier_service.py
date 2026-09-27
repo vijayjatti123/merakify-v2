@@ -135,6 +135,11 @@ def advance(state):
     supplied = {topic: ad_brief[field] for field, topic in {
         "audience": "audience", "selling_point": "differentiator", "call_to_action": "outcome",
         "treatment": "execution", "must_preserve": "constraints"}.items() if ad_brief.get(field)}
+    # The intake labels selling_point "Main message — the one thing viewers
+    # should remember". It answers the takeaway question even when no
+    # separate purchase CTA is wanted; do not ask for the same fact again.
+    if "outcome" not in supplied and ad_brief.get("selling_point"):
+        supplied["outcome"] = ad_brief["selling_point"]
     available = [k for k in QUESTIONS if k not in supplied and k not in state["known_fields"]
                  and k not in state["gathered"] and not any(t.get("topic") == k for t in turns)]
     try:

@@ -35,6 +35,12 @@ For a critical_outcome involving cause and effect, cite visible evidence for bot
 the result in frame_observations. If the sampled frames clearly contradict the required result,
 return mismatch. If the decisive instant falls between samples, return unverified; do not claim a
 pass because the prompt requested the outcome or a character reacts to it.
+Assess critical_outcome SEPARATELY from the action beats. Return outcome_evidence with its own
+status, concrete visible observation, and supporting VIDEO frame indices. Drawing motions do
+not prove a completed drawing; a smile does not prove the intended work is finished. If the
+required result is a finished/changed physical object, inspect that object in the final frame.
+If it is visibly blank or unchanged, mark contradicted. If it is too small or obscured to tell,
+mark unverified. Never copy the requested result into observed without seeing it.
 For an outcome that requires a visible change and reversal (for example stretch then snap back,
 break then repair, or fall then stand), a stable final pose or taut prop alone does not prove the
 transition. The frame evidence must show both materially different states OF THE SUBJECT, not
@@ -96,11 +102,16 @@ CHECK_SCHEMA = {"type": "OBJECT", "properties": {**{key: {"type": "OBJECT", "pro
         "observed": {"type": "STRING"},
         "frame_indices": {"type": "ARRAY", "items": {"type": "INTEGER"}}},
         "required": ["beat_index", "status", "observed", "frame_indices"]}},
+    "outcome_evidence": {"type": "OBJECT", "properties": {
+        "status": {"type": "STRING", "enum": ["observed", "unverified", "contradicted"]},
+        "observed": {"type": "STRING"},
+        "frame_indices": {"type": "ARRAY", "items": {"type": "INTEGER"}}},
+        "required": ["status", "observed", "frame_indices"]},
     "mouth_speech": {"type": "OBJECT", "properties": {
         "status": {"type": "STRING", "enum": ["pass", "mismatch", "unverified"]},
         "observed": {"type": "STRING"}, "reason": {"type": "STRING"}},
         "required": ["status", "observed", "reason"]}},
-    "required": ["style", "scale", "staging", "frame_observations", "beat_evidence"]}
+    "required": ["style", "scale", "staging", "frame_observations", "beat_evidence", "outcome_evidence"]}
 
 
 NON_RIGID_CHANGE = re.compile(r"\b(?:stretch\w*|elongat\w*|deform\w*|morph\w*)\b", re.I)
@@ -287,6 +298,19 @@ def inspect(media, expected):
                        for index, row in enumerate(beat_evidence, 1))):
             raise ValueError("Action-beat visual evidence is incomplete")
         verdict["beat_evidence"] = beat_evidence
+        if (expected.get("staging") or {}).get("critical_outcome"):
+            outcome = verdict.get("outcome_evidence")
+            if (not isinstance(outcome, dict) or outcome.get("status") not in
+                    {"observed", "unverified", "contradicted"}
+                    or not isinstance(outcome.get("observed"), str)
+                    or not isinstance(outcome.get("frame_indices"), list)
+                    or any(not isinstance(index, int) or not 1 <= index <= len(samples)
+                           for index in outcome.get("frame_indices", []))):
+                outcome = {"status": "unverified", "observed": "",
+                           "frame_indices": []}
+            verdict["outcome_evidence"] = outcome
+        else:
+            outcome = None
         if silent_faces:
             mouth = verdict.get("mouth_speech")
             if not isinstance(mouth, dict) or mouth.get("status") not in {"pass", "mismatch", "unverified"}:
@@ -306,6 +330,13 @@ def inspect(media, expected):
               and verdict["staging"]["status"] == "pass"):
             verdict["staging"] = {"status": "unverified", "observed": verdict["staging"]["observed"],
                                   "reason": "A required action beat is not visibly verified."}
+        if outcome:
+            if outcome["status"] == "contradicted":
+                verdict["staging"] = {"status": "mismatch", "observed": outcome["observed"],
+                                      "reason": "The required final outcome is visibly absent."}
+            elif verdict["staging"]["status"] == "pass" and (outcome["status"] != "observed" or not outcome["frame_indices"]):
+                verdict["staging"] = {"status": "unverified", "observed": outcome["observed"],
+                                      "reason": "The required final outcome is not visibly verified."}
         if verdict["staging"]["status"] == "pass" and needs_shape_change_review(expected):
             # The checker twice called a rigid lean a torso elongation in a
             # real audit, including when asked for prompt-blind observations.

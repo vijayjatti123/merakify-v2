@@ -300,6 +300,25 @@ class ComplianceTests(unittest.TestCase):
              patch.object(gate,'_google',return_value=raw):
             result=gate.inspect(io.BytesIO(),{'staging':{'action_beats':['stand','stretch then rebound']}})
         self.assertEqual(result['verdict']['staging']['status'],'unverified')
+
+    def test_finished_artifact_requires_separate_outcome_evidence(self):
+        response = {**verdict()['verdict'], 'frame_observations': [
+            {'frame_index': 1, 'observed': 'person draws', 'later_beat_already_visible': False, 'reason': 'motion'},
+            {'frame_index': 2, 'observed': 'person smiles over blank page', 'later_beat_already_visible': False, 'reason': 'ending'}],
+            'beat_evidence': [], 'outcome_evidence': {
+                'status': 'contradicted', 'observed': 'The final page is blank.', 'frame_indices': [2]}}
+        raw = {'candidates': [{'content': {'parts': [{'text': json.dumps(response)}]}}]}
+        with patch.object(gate, 'frames', return_value=[(0, {'inlineData': {}}), (2, {'inlineData': {}})]), \
+             patch.object(gate, '_google', return_value=raw):
+            result = gate.inspect(io.BytesIO(), {'staging': {'critical_outcome': 'The finished sketch is visible.'}})
+        self.assertEqual(result['verdict']['staging']['status'], 'mismatch')
+
+        response.pop('outcome_evidence')
+        raw['candidates'][0]['content']['parts'][0]['text'] = json.dumps(response)
+        with patch.object(gate, 'frames', return_value=[(0, {'inlineData': {}}), (2, {'inlineData': {}})]), \
+             patch.object(gate, '_google', return_value=raw):
+            result = gate.inspect(io.BytesIO(), {'staging': {'critical_outcome': 'The finished sketch is visible.'}})
+        self.assertEqual(result['verdict']['staging']['status'], 'unverified')
     def test_shape_change_is_saved_for_review_without_paid_retry(self):
         expected = {'staging': {'critical_outcome': 'His torso elongates and then recoils.'}}
         jobs.update_video(self.db, self.job.id, 1, video_compliance_expected=expected)
