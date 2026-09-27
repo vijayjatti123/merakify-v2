@@ -174,6 +174,14 @@ def visual_instruction(result, shot, opening_label, *, speaking=True):
         style = "; ".join(str(style.get(key) or "").strip() for key in
                           ("rendering", "palette", "lighting_motif", "texture_grain") if style.get(key))
     camera = [str(shot.get(key) or "").strip() for key in ("camera_angle", "camera_movement")]
+    final_proof = " ".join(str(value or "") for value in (
+        direction.get("critical_outcome"), shot.get("state_at_shot_end")))
+    # A forward move often turns a two-subject final proof into a close-up of
+    # only one subject. This happened twice in a live bakery test despite a
+    # later "do not crop" sentence. Resolve the conflicting camera order here.
+    if (re.search(r"\b(?:both|together|same frame|alongside|beside)\b", final_proof, re.I)
+            and re.search(r"\b(?:push|dolly forward|zoom|tilt|pan)\b", camera[1], re.I)):
+        camera[1] = "locked-off at the opening shot size; do not push, zoom, tilt or pan"
     if shot.get("lens"):
         camera.append(f"lens {shot['lens']}")
     camera = "; ".join(value for value in camera if value)

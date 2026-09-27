@@ -102,6 +102,17 @@ class DialogueWindowTests(unittest.TestCase):
         self.assertIn('Feet on the cabin floor.', prompt)
         self.assertNotIn('floor..', prompt)
 
+    def test_final_person_and_object_override_conflicting_push(self):
+        shot = {'camera_angle': 'eye-level medium',
+                'camera_movement': 'dolly forward slowly, with smooth motion',
+                'state_at_shot_end': 'Anaya smiles; the bun is on the tray beside her.',
+                'shot_direction': {'critical_outcome':
+                    'Hold both Anaya’s face and the bun framed together.'}}
+        prompt = dialogue_window.visual_instruction({}, shot, 'the accepted preview')
+        self.assertIn('locked-off at the opening shot size', prompt)
+        self.assertNotIn('dolly forward slowly', prompt)
+        self.assertIn('Hold both Anaya', prompt)
+
 
 if __name__ == '__main__':
     unittest.main()
