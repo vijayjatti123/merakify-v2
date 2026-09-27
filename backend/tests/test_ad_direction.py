@@ -318,6 +318,20 @@ class AdDirectionTests(unittest.TestCase):
         self.assertNotIn('already been lifted', prompt)
         self.assertLess(prompt.index('Hand reaches for cup.'), prompt.index('Hand lifts cup.'))
 
+    def test_faceless_product_hero_does_not_add_unscheduled_effect_from_performance(self):
+        from app.services.dialogue_window import visual_instruction
+        result = directed()
+        shot = result['shots'][0]
+        shot['characters_in_shot'] = []
+        shot['shot_direction']['action_beats'] = ['Hold cut loaf and single slice on board.',
+                                                   'Sunlight reveals crust and crumb.']
+        shot['shot_direction']['performance'] = 'Steam wisps rise above the bread.'
+        shot['shot_direction']['forbidden_geometry'] = ['No artificial steam jets.']
+        prompt = visual_instruction(result, shot, 'the accepted preview', speaking=False)
+        self.assertIn('Hold cut loaf and single slice on board.', prompt)
+        self.assertNotIn('Performance: Steam wisps', prompt)
+        self.assertIn('No artificial steam jets.', prompt)
+
     def test_forbidden_rules_are_not_negated_twice_in_video_prompt(self):
         from app.services.dialogue_window import visual_instruction
         result = directed()

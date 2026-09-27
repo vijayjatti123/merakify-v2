@@ -223,7 +223,11 @@ def visual_instruction(result, shot, opening_label, *, speaking=True):
             parts.append(sentence("Action", action))
         if beats:
             parts.append("Ordered visible beats: " + " ".join(f"{i}) {beat}" for i, beat in enumerate(beats, 1)))
-        if direction.get("performance"):
+        # In a faceless product shot the ordered beats already specify every
+        # visible action. A second free-form performance sentence can invent
+        # an optional effect that conflicts with the locked staging (for
+        # example "steam wisps" beside a no-steam product hero).
+        if direction.get("performance") and (shot.get("characters_in_shot") or not beats):
             parts.append(sentence("Performance", direction['performance']))
     parts.extend([
         sentence("Required outcome", direction.get("critical_outcome")),

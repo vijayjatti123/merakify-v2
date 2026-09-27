@@ -177,6 +177,10 @@ follow their approved dramatic arc and locked rendering. More camera motion is n
 Every shot must earn its place: shot_direction.purpose states its viewer-facing story/product beat;
 performance describes observable behavior/expression, or object motion for a faceless shot;
 product_props identifies only supplied relevant objects, their placement/contact and product role.
+For a faceless product shot, action_beats are the sole source of visible motion. Do not
+invent steam, particles, splashes, extra props, hands or any other effect in performance
+unless that same effect is explicitly approved in the source story and scheduled in an
+action_beat. A static hero shot can simply hold; do not add movement to fill its duration.
 Before outputting the sequence, decide which approved shot visibly establishes the problem, which
 shows the product's physical role, which proves its effect, and which resolves the story. A spoken
 claim, logo shot, or static final pose cannot substitute for visual evidence when the story requires
@@ -464,6 +468,9 @@ Review the whole plan once, collecting ALL evidenced problems together:
    purpose label claiming repetition. Preserve reveals, product roles, payoff and complete speech.
    A plausible sequence with an omitted required beat is not approved.
 2. EXECUTION: opening state, opening_characters, action/performance and ending must agree.
+   Cross-check optional performance flourishes against the source, ordered beats and
+   forbidden geometry. Reject invented effects or a performance sentence that reintroduces
+   something the staging rules forbid; name both conflicting fields in one repair request.
    Include every character visibly present initially, exclude later arrivals. Check that the
    actual actions and complete speech are feasible in the allotted time, not a generic seconds cap.
    Independently verify every movement path, physical support/contact, spatial invariant and
