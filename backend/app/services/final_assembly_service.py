@@ -32,7 +32,8 @@ def fingerprint(result, aspect_ratio, quality, color_grade='None'):
         url = urlsplit(shot.get("video_url") or "")
         return [shot.get("shot_number"), shot.get("video_key") or urlunsplit((url.scheme, url.netloc, url.path, "", "")),
                 shot.get("video_sha256"), shot.get("video_task_id"), shot.get("video_status"), shot.get("video_source_changed", False), is_voiceover(shot),
-                shot.get("dialogue_audio_key"), shot.get("dialogue_audio_duration_sec"), shot.get("dialogue_audio_url") if not shot.get("dialogue_audio_key") else None]
+                shot.get("dialogue_audio_key"), shot.get("dialogue_audio_duration_sec"), shot.get("dialogue_audio_url") if not shot.get("dialogue_audio_key") else None,
+                shot.get("video_edit_range")]
     value = [sorted([identity(s) for s in result.get("shots", [])], key=lambda s: s[0]),
              result.get("assembly", {}), result.get("audio_assembly_pending", False), aspect_ratio, quality, color_grade or 'None']
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
@@ -59,6 +60,15 @@ def prepare(job, result, *, audio_offsets=None):
         raise AssemblyError("Duplicate shot numbers; cannot determine the final timeline.")
     if len(shots) > 64:
         raise AssemblyError("This assembly supports at most 64 shots per job.")
+    for shot in shots:
+        edit = shot.get("video_edit_range")
+        if edit is not None:
+            if shot.get("has_dialogue") or shot.get("speech_mode") not in (None, "none"):
+                raise AssemblyError(f"Shot {shot['shot_number']}: speaking or narrated footage must keep its approved audio timing.")
+            if (not isinstance(edit, dict) or set(edit) != {"start_sec", "end_sec"}
+                    or any(type(edit[key]) not in (int, float) or not math.isfinite(edit[key]) for key in edit)
+                    or edit["start_sec"] < 0 or edit["end_sec"] - edit["start_sec"] < 0.5):
+                raise AssemblyError(f"Shot {shot['shot_number']}: select at least 0.5 seconds of usable footage.")
     boundaries = {}
     for item in result.get("assembly", {}).get("transitions", []):
         between = item.get("between")
@@ -88,7 +98,7 @@ def prepare(job, result, *, audio_offsets=None):
         raise AssemblyError(f'Unsupported color grade: {grade!r}.')
     return {"source_hash": fingerprint(result, job.aspect_ratio, job.quality, grade), "color_grade": grade,
             "aspect_ratio": job.aspect_ratio, "quality": job.quality, "transitions": transitions,
-            "shots": [{k: s.get(k) for k in ("shot_number", "video_url", "video_key", "video_sha256", "video_provider", "has_dialogue", "speech_mode", "characters_in_shot", "dialogue_audio_url", "dialogue_audio_key", "dialogue_audio_duration_sec")} for s in shots]}
+            "shots": [{k: s.get(k) for k in ("shot_number", "video_url", "video_key", "video_sha256", "video_provider", "has_dialogue", "speech_mode", "characters_in_shot", "dialogue_audio_url", "dialogue_audio_key", "dialogue_audio_duration_sec", "video_edit_range")} for s in shots]}
 
 
 def ffmpeg():
@@ -169,13 +179,29 @@ def filter_graph(plan, measured):
     short = 480 if plan["quality"] == "480p" else 720
     w, h = map(int, plan["aspect_ratio"].split(":"))
     width, height = (2 * round(short * w / h / 2), short) if w >= h else (short, 2 * round(short * h / w / 2))
-    durations = [math.ceil(max(m["video_duration"], m["audio_duration"]) * FPS - 1e-6) / FPS for m in measured]
+    windows = []
+    for shot, media in zip(plan["shots"], measured):
+        edit = shot.get("video_edit_range")
+        if edit:
+            start = math.floor(edit["start_sec"] * FPS + 1e-6) / FPS
+            end = math.ceil(edit["end_sec"] * FPS - 1e-6) / FPS
+            if end > min(media["video_duration"], media["audio_duration"]) + 0.04:
+                raise AssemblyError(f"Shot {shot['shot_number']}: selected footage extends beyond the saved clip. Choose an earlier end point.")
+        else:
+            start = 0.0
+            end = math.ceil(max(media["video_duration"], media["audio_duration"]) * FPS - 1e-6) / FPS
+        windows.append((start, end))
+    durations = [end - start for start, end in windows]
     parts = []
-    for i, duration in enumerate(durations):
+    for i, (duration, (start, end)) in enumerate(zip(durations, windows)):
         # FFmpeg 7 setpts clears link frame_rate (1/0), even for CFR sources.
         # Restore explicit CFR after all timestamp/padding/trim filters, before xfade.
-        parts.append(f"[{i}:v:0]fps={FPS},scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=0.35,trim=duration={duration:.9f},fps={FPS},settb=AVTB[v{i}]")
-        parts.append(f"[{i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS,apad,atrim=duration={duration:.9f}[a{i}]")
+        if plan["shots"][i].get("video_edit_range"):
+            parts.append(f"[{i}:v:0]fps={FPS},scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,settb=AVTB,trim=start={start:.9f}:end={end:.9f},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=0.35,trim=duration={duration:.9f},fps={FPS},settb=AVTB[v{i}]")
+            parts.append(f"[{i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=start={start:.9f}:end={end:.9f},asetpts=PTS-STARTPTS,apad,atrim=duration={duration:.9f}[a{i}]")
+        else:
+            parts.append(f"[{i}:v:0]fps={FPS},scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=0.35,trim=duration={duration:.9f},fps={FPS},settb=AVTB[v{i}]")
+            parts.append(f"[{i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS,apad,atrim=duration={duration:.9f}[a{i}]")
     v, a, total = 'v0', 'a0', durations[0]
     timeline = [{"shot_number": plan['shots'][0]['shot_number'], "start": 0.0, "duration": durations[0]}]
     boundaries = []
@@ -251,7 +277,8 @@ def render(paths, target, plan, emit=lambda note: None):
             if run.returncode:
                 raise AssemblyError('FFmpeg failed: ' + run.stderr.decode(errors='replace')[-1500:])
             final = probe(target)
-            if any(abs(final[k] - timeline['duration']) > 0.10 for k in ('video_duration', 'audio_duration')):
+            # ffprobe rounds to the final frame; allow float representation of exactly 100ms.
+            if any(abs(final[k] - timeline['duration']) > 0.10 + 1e-6 for k in ('video_duration', 'audio_duration')):
                 raise AssemblyError('Stitched audio/video duration failed the 100ms timeline check.')
             return {'timeline': timeline, 'sources': measured, 'final': final, 'filter_graph': graph,
                     'audio_offsets': offset_evidence, 'local_attempts': attempt + 1}

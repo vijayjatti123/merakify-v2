@@ -181,7 +181,15 @@ class ScriptArchitectRoutingTests(unittest.TestCase):
                     }]
                 }
             if system_prompt == prompts.QA_AGENT:
-                raise AssertionError('A semantic QA call must not block user review')
+                from app.services.story_requirements import requirements
+                story = {'scenes': [{'scene_number': 1, 'heading': 'CAFE',
+                    'description': 'Ravi enters.', 'dialogue_or_vo': '', 'mood': 'quiet'}]}
+                return {'approved': True, 'issues': [],
+                    'shot_checks': [{'shot_number': 1, 'consistent': True,
+                                     'evidence': 'Entry and final position agree.'}],
+                    'requirement_coverage': [{'requirement_id': row['id'],
+                        'shot_numbers': [1], 'covered': True, 'evidence': 'Ravi enters the cafe.'}
+                        for row in requirements(story)]}
             if system_prompt == prompts.SHOT_ASSEMBLER:
                 return {"total_duration_sec": 5, "transitions": []}
             raise AssertionError("unexpected prompt")

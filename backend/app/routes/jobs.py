@@ -72,6 +72,31 @@ class VideoGenerateRequest(BaseModel):
     audio_model: AudioVideoModel | None = None
 
 
+class VideoEditRangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_video_key: str = Field(min_length=1, max_length=1024)
+    start_sec: float | None = None
+    end_sec: float | None = None
+
+
+@router.put("/{job_id}/shots/{shot_number}/edit-range")
+def save_video_edit_range(job_id: str, shot_number: int, payload: VideoEditRangeRequest,
+                          db: Session = Depends(get_db)):
+    start, end = payload.start_sec, payload.end_sec
+    if (start is None) != (end is None):
+        raise HTTPException(422, "Choose both the start and end, or clear the selection.")
+    if start is not None and (not math.isfinite(start) or not math.isfinite(end)
+                              or start < 0 or end - start < 0.5 or end > 120):
+        raise HTTPException(422, "Choose at least half a second within the saved clip.")
+    edit = None if start is None else {"start_sec": round(start, 3), "end_sec": round(end, 3)}
+    try:
+        return job_service.set_video_edit_range(db, job_id, shot_number, payload.expected_video_key, edit)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+
+
 class PreviewReplacementRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_key: str = Field(default="", max_length=1024)
@@ -525,6 +550,8 @@ def revise_job(job_id: str, payload: JobRevise, db: Session = Depends(get_db)):
             # All direction fields are shown together for explicit human review.
             # Invalidate the previous approval stamp, never silently rewrite them.
             merged.pop("direction_source", None)
+            if edit.dialogue_text is not None and edit.dialogue_text != shot.get("dialogue_text"):
+                merged.pop("dialogue_language", None)
             if edit.speech_mode is not None:
                 merged["has_dialogue"] = edit.speech_mode != "none"
         merged_shots.append(merged)
@@ -607,15 +634,21 @@ def approve_job(job_id: str, background_tasks: BackgroundTasks, db: Session = De
     if result.get("generation_approved"):
         return _job_out(job, result)
     from app.services.director_review import review
+    if result.get("qa", {}).get("approved") is False:
+        raise HTTPException(status_code=422, detail="The directed story still needs its saved corrections before approval.")
     technical = review(result.get("shots", []), result.get("continuity", {}).get("characters", []),
                        result.get("planning_constraints", {}).get("minimum_shot_seconds"),
                        {"ad_type": job.ad_type, "ad_brief": json.loads(job.ad_brief_json or "{}")},
-                       shot_numbers=set(result.get("plan_edited_shots", [])) or None)
+                       shot_numbers=set(result.get("plan_edited_shots", [])) or None,
+                       approved_story=result.get("script"))
     if not technical["approved"]:
         raise HTTPException(status_code=422, detail="Correct the plan details before approval: " + "; ".join(
             f"Shot {i['shot_number']}: {i['problem']}" for i in technical["issues"]))
     updated_result = dict(result)
-    updated_result["qa"] = technical
+    # Approval must not erase the semantic story-coverage verdict with a
+    # weaker code-only technical check. Edited plans use their own review.
+    updated_result["qa"] = (result.get("qa") if not result.get("plan_edited_shots")
+                            and result.get("qa", {}).get("semantic_review_performed") else technical)
     updated_result["generation_approved"] = True
     updated_result["preview_preparation_pending"] = True
     updated_result["audio_assembly_pending"] = any(shot.get("has_dialogue") for shot in result.get("shots", []))

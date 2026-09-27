@@ -25,6 +25,18 @@ class ComplianceTests(unittest.TestCase):
         self.assertNotIn('Yamaraj', str(expected['visual_style']))
         self.assertEqual(expected['speech'], {'mode': 'none'})
 
+    def test_spirit_identity_is_an_explicit_staging_check(self):
+        jobs.set_result(self.db, self.job.id, {'continuity': {'characters': [
+            {'name': 'Carpenter', 'image_url': 'https://example.com/carpenter.jpg'}]}})
+        expected = gate.snapshot(self.db, self.job.id, {
+            'characters_in_shot': ['Carpenter'], 'speech_mode': 'none',
+            'description': 'The spirit of the Carpenter rises from his body.'})
+        self.assertIn('same recognizable face, hair and clothing',
+                      expected['staging']['spirit_identity'])
+        self.assertEqual(expected['identity_reference_url'],
+                         'https://example.com/carpenter.jpg')
+        self.assertIn('generic', gate.RULES)
+
     def test_product_inventory_reaches_video_checker_and_corrective_prompt(self):
         expected = gate.snapshot(self.db, self.job.id, {
             'characters_in_shot': [], 'speech_mode': 'none',
@@ -131,6 +143,25 @@ class ComplianceTests(unittest.TestCase):
              patch.object(video, 'provider') as api:
             self.assertTrue(self.check())
         api.assert_not_called()
+
+    def test_visible_speaking_in_silent_shot_is_not_hidden_by_audio_muting(self):
+        check = verdict()
+        check['verdict']['mouth_speech'] = {'status': 'mismatch',
+            'observed': 'Repeated articulated mouth shapes',
+            'reason': 'Character visibly mouths speech throughout the final beat.'}
+        check['verdict']['speech'] = {'status': 'mismatch', 'observed': 'extra words',
+            'reason': 'Unexpected speech in a silent shot.'}
+        check['speech_check'] = {'verdict': {'status': 'mismatch', 'confidence': .95,
+            'transcript': 'extra words', 'reason': 'extra voice', 'issues': []}}
+        jobs.update_video(self.db, self.job.id, 1,
+            video_compliance_expected={'speech': {'mode': 'none'}, 'visible_characters': ['Carpenter']})
+        jobs.video_check_state(self.db, self.job.id, 1, 'first', check=check)
+        with patch('app.services.speech_compliance_service.remove_unwanted_speech',
+                   side_effect=AssertionError('must not mask visible speech')), \
+             patch.object(video, 'provider', return_value={'id': 'second'}) as api:
+            self.assertFalse(self.check())
+        self.assertIn('mouth at rest', api.call_args.args[2]['prompt'])
+        self.assertNotIn('video_audio_cleanup', self.data())
 
     def test_silent_speech_is_removed_from_saved_video_before_paid_retry(self):
         check = verdict()
@@ -244,7 +275,11 @@ class ComplianceTests(unittest.TestCase):
     def test_early_later_beat_forces_staging_mismatch(self):
         response={**verdict()['verdict'], 'frame_observations':[
             {'frame_index':1,'observed':'jumper at door','later_beat_already_visible':False,'reason':'opening'},
-            {'frame_index':2,'observed':'deployed canopy','later_beat_already_visible':True,'reason':'early payoff'}]}
+            {'frame_index':2,'observed':'deployed canopy','later_beat_already_visible':True,'reason':'early payoff'}],
+            'beat_evidence': [
+                {'beat_index':1,'status':'observed','observed':'jumper at door','frame_indices':[1]},
+                {'beat_index':2,'status':'unverified','observed':'freefall unseen','frame_indices':[]},
+                {'beat_index':3,'status':'observed','observed':'open canopy','frame_indices':[2]}]}
         raw={'candidates':[{'content':{'parts':[{'text':json.dumps(response)}]}}]}
         with patch.object(gate,'frames',return_value=[(0,{'inlineData':{}}),(2,{'inlineData':{}})]), \
              patch.object(gate,'_google',return_value=raw) as checker:
@@ -253,6 +288,34 @@ class ComplianceTests(unittest.TestCase):
         self.assertEqual(result['verdict']['staging']['status'],'mismatch')
         self.assertTrue(checker.call_args.kwargs['verification'])
         self.assertEqual(result['model'],gate.settings.gemini_preview_check_model)
+    def test_missing_required_action_beat_cannot_pass_staging(self):
+        response={**verdict()['verdict'], 'frame_observations':[
+            {'frame_index':1,'observed':'person still','later_beat_already_visible':False,'reason':'opening'},
+            {'frame_index':2,'observed':'person still','later_beat_already_visible':False,'reason':'no visible change'}],
+            'beat_evidence': [
+                {'beat_index':1,'status':'observed','observed':'person standing','frame_indices':[1]},
+                {'beat_index':2,'status':'unverified','observed':'stretch and rebound not visible','frame_indices':[]}]}
+        raw={'candidates':[{'content':{'parts':[{'text':json.dumps(response)}]}}]}
+        with patch.object(gate,'frames',return_value=[(0,{'inlineData':{}}),(2,{'inlineData':{}})]), \
+             patch.object(gate,'_google',return_value=raw):
+            result=gate.inspect(io.BytesIO(),{'staging':{'action_beats':['stand','stretch then rebound']}})
+        self.assertEqual(result['verdict']['staging']['status'],'unverified')
+    def test_shape_change_is_saved_for_review_without_paid_retry(self):
+        expected = {'staging': {'critical_outcome': 'His torso elongates and then recoils.'}}
+        jobs.update_video(self.db, self.job.id, 1, video_compliance_expected=expected)
+        response = {**verdict()['verdict'], 'frame_observations': [
+            {'frame_index': 1, 'observed': 'person upright', 'later_beat_already_visible': False, 'reason': 'opening'},
+            {'frame_index': 2, 'observed': 'person leans diagonally', 'later_beat_already_visible': False, 'reason': 'motion'}],
+            'beat_evidence': []}
+        raw = {'candidates': [{'content': {'parts': [{'text': json.dumps(response)}]}}]}
+        with patch.object(gate, 'frames', return_value=[(0, {'inlineData': {}}), (2, {'inlineData': {}})]), \
+             patch.object(gate, '_google', return_value=raw), patch.object(video, 'provider') as provider:
+            checked = gate.inspect(io.BytesIO(), expected)
+            self.assertEqual(checked['verdict']['staging']['status'], 'unverified')
+            self.assertTrue(gate.accept(self.db, self.job.id, self.shot, io.BytesIO(b'video'),
+                                        check_cache={'first': checked}))
+            provider.assert_not_called()
+        self.assertIn('Check the visible shape change', ' '.join(self.data()['video_warnings']))
     def test_snapshot_uses_real_job_field_not_result_prose(self):
         value=gate.snapshot(self.db,self.job.id,{'camera_angle':'eye-level close-up'})
         self.assertEqual(value['visual_style'],'Cartoon / Anime')

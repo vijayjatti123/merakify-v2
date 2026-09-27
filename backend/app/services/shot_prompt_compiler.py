@@ -350,7 +350,7 @@ def compiler_input(result, *, brief="", emit, camera_contract=False):
     for shot in shots:
         if shot.get('direction_version') == 1:
             from app.services.ad_direction import problems
-            errors = problems(shot)
+            errors = problems(shot, result.get('script'))
             if errors:
                 raise ValueError(f"Shot {shot['shot_number']}: direction needs review before video: {'; '.join(errors)}")
         item = {k: shot.get(k) for k in ("shot_number", "scene_number", "camera_angle", "lens", "lighting",

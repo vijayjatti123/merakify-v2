@@ -90,6 +90,18 @@ class H3Tests(unittest.TestCase):
         self.assertNotIn("video_urls", t["request"])
         self.assertIn("Warmer lighting", t["request"]["prompt"])
 
+    def test_silent_vocal_direction_cannot_reach_provider(self):
+        shot = {**self.shot, "direction_version": 1, "has_dialogue": False,
+                "speech_mode": "none", "description": "The carpenter wakes.",
+                "shot_direction": {"action_beats": ["The carpenter gasps.", "He looks at the bucket."]}}
+        with self.assertRaisesRegex(ValueError, "vocal sounds"):
+            video.translate(self.result, shot)
+
+    def test_direction_change_invalidates_saved_video(self):
+        before = video.source_fingerprint(self.shot)
+        revised = {**self.shot, "shot_direction": {"action_beats": ["The spirit resists again."]}}
+        self.assertNotEqual(before, video.source_fingerprint(revised))
+
     def test_silent_shot_keeps_directed_action_order_without_inventing_speech(self):
         shot = {**self.shot, "has_dialogue": False, "speech_mode": "none",
                 "description": "Kabir reaches for the bottle.",

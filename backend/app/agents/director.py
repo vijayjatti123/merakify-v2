@@ -120,14 +120,15 @@ def refresh_edited_shot_direction(shots, shot_number, continuity, approved_story
                 raise ValueError('Direction patch omitted required fields')
             updated = apply_patch_response(shots,
                 {'patches': [{'shot_number': shot_number, 'changes': changes}]},
-                {shot_number: allowed})
+                {shot_number: allowed}, approved_story)
             candidate = next(shot for shot in updated if shot['shot_number'] == shot_number)
             candidate['direction_version'] = 1
-            problems = ad_direction.problems(candidate)
+            problems = ad_direction.problems(candidate, approved_story)
             if problems:
                 raise ValueError('; '.join(problems))
             from app.services.director_review import review
-            verdict = review([candidate], (continuity or {}).get('characters', []), MIN_SHOT_SECONDS)
+            verdict = review([candidate], (continuity or {}).get('characters', []), MIN_SHOT_SECONDS,
+                             approved_story=approved_story)
             if not verdict['approved']:
                 raise ValueError('; '.join(issue['problem'] for issue in verdict['issues']))
             return updated
@@ -460,7 +461,7 @@ def validate_and_correct(
         for shot in current_shots:
             shot["review_mode"] = "user"
         if verdict["approved"]:
-            ad_direction.accept_shots(current_shots, review_shot_numbers)
+            ad_direction.accept_shots(current_shots, review_shot_numbers, approved_story)
         return {"shots": current_shots, "qa": verdict,
                 "assembly": timeline(current_shots, provisional=any(s.get("has_dialogue") for s in current_shots))}
 
@@ -512,7 +513,7 @@ def validate_and_correct(
     # Contract errors join the existing bounded QA/FIX loop, not another call.
     def code_review(reviewed_shots):
         return ad_direction.check_plan(check_mechanics(check_camera_plan({'approved': True, 'issues': []}, reviewed_shots),
-            reviewed_shots, characters, minimum_shot_seconds), reviewed_shots)
+            reviewed_shots, characters, minimum_shot_seconds), reviewed_shots, approved_story)
 
     def mechanical_review(verdict, reviewed_shots):
         if ad_direction_plan:
@@ -556,8 +557,9 @@ def validate_and_correct(
             }
             patch_response = call_agent(prompts.CINEMATOGRAPHY_PATCH,
                 json.dumps(compact, ensure_ascii=False),
-                max_tokens=min(4096, 1536 + 256 * len(permissions)))
-            current_shots = apply_patch_response(current_shots, patch_response, permissions)
+                max_tokens=min(6144, 3072 + 512 * len(permissions)),
+                truncation_retry_tokens=min(8192, 4096 + 768 * len(permissions)))
+            current_shots = apply_patch_response(current_shots, patch_response, permissions, approved_story)
         else:
             # Rare cross-field failures (for example an invalid speaker/cast
             # relationship) need the existing complete-plan correction, still
@@ -591,6 +593,7 @@ def validate_and_correct(
         review_content(current_shots),
         **qa_options(current_shots),
     )
+    qa['semantic_review_performed'] = True
 
     qa = mechanical_review(qa, current_shots)
     def screen_review_issues(verdict):
@@ -632,7 +635,8 @@ def validate_and_correct(
                 max_tokens=min(8192, 2048 + 256 * len(permissions) + 2048 * len(insert_anchors)),
             )
             if insert_anchors:
-                repaired, number_map = apply_insertion_response(current_shots, patch_response, permissions, insert_anchors)
+                repaired, number_map = apply_insertion_response(current_shots, patch_response, permissions,
+                                                               insert_anchors, approved_story)
                 # Preserve Module K's identity correspondence when code assigns
                 # display ordinals after insertion. Existing speech is unchanged.
                 current_shots = [{**s, 'shot_number': number_map[s['shot_number']]} for s in current_shots]
@@ -641,7 +645,7 @@ def validate_and_correct(
                 notify('cinematography', f'Inserted {len(insert_anchors)} silent story beat(s); existing shot content retained.')
                 cine = {'shots': repaired}
             else:
-                cine = {'shots': apply_patch_response(current_shots, patch_response, permissions)}
+                cine = {'shots': apply_patch_response(current_shots, patch_response, permissions, approved_story)}
         else:
             # Directed records carry opening/performance/end facts. Reuse the
             # existing batch-size allowance instead of the old flat 4096 cap.
@@ -676,6 +680,7 @@ def validate_and_correct(
             review_content(current_shots),
             **qa_options(current_shots),
         )
+        qa['semantic_review_performed'] = True
         qa = mechanical_review(qa, current_shots)
         remaining, _, rejected_again, blocked_again = screen_review_issues(qa)
         rejected.extend(rejected_again)
@@ -704,7 +709,7 @@ def validate_and_correct(
     if any(s.get('direction_version') == 1 for s in current_shots):
         if not qa.get('approved'):
             raise ValueError("The directed shot plan still has unresolved checks. Your story is saved; retry planning.")
-        ad_direction.accept_shots(current_shots)
+        ad_direction.accept_shots(current_shots, approved_story=approved_story)
 
     # Dialogue timing is provisional until approval triggers real decoded audio.
     # Module K's QA/FIX logic above is unchanged; only assembly is deferred.
@@ -714,11 +719,14 @@ def validate_and_correct(
             "total_duration_sec": sum(float(s.get("duration_sec", 0)) for s in current_shots),
             "transitions": [], "provisional": True,
         }}
-    assembled = assemble_shots(current_shots, characters, target_duration_sec, narrator_voice_ref=narrator_voice_ref, emit=emit)
+    assembled = assemble_shots(current_shots, characters, target_duration_sec,
+                               narrator_voice_ref=narrator_voice_ref, emit=emit,
+                               approved_story=approved_story)
     return {**assembled, "qa": qa}
 
 
-def assemble_shots(shots, characters, target_duration_sec, *, narrator_voice_ref=None, emit=None):
+def assemble_shots(shots, characters, target_duration_sec, *, narrator_voice_ref=None, emit=None,
+                   approved_story=None):
     """Existing assembly/duration sequence; dialogue jobs call this only after audio."""
     if shots and all(s.get("review_mode") == "user" for s in shots):
         from app.services.director_review import timeline
@@ -791,7 +799,7 @@ def assemble_shots(shots, characters, target_duration_sec, *, narrator_voice_ref
     else:
         notify("assembly", f"{actual}s is within range of the {target_duration_sec}s target — no trim needed.")
 
-    ad_direction.accept_shots(current_shots)
+    ad_direction.accept_shots(current_shots, approved_story=approved_story)
     return {"shots": current_shots, "assembly": assembly}
 
 
@@ -828,8 +836,12 @@ def _prepare_media_parallel(db, job_id, result, *, brief, emit):
                 # A completed early-preview branch may already have accepted
                 # most shots while speech was rendering. Retry only missing or
                 # explicitly edited images; never reconsider paid accepted work.
-                preview_targets = edited or {shot["shot_number"] for shot in snapshot["shots"]
-                                              if not shot.get("still_frame_url")}
+                # A newly edited shot loses its old preview at edit time. Once
+                # its replacement has been saved, later audio/Compiler work
+                # must not spend on it again merely because the edit marker
+                # still identifies which prompt to recompile.
+                preview_targets = {shot["shot_number"] for shot in snapshot["shots"]
+                                   if not shot.get("still_frame_url")}
                 snapshot["shots"] = generate_still_frames(snapshot, job_id=job_id, emit=notify, shot_numbers=preview_targets,
                     on_progress=lambda current: messages.put(("preview_progress", copy.deepcopy(current))))
                 messages.put(("preview_progress", snapshot))
@@ -932,7 +944,8 @@ def finalize_audio_assembly(db, job_id):
             emit("assembly", "Unchanged accepted transitions and measured duration restored.")
         else:
             assembled = assemble_shots(result["shots"], continuity.get("characters", []), result["format"]["duration_target_sec"],
-                                       narrator_voice_ref=continuity.get("narrator_voice_ref"), emit=emit)
+                                       narrator_voice_ref=continuity.get("narrator_voice_ref"), emit=emit,
+                                       approved_story=result.get("script"))
         result.update(assembled)
         result["assembly"]["provisional"] = False
     except Exception as error:
@@ -1115,7 +1128,12 @@ def run_pipeline(db: Session, job_id: str) -> None:
             final_scene = script['scenes'][-1]
             lock_final_line_in_shots(cine['shots'], final_line,
                 final_scene['scene_number'], final_scene.get('dialogue_or_vo'))
+            from app.agents.dialogue_integrity import contains_exact_line, spoken_language_for_locked_line
+            for shot in cine['shots']:
+                if shot.get('scene_number') == final_scene['scene_number'] and contains_exact_line(shot.get('dialogue_text'), final_line):
+                    shot['dialogue_language'] = spoken_language_for_locked_line(final_line, language)
         directed_ad = ad_direction.validate_ad(cine.get('ad_direction'))
+        ad_direction.normalize_silent_startle(cine['shots'], script)
         for shot in cine['shots']:
             shot['direction_version'] = 1
         from app.services.dialogue_duration import preflight_dialogue_durations
@@ -1164,7 +1182,7 @@ def run_pipeline(db: Session, job_id: str) -> None:
             minimum_shot_seconds=minimum_shot_seconds,
             ad_direction_plan=directed_ad,
             approved_story=script,
-            semantic_review=False,
+            semantic_review=True,
         )
         cine["shots"] = _attach_voice_refs(
             validated["shots"], continuity["characters"], continuity.get("narrator_voice_ref")

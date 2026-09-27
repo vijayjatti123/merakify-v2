@@ -9,15 +9,20 @@ def identity(url):
 
 
 def shot_text(shot):
-    # Never match entities against global style prose or the compiled appendix.
+    # Never match entities against global style prose, the compiled appendix,
+    # or forbidden/absent-only facts. Merely naming a prop to forbid it must
+    # not attach its image and invite the video model to put it in the shot.
     fields = ("description", "state_at_shot_start", "state_at_shot_end", "composition_note")
     direction = shot.get("shot_direction") or {}
     directed = []
     for key in ("product_props", "blocking", "critical_outcome", "support_and_contact"):
         directed.append(str(direction.get(key) or ""))
-    for key in ("action_beats", "entry_exit_paths", "spatial_invariants", "forbidden_geometry"):
+    for key in ("action_beats", "entry_exit_paths", "spatial_invariants"):
         directed.extend(str(value) for value in direction.get(key) or [])
-    return " ".join([*(str(shot.get(k) or "") for k in fields), *directed])
+    text = " ".join([*(str(shot.get(k) or "") for k in fields), *directed])
+    return " ".join(sentence for sentence in re.split(r"(?<=[.!?])\s+", text)
+                    if not re.search(r"\b(?:absent|not visible|must not|do not|no product featured)\b",
+                                     sentence, re.IGNORECASE))
 
 
 def uses_product(shot, product):

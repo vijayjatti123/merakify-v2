@@ -117,6 +117,17 @@ class ReviewApiTests(unittest.TestCase):
         with self.sessions() as db: job_service.set_result(db,self.job_id,self.plan)
     def tearDown(self): test_module_f.ModuleFTests.tearDown(self)
 
+    def test_approval_keeps_semantic_coverage_verdict(self):
+        self.plan['qa'] = {**self.plan['qa'], 'semantic_review_performed': True,
+                           'source_coverage': [{'requirement': 'visible bond', 'covered': True}]}
+        with self.sessions() as db:
+            job_service.set_result(db, self.job_id, self.plan)
+            with patch.object(job_service, 'queue_pipeline_task'):
+                approved = approve_job(self.job_id, BackgroundTasks(), db)
+            self.assertTrue(approved.result['qa']['semantic_review_performed'])
+            self.assertEqual(approved.result['qa']['source_coverage'],
+                             self.plan['qa']['source_coverage'])
+
     def test_execution_edit_persists_in_plan_without_provider_call(self):
         direction={**self.plan['shots'][0]['shot_direction'], 'blocking':'Hand enters screen right.',
             'action_beats':['Hand grips handle.','Cup lifts and holds.'], 'critical_outcome':'Cup clears table.'}

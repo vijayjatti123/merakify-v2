@@ -5,6 +5,7 @@ import copy
 import uuid
 import io
 import json
+import re
 import time
 import wave
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from app.services import job_service, storage_service
 
 
 SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech"
+SARVAM_TRANSLITERATE_URL = "https://api.sarvam.ai/transliterate"
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 TTS_TIMEOUT_SECONDS = 35.0
 
@@ -175,6 +177,65 @@ def _exception_detail(error: Exception) -> str:
     return f"{error_type}: {message}" if message else error_type
 
 
+async def _tts_script(client: httpx.AsyncClient, text: str, language: str) -> str:
+    """Turn Romanized Indic speech into native script without changing the approved line.
+
+    This copy goes only to TTS. The original dialogue remains authoritative for
+    the storyboard, video prompt and speech comparison.
+    """
+    from app.services.voice_timing import native_script_guard
+    try:
+        native_script_guard(text, language)
+        return text
+    except VoiceGenerationError:
+        if _language_code(language) == 'en-IN' or len(text) > 2500 or not text.strip():
+            raise
+    if not settings.sarvam_api_key.strip():
+        raise VoiceGenerationError('SARVAM_API_KEY is not configured for Indic transliteration')
+    words = re.findall(r'\S+\s*', text)
+    chunks, chunk = [], ''
+    for word in words:
+        if len(chunk) + len(word) > 1000 and chunk:
+            chunks.append(chunk)
+            chunk = ''
+        if len(word) > 1000:
+            raise VoiceGenerationError('A dialogue word exceeds Sarvam transliteration limit')
+        chunk += word
+    if chunk:
+        chunks.append(chunk)
+    converted = []
+    for piece in chunks:
+        response = await client.post(SARVAM_TRANSLITERATE_URL,
+            headers={'api-subscription-key': settings.sarvam_api_key},
+            json={'input': piece, 'source_language_code': 'en-IN',
+                  'target_language_code': _language_code(language)})
+        if not response.is_success:
+            raise _provider_error('Sarvam transliteration', response)
+        output = response.json().get('transliterated_text')
+        if not isinstance(output, str) or not output.strip():
+            raise VoiceGenerationError('Sarvam transliteration returned no text')
+        converted.append(output)
+    spoken = ' '.join(part.strip() for part in converted)
+    native_script_guard(spoken, language)
+    # Phonetic transliteration can silently change a word (for example
+    # "atoot" -> "अतुल"). One cheap, bounded text review corrects this TTS-only
+    # copy before an expensive voice/video render. The approved line is never
+    # rewritten. Failure stops audio rather than speaking the wrong claim.
+    from app.agents import prompts
+    from app.agents.llm_client import call_agent
+    review = await asyncio.to_thread(call_agent, prompts.INDIC_TTS_SCRIPT_REVIEW,
+        json.dumps({'language': language, 'approved_romanized_line': text,
+                    'draft_native_script': spoken}, ensure_ascii=False),
+        max_tokens=1024)
+    corrected = review.get('native_text') if isinstance(review, dict) else None
+    if not isinstance(corrected, str) or not corrected.strip():
+        raise VoiceGenerationError('Indic TTS script review returned no native-script line')
+    native_script_guard(corrected, language)
+    if len(re.findall(r'\S+', corrected)) != len(re.findall(r'\S+', text)):
+        raise VoiceGenerationError('Indic TTS script review changed the number of spoken words')
+    return corrected
+
+
 async def _sarvam_tts(
     client: httpx.AsyncClient,
     text: str,
@@ -304,6 +365,10 @@ async def _generate_dialogue_shot(
         )
         from app.services.voice_timing import mood_pace
         text = shot.get("dialogue_text") or ""
+        tts_text = await _tts_script(client, text, language)
+        if tts_text != text:
+            job_service.append_event(db, job_id, 'voice_generation',
+                f'Shot {shot_number}: Romanized {language} converted to native script for TTS only; approved dialogue unchanged.')
         target = float(shot["duration_sec"])
         if target <= 0:
             raise VoiceGenerationError("Dialogue shot duration must be positive")
@@ -313,7 +378,7 @@ async def _generate_dialogue_shot(
         pace = mood_pace(mood)
         generated = await synthesize_dialogue(
             client,
-            text=text,
+            text=tts_text,
             voice_id=voice_id,
             language=language,
             pace=pace,
@@ -326,7 +391,7 @@ async def _generate_dialogue_shot(
             job_service.append_event(db, job_id, "voice_generation", f"Shot {shot_number}: decoded {measured:.3f}s vs {target:.3f}s; one bounded pace retry {pace:.3f} -> {corrected_pace:.3f}.")
             # Exactly one retry; a retry failure retains the successful first audio.
             try:
-                corrected = await _sarvam_tts(client, text, voice_id, language, pace=corrected_pace)
+                corrected = await _sarvam_tts(client, tts_text, voice_id, language, pace=corrected_pace)
                 corrected_duration = decoded_audio_duration(corrected.data)
                 attempts.append({"pace":corrected_pace,"duration_sec":corrected_duration,"provider":corrected.provider})
                 generated, measured, pace = corrected, corrected_duration, corrected_pace
@@ -353,6 +418,7 @@ async def _generate_dialogue_shot(
             "dialogue_audio_url": uploaded["url"],
             "dialogue_audio_key": object_key,
             "dialogue_audio_provider": generated.provider,
+            "dialogue_tts_text": tts_text,
             "dialogue_voice_id": voice_id,
             "duration_sec": final_duration,
             "dialogue_audio_duration_sec": measured,
@@ -516,7 +582,7 @@ async def generate_job_dialogue_audio(
     async with httpx.AsyncClient(timeout=timeout) as client:
         await asyncio.gather(
             *(
-                _generate_dialogue_shot(db, job_id, shot, job.language or "English", client, moods.get(shot.get("scene_number"), ""))
+                _generate_dialogue_shot(db, job_id, shot, shot.get("dialogue_language") or job.language or "English", client, moods.get(shot.get("scene_number"), ""))
                 for shot in dialogue_shots
             )
         )

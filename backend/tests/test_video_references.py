@@ -65,6 +65,14 @@ class ReferenceTests(unittest.TestCase):
         with patch('app.services.storage_service.asset_url',return_value='https://example.com/p.png'):
             built=self.build()
         self.assertTrue(any(role['kind']=='product' for entry in built['manifest'] for role in entry['roles']))
+    def test_forbidden_or_absent_prop_does_not_become_video_reference(self):
+        self.shot['description'] = 'Meera wakes on the floor.'
+        self.shot['state_at_shot_start'] = 'Meera is supine. Golden lasso is absent.'
+        self.shot['shot_direction'] = {'forbidden_geometry': ['Golden lasso must not enter the frame.']}
+        self.result['entity_references'] = {'props:golden lasso': {
+            'url': 'https://example.com/lasso.jpg', 'shot_number': 0}}
+        built = self.build(tag_style='h3')
+        self.assertNotIn('https://example.com/lasso.jpg', built['images'])
     def test_unbound_tags_and_length_rejected(self):
         r=self.build()
         for prompt in ('Use <IMAGE_REF_8>', 'Use @Image1', 'x'*20001):
@@ -120,7 +128,11 @@ class HydrationTests(unittest.TestCase):
             mismatch={'verdict':{'style':{'status':'pass','observed':'photo','reason':'match'},'scale':{'status':'mismatch','observed':'wide','reason':'medium required'}}}
             with patch.object(gate,'inspect',return_value=mismatch),patch.object(video,'provider',return_value={'id':'two'}) as submit:
                 self.assertFalse(gate.accept(db,job.id,{'shot_number':1,'video_task_id':'one'},io.BytesIO()))
-                self.assertEqual(submit.call_args.args,sent)
+                retry = submit.call_args.args
+                self.assertEqual(retry[:2], sent[:2])
+                self.assertEqual(retry[2]['image_urls'], sent[2]['image_urls'])
+                self.assertTrue(retry[2]['prompt'].startswith(sent[2]['prompt']))
+                self.assertIn('Automatic corrective retry', retry[2]['prompt'])
         engine.dispose()
 
 if __name__=='__main__':unittest.main()

@@ -31,6 +31,15 @@ export async function getJob(jobId) {
   return res.json();
 }
 
+export async function getShotVideoRequest(jobId, shotNumber) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shotNumber}/video-request`, { cache: "no-store" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "Video instructions are not ready yet.");
+  }
+  return res.json();
+}
+
 export async function generateShotVideo(jobId, shotNumber) {
   const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shotNumber}/video`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
   if (!res.ok) {
@@ -267,6 +276,17 @@ export async function assembleFinalVideo(jobId) {
   const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/assemble`, { method: "POST" });
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || "Failed to assemble final video");
+  return data;
+}
+
+export async function saveVideoEditRange(jobId, shot, range) {
+  const res = await fetch(`${BASE_URL}/api/jobs/${jobId}/shots/${shot.shot_number}/edit-range`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_video_key: shot.video_key,
+      start_sec: range?.start_sec ?? null, end_sec: range?.end_sec ?? null }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "Could not save the selected footage.");
   return data;
 }
 

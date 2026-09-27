@@ -149,6 +149,22 @@ def prompt_instruction(shot, duration=None, reference_label="Audio 1", *, exact_
     )
 
 
+def spirit_owner(shot):
+    """Return the named person whose visible spirit is explicitly in this shot."""
+    direction = shot.get("shot_direction") or {}
+    context = " ".join(str(value or "") for value in (
+        shot.get("description"), shot.get("state_at_shot_start"),
+        shot.get("state_at_shot_end"), *(direction.get("action_beats") or [])))
+    if not re.search(r"\b(?:spirit|ghost|soul)\b", context, re.I):
+        return None
+    for name in shot.get("characters_in_shot") or []:
+        if (re.search(rf"\b{re.escape(name)}(?:[’']s)?\s+(?:spirit|ghost|soul)\b", context, re.I)
+                or re.search(rf"\b(?:spirit|ghost|soul)\b.{{0,85}}\b(?:of|from|above|into)\s+"
+                             rf"(?:the\s+)?(?:prone\s+|physical\s+)?{re.escape(name)}\b", context, re.I)):
+            return name
+    return None
+
+
 def visual_instruction(result, shot, opening_label, *, speaking=True):
     """Compact shot direction from approved physical facts and ordered beats."""
     direction = shot.get("shot_direction") or {}
@@ -174,6 +190,16 @@ def visual_instruction(result, shot, opening_label, *, speaking=True):
         sentence("Physical support/contact", direction.get("support_and_contact")),
         sentence("Product/props", direction.get("product_props")),
     ]
+    # A model can interpret an unnamed spirit as a new generic figure even
+    # with the owner's portrait attached. State the identity relationship in
+    # the actual provider prompt whenever the approved action explicitly
+    # describes a named person's spirit leaving/returning to their body.
+    if name := spirit_owner(shot):
+        parts.append(f"Spirit identity: the spirit of {name} is a translucent visual double of "
+                     f"{name}, with the same face, hair and clothing as the approved {name} "
+                     "identity reference. Never render a generic faceless or bald mannequin, dark "
+                     "figure, or different clothing. The separate physical body remains in its "
+                     "approved position until reunion.")
     paths = direction.get("entry_exit_paths") or []
     if paths:
         parts.append(sentence("Entry/exit path", " ".join(paths)))
@@ -198,12 +224,24 @@ def visual_instruction(result, shot, opening_label, *, speaking=True):
     invariants = direction.get("spatial_invariants") or []
     forbidden = direction.get("forbidden_geometry") or []
     if not shot.get("characters_in_shot"):
-        forbidden = [rule for rule in forbidden if not re.search(r"\b(?:human|people|person|characters?|hands?)\b", rule, re.I)]
+        no_people = bool(re.search(r"\bno\s+(?:human(?:\s+figures?)?|people|persons?|characters?)\b",
+                                   str(shot.get("state_at_shot_start") or "") + " "
+                                   + str(shot.get("state_at_shot_end") or ""), re.I))
+        if no_people:
+            parts.append("Only the approved non-human subjects and existing set objects remain "
+                         "visible throughout. The background stays unoccupied. No person, "
+                         "silhouette, reflection, hand, new prop, symbolic object or decoration "
+                         "enters the frame at any time.")
+        else:
+            forbidden = [rule for rule in forbidden if not re.search(r"\b(?:human|people|person|characters?|hands?)\b", rule, re.I)]
         parts.append("Every frame keeps the approved opening's subjects and setting.")
     if invariants:
         parts.append("Keep throughout: " + " ".join(invariants))
     if forbidden:
-        parts.append("Never show: " + " ".join(forbidden))
+        # Director rules often already say "must not" or "do not". Prefixing
+        # those sentences with "Never show" reverses their meaning for the
+        # model ("Never show: do not move the bucket").
+        parts.append("Hard staging rules: " + " ".join(forbidden))
     parts.append("The PERFORMANCE TIMELINE below is the only authority for action order and speech; do not infer or add dialogue from any other visual instruction."
-                 if speaking else "Follow the ordered visible beats in one continuous shot; no dialogue, muttering, extra action or scene cuts.")
+                 if speaking else "Follow the ordered visible beats in one continuous shot; no dialogue, muttering, speech-like lip articulation, extra action or scene cuts.")
     return "\n".join(part for part in parts if part)

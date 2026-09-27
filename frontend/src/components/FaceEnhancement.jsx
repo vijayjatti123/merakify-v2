@@ -1,8 +1,8 @@
 import { Button, Alert } from "@mui/material";
 import ActionProgress from "./ActionProgress";
 import { friendlyMessage } from "../utils/presentation";
-import { useEffect, useState } from "react";
-import { enhanceShotFace } from "../api/client";
+import { useEffect, useRef, useState } from "react";
+import { enhanceShotFace, saveVideoEditRange } from "../api/client";
 
 export default function FaceEnhancement({ jobId, shot, onRefresh }) {
   const [confirm, setConfirm] = useState(false);
@@ -37,9 +37,46 @@ export default function FaceEnhancement({ jobId, shot, onRefresh }) {
 
 
 // Signed URL refreshes during enhancement must not restart the current playback.
-export function ShotVideo({ shot }) {
+export function ShotVideo({ shot, jobId, onRefresh }) {
   const [source, setSource] = useState(shot.video_url);
+  const [duration, setDuration] = useState(0);
+  const [start, setStart] = useState(shot.video_edit_range?.start_sec ?? 0);
+  const [end, setEnd] = useState(shot.video_edit_range?.end_sec ?? 0);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const player = useRef(null);
   const identity = shot.video_key || shot.video_url;
   useEffect(() => { setSource(shot.video_url); }, [identity]);
-  return <video controls preload="metadata" src={source} onError={() => setSource(shot.video_url)} className="my-3 w-full rounded-md" aria-label={`Generated video for shot ${shot.shot_number}`} />;
+  useEffect(() => {
+    setStart(shot.video_edit_range?.start_sec ?? 0);
+    setEnd(shot.video_edit_range?.end_sec ?? duration);
+  }, [identity, shot.video_edit_range?.start_sec, shot.video_edit_range?.end_sec, duration]);
+  const canSelect = jobId && shot.video_key && shot.video_status === "done" && !shot.video_source_changed &&
+    !shot.has_dialogue && [undefined, null, "none"].includes(shot.speech_mode);
+  async function save(range) {
+    setSaving(true); setError("");
+    try { await saveVideoEditRange(jobId, shot, range); await onRefresh(); }
+    catch (failure) { setError(failure.message); }
+    finally { setSaving(false); }
+  }
+  const fmt = (value) => `${Math.max(0, value).toFixed(1)}s`;
+  return <div>
+    <video ref={player} controls preload="metadata" src={source} onError={() => setSource(shot.video_url)}
+      onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+      className="my-3 w-full rounded-md" aria-label={`Generated video for shot ${shot.shot_number}`} />
+    {canSelect && Number.isFinite(duration) && duration >= 0.5 && <details className="text-sm my-2" data-testid={`footage-selection-${shot.shot_number}`}>
+      <summary className="cursor-pointer" style={{ color: "var(--mui-palette-primary-main)" }}>Keep the best part of this clip (optional)</summary>
+      <p className="my-2">Play the video and pause at the moments you want to keep. The original clip stays saved.</p>
+      <div className="flex flex-wrap items-center gap-2 my-2">
+        <Button size="small" variant="outlined" onClick={() => setStart(Math.max(0, Math.min(player.current?.currentTime ?? 0, end - 0.5)))}>Start here</Button>
+        <span>From {fmt(start)}</span>
+        <Button size="small" variant="outlined" onClick={() => setEnd(Math.max(player.current?.currentTime ?? duration, start + 0.5))}>End here</Button>
+        <span>To {fmt(end)}</span>
+      </div>
+      <Button size="small" variant="contained" disabled={saving || start < 0 || end > duration + 0.05 || end - start < 0.5}
+        onClick={() => save({ start_sec: start, end_sec: end })}>{saving ? "Saving…" : "Use this part in final video"}</Button>
+      {shot.video_edit_range && <Button size="small" disabled={saving} onClick={() => save(null)}>Use whole clip</Button>}
+      {error && <Alert severity="error" sx={{ mt: 1 }}>{friendlyMessage(error, "Could not save the selected footage.")}</Alert>}
+    </details>}
+  </div>;
 }

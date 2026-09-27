@@ -33,7 +33,14 @@ def identity(url):
 
 
 def source_fingerprint(shot):
-    data = [shot.get(k) for k in ("compiled_prompt", "still_frame_key", "duration_sec", "dialogue_text", "dialogue_audio_key", "has_dialogue", "speech_mode")]
+    # All fields projected into the provider request must invalidate an older
+    # render. The compiled still prompt alone is not the H3 video prompt.
+    data = [shot.get(k) for k in (
+        "compiled_prompt", "still_frame_key", "duration_sec", "dialogue_text",
+        "dialogue_audio_key", "has_dialogue", "speech_mode", "speaker_label", "dialogue_language",
+        "shot_direction", "state_at_shot_start", "state_at_shot_end",
+        "camera_angle", "camera_movement", "lens", "lighting",
+        "characters_in_shot")]
     return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -48,6 +55,10 @@ def fresh_url(url):
 
 
 def translate(result, shot, *, audio_model=None):
+    from app.services.ad_direction import silent_vocal_directions
+    if shot.get("direction_version") == 1 and (vocal := silent_vocal_directions(shot, result.get("script"))):
+        raise ValueError("This silent shot still directs vocal sounds (" + ", ".join(vocal)
+                         + "). Refresh only this shot's direction before generating video.")
     translated = _translate(result, shot, audio_model=audio_model)
     if shot.get("approved_product_references"):
         prompt = translated["request"]["prompt"]

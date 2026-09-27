@@ -118,3 +118,22 @@ class ParallelPreparationTests(unittest.TestCase):
             director._prepare_media_parallel(Mock(), "audit", result, brief="test", emit=Mock())
         self.assertEqual(result["shots"][0]["still_frame_url"], "keep-image")
         self.assertEqual(result["shots"][1]["still_frame_url"], "new-image")
+
+    def test_edited_marker_recompiles_without_regenerating_saved_replacement(self):
+        result = {"plan_edited_shots": [1], "shots": [
+            {"shot_number": 1, "description": "new pose", "still_frame_url": "replacement-image",
+             "still_frame_key": "replacement-key", "compiled_prompt": "old"}]}
+        def previews(snapshot, *, shot_numbers, **kwargs):
+            self.assertEqual(shot_numbers, set())
+            self.assertEqual(snapshot["shots"][0]["still_frame_url"], "replacement-image")
+            return snapshot["shots"]
+        def compiler(snapshot, **kwargs):
+            self.assertEqual([s["shot_number"] for s in snapshot["shots"]], [1])
+            return [{**snapshot["shots"][0], "compiled_prompt": "new"}]
+        with patch.object(director.job_service, "set_result"), \
+             patch.object(director, "generate_still_frames", side_effect=previews), \
+             patch.object(director, "compile_shot_prompts", side_effect=compiler):
+            director._prepare_media_parallel(Mock(), "audit", result, brief="test", emit=Mock())
+        self.assertEqual(result["shots"][0]["still_frame_url"], "replacement-image")
+        self.assertEqual(result["shots"][0]["compiled_prompt"], "new")
+        self.assertNotIn("plan_edited_shots", result)

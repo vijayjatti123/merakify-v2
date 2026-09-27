@@ -28,7 +28,7 @@ def protect_unflagged(shots, revised, issues):
         raise ValueError('Correction reordered unflagged shots. Retry planning.')
 
 
-def apply_insertion_response(shots, response, permissions, anchors):
+def apply_insertion_response(shots, response, permissions, anchors, approved_story=None):
     """Insert silent story beats, retaining existing content and mapping ordinals.
 
     Speech creation/removal is deliberately excluded. The same independent QA
@@ -43,7 +43,8 @@ def apply_insertion_response(shots, response, permissions, anchors):
         if isinstance(direction, dict):
             direction.setdefault('dialogue_beat_index', 0)
     validate(response, contracts()['patch-insert-v1'])
-    updated = apply_patch_response(shots, {'patches': response['patches']}, permissions) if permissions else copy.deepcopy(shots)
+    updated = apply_patch_response(shots, {'patches': response['patches']}, permissions,
+                                   approved_story) if permissions else copy.deepcopy(shots)
     if not permissions and response['patches']:
         raise ValueError('Insertion response changed unauthorized existing shots.')
     by_number = {s['shot_number']: s for s in shots}
@@ -120,7 +121,7 @@ def patch_permissions(shots, issues):
     return {number: sorted(fields) for number, fields in allowed.items()} or None
 
 
-def apply_patch_response(shots, response, permissions):
+def apply_patch_response(shots, response, permissions, approved_story=None):
     patches = response.get('patches') if isinstance(response, dict) else None
     if not isinstance(patches, list) or not patches:
         raise ValueError('Planning correction returned no field patches. Please retry planning.')
@@ -146,10 +147,6 @@ def apply_patch_response(shots, response, permissions):
                 from app.services.ad_direction import SHOT_FIELDS, EXECUTION_FIELDS
                 if (not isinstance(value, dict) or set(value) != set(SHOT_FIELDS) | set(EXECUTION_FIELDS) | {'dialogue_beat_index'}):
                     raise ValueError('Planning correction returned incomplete shot direction.')
-                probe = {**by_number[number], 'shot_direction': value, 'direction_version': 1}
-                from app.services.ad_direction import problems
-                if problems(probe):
-                    raise ValueError('Planning correction returned incomplete physical staging.')
             elif field == 'duration_sec':
                 import math
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
@@ -160,6 +157,11 @@ def apply_patch_response(shots, response, permissions):
         from app.services.ad_direction import DIRECTION_FIELDS, source_key
         if set(DIRECTION_FIELDS) <= set(changes):
             by_number[number]['direction_source'] = source_key(by_number[number])
+        if 'shot_direction' in changes:
+            from app.services.ad_direction import problems
+            if issues := problems(by_number[number], approved_story):
+                raise ValueError('Planning correction returned incomplete physical staging: '
+                                 + '; '.join(issues))
         seen.add(number)
     if seen != set(permissions):
         raise ValueError('Planning correction omitted a flagged shot. Please retry planning.')

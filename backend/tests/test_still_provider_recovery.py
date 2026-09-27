@@ -2,12 +2,25 @@ import base64
 import io
 import json
 import unittest
+from urllib.error import HTTPError
 from unittest.mock import patch
 from PIL import Image
 from app.services import still_frame_service as service
 
 
 class StillProviderRecoveryTests(unittest.TestCase):
+    def test_invalid_google_key_has_safe_actionable_diagnostic(self):
+        body = io.BytesIO(json.dumps({'error': {'message': 'API key not valid. Please pass a valid API key.'}}).encode())
+        error = HTTPError('https://example.com', 400, 'Bad Request', {}, body)
+        with patch.object(service.settings, 'google_ai_api_key', 'private-secret'), \
+             patch.object(service, 'urlopen', side_effect=error):
+            with self.assertRaises(service.StillProviderError) as caught:
+                service._google([{'text': 'private prompt'}], verification=True,
+                                response_schema={'type': 'OBJECT', 'properties': {}})
+        self.assertIn('configured Google AI API key is invalid', str(caught.exception))
+        self.assertNotIn('private-secret', str(caught.exception))
+        self.assertNotIn('private prompt', str(caught.exception))
+
     def setUp(self):
         display = patch('app.services.preview_display.store_variants', return_value=None)
         display.start()

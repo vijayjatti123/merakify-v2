@@ -24,6 +24,52 @@ def directed():
 
 
 class AdDirectionTests(unittest.TestCase):
+    def test_silent_direction_rejects_vocal_actions(self):
+        shot = directed()['shots'][0]
+        shot.update(has_dialogue=False, speech_mode='none', dialogue_text='')
+        shot['shot_direction']['performance'] = 'He gasps and smiles at the bucket.'
+        self.assertIn('gasps', ad_direction.silent_vocal_directions(shot))
+        self.assertTrue(any('Silent shot directs vocal performance' in issue
+                            for issue in ad_direction.problems(shot)))
+        shot['shot_direction']['performance'] = 'He smiles without speaking.'
+        self.assertEqual(ad_direction.silent_vocal_directions(shot), [])
+
+    def test_source_required_nonverbal_groan_is_preserved_without_invented_gasp(self):
+        shot = directed()['shots'][0]
+        shot.update(has_dialogue=False, speech_mode='none', dialogue_text='')
+        shot['shot_direction']['performance'] = 'Yamaraj groans, then the carpenter gasps.'
+        story = {'production_context': {'original_brief': 'Yamaraj drops his lasso and groans.'}}
+        self.assertEqual(ad_direction.silent_vocal_directions(shot, story), ['gasps'])
+
+    def test_invented_silent_gasp_becomes_visible_startle_before_review(self):
+        shot = directed()['shots'][0]
+        shot.update(has_dialogue=False, speech_mode='none', dialogue_text='',
+                    description='The carpenter gasps and jolts upright.')
+        shot['shot_direction']['performance'] = 'He gasps, then smiles.'
+        story = {'production_context': {'original_brief': 'He wakes with a start and smiles.'}}
+        ad_direction.normalize_silent_startle([shot], story)
+        self.assertIn('startles and jolts', shot['description'])
+        self.assertEqual(ad_direction.silent_vocal_directions(shot, story), [])
+
+    def test_preview_keeps_source_requested_nonverbal_groan(self):
+        result = directed()
+        result['script'] = {'production_context': {'original_brief': 'Yamaraj drops the lasso and groans.'}}
+        shot = result['shots'][0]
+        shot.update(has_dialogue=False, speech_mode='none', dialogue_text='')
+        shot['shot_direction']['performance'] = 'Yamaraj groans in defeat.'
+        shot['direction_source'] = ad_direction.source_key(shot)
+        self.assertIsNotNone(preview_plan.preview_input(result, shot))
+
+    def test_future_action_is_checker_context_not_image_generation_text(self):
+        facts = {'state_at_shot_start': 'Hand rests beside cup on table.',
+                 'camera_angle': 'eye-level close-up', 'lighting': 'Soft window light',
+                 'characters': [], 'later_action_beats': ['Hand approaches cup', 'Golden lasso appears later']}
+        contract = preview_plan.visual_contract(facts)
+        self.assertIn('Golden lasso appears later', preview_plan.contract_text(contract))
+        self.assertNotIn('Golden lasso appears later',
+            preview_plan.contract_text(contract, for_generation=True))
+        self.assertNotIn('Golden lasso appears later', preview_plan.generation_prompt(contract))
+
     def test_simple_description_edit_refreshes_only_that_shot(self):
         direction = dict(purpose='Show the cup', performance='A hand moves calmly',
             product_props='Blue cup', edit_intent='Hold on the cup',
@@ -272,6 +318,16 @@ class AdDirectionTests(unittest.TestCase):
         self.assertNotIn('already been lifted', prompt)
         self.assertLess(prompt.index('Hand reaches for cup.'), prompt.index('Hand lifts cup.'))
 
+    def test_forbidden_rules_are_not_negated_twice_in_video_prompt(self):
+        from app.services.dialogue_window import visual_instruction
+        result = directed()
+        shot = result['shots'][0]
+        shot['shot_direction']['forbidden_geometry'] = ['The cup must not float.']
+        prompt = visual_instruction(result, shot, 'the accepted preview', speaking=False)
+        self.assertIn('Hard staging rules: The cup must not float.', prompt)
+        self.assertNotIn('Never show: The cup must not float.', prompt)
+        self.assertIn('no dialogue, muttering, speech-like lip articulation', prompt)
+
     def test_character_entering_later_is_not_in_opening_look(self):
         result = directed()
         result['continuity']['characters'] = [{'name': 'Yamaraj', 'description': 'A deity'}]
@@ -283,6 +339,77 @@ class AdDirectionTests(unittest.TestCase):
         opening = preview_plan.preview_input(result, shot)
         self.assertNotIn('Yamaraj', str(opening['visual_style']))
         self.assertIn('Yamaraj', str(ad_direction.shot_visual_style(result, shot)))
+
+    def test_explicit_hero_light_excludes_global_absent_prop_motif(self):
+        from app.services.dialogue_window import visual_instruction
+        result = directed()
+        shot = result['shots'][0]
+        shot.update(description='A Fevicol bucket stands on the bench.',
+                    state_at_shot_start='The Fevicol bucket rests on the bench; no people present.',
+                    lighting='Warm golden key light on the bucket.', characters_in_shot=[],
+                    opening_characters=[])
+        result['continuity']['visual_style'] = {
+            'rendering': 'Photorealistic live-action',
+            'palette': 'Warm wood browns, golden accent on lasso and Fevicol bucket',
+            'lighting_motif': 'Cool fog when the spirit appears',
+        }
+        result['entity_references'] = {'props:lasso': {'url': 'https://example.com/lasso.jpg'}}
+        prompt = visual_instruction(result, shot, 'the accepted preview', speaking=False)
+        self.assertIn('Warm golden key light', prompt)
+        self.assertNotIn('lasso', prompt.casefold())
+        self.assertNotIn('Cool fog', prompt)
+
+    def test_product_shot_omits_unreferenced_story_prop_in_global_palette(self):
+        from app.services.dialogue_window import visual_instruction
+        result = directed()
+        result['continuity']['visual_style'] = {
+            'palette': 'Neutral true-to-life colors, with golden accent only on lasso and Fevicol bucket highlights'}
+        shot = result['shots'][0]
+        shot.update(characters_in_shot=[], description='One Fevicol bucket on a table.',
+                    state_at_shot_start='One Fevicol bucket on a table; no human figures present.',
+                    state_at_shot_end='The same Fevicol bucket remains; no people present.')
+        prompt = visual_instruction(result, shot, 'the supplied image')
+        self.assertNotIn('lasso', prompt.casefold())
+        self.assertIn('No person, silhouette', prompt)
+        self.assertIn('new prop', prompt)
+
+    def test_new_style_projection_keeps_accepted_preview_when_only_absent_prop_was_removed(self):
+        from app.services.still_frame_service import invalidate_changed_stills, shot_fingerprint
+        result = directed()
+        result['continuity']['characters'] = [{'name': 'Yamaraj'}]
+        result['continuity']['visual_style'] = {
+            'rendering': 'Natural, Yamaraj blue skin',
+            'palette': 'Neutral true-to-life colors, with golden accent only on lasso and Fevicol bucket highlights'}
+        shot = result['shots'][0]
+        shot.update(characters_in_shot=[], description='One Fevicol bucket on a table.',
+                    state_at_shot_start='One Fevicol bucket on a table; no human figures present.',
+                    state_at_shot_end='The same Fevicol bucket remains; no people present.')
+        shot['direction_source'] = ad_direction.source_key(shot)
+        saved = preview_plan.preview_input(result, shot)
+        saved['visual_style']['palette'] = result['continuity']['visual_style']['palette']
+        shot.update(preview_input=saved, still_frame_key='accepted.jpg')
+        shot['still_frame_source_hash'] = shot_fingerprint(shot)
+        invalidate_changed_stills(result)
+        self.assertEqual(shot['still_frame_key'], 'accepted.jpg')
+
+    def test_spirit_and_product_only_shots_keep_visual_identity_boundaries(self):
+        from app.services.dialogue_window import visual_instruction
+        result = directed()
+        spirit = result['shots'][0]
+        spirit.update(characters_in_shot=['Carpenter'],
+                      description='The spirit of the Carpenter rises from his prone body.',
+                      state_at_shot_start='The Carpenter lies supine on the floor.',
+                      state_at_shot_end='The Carpenter spirit hovers over the body.')
+        prompt = visual_instruction(result, spirit, 'Image 1', speaking=False)
+        self.assertIn('translucent visual double of Carpenter', prompt)
+        self.assertIn('Never render a generic faceless', prompt)
+
+        hero = result['shots'][0]
+        hero.update(characters_in_shot=[], description='The product sits on a workbench.',
+                    state_at_shot_start='The product sits on a bench; no human figures present.',
+                    state_at_shot_end='The product remains on a bench; no people present.')
+        prompt = visual_instruction(result, hero, 'the supplied image')
+        self.assertIn('No person, silhouette, reflection, hand, new prop', prompt)
 
 
 

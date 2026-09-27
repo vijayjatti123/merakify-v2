@@ -14,18 +14,43 @@ def _normalized_spoken(value):
 
 
 def explicit_final_line(brief):
-    """Lock only a clearly labelled, quoted final spoken line in a brief.
+    """Preserve an explicitly supplied final line or CTA, quoted or unquoted.
 
-    General desired outcomes and unquoted marketing copy are not dialogue.
-    A pasted screenplay already has its separate verbatim protection path.
+    The selected audio mode determines whether the line is spoken; a silent ad
+    must never turn its closing copy into dialogue.
     """
     if not isinstance(brief, str):
         return None
-    label = re.compile(r"(?im)^\s*(?:[-*]\s*)?(?:(?:spoken\s+)?cta|final\s+(?:spoken\s+)?"
-                       r"(?:voice[ -]?over|vo|narration|tagline|line))"
-                       r"(?:\s*\([^\n)]*\))?\s*:\s*(?:\"([^\"\n]+)\"|“([^”\n]+)”|'([^'\n]+)'|‘([^’\n]+)’)\s*$")
+    label = re.compile(
+        r"(?im)^\s*(?:[-*]\s*)?(?:(?:spoken\s+)?cta|final\s+(?:spoken\s+)?"
+        r"(?:voice[ -]?over|vo|narration|tagline|line))"
+        r"(?:\s*\([^\n)]*\))?\s*:\s*(.+?)\s*$"
+    )
     matches = label.findall(brief)
-    return next((text.strip() for text in matches[-1] if text), None) if matches else None
+    if not matches:
+        return None
+    value = matches[-1].strip()
+    if len(value) >= 2 and (value[0], value[-1]) in {
+        ('"', '"'), ('“', '”'), ("'", "'"), ('‘', '’')
+    }:
+        value = value[1:-1].strip()
+    return value or None
+
+
+def spoken_language_for_locked_line(line, configured):
+    """Use a high-confidence Indic cue for user-authored closing copy.
+
+    Do not translate the line. Ambiguous Roman-script text keeps the user's
+    selected language until the clarifier obtains a more precise choice.
+    """
+    if re.search(r"[\u0900-\u097f]", line or ''):
+        return 'Hindi'
+    if configured != 'English':
+        return configured
+    words = set(re.findall(r"[a-z]+", (line or '').casefold()))
+    hindi = {'apne', 'aap', 'aapke', 'kaam', 'bandhan', 'atoot', 'abhi',
+             'judiye', 'mazbooti', 'wada', 'nahi', 'hai', 'hoga', 'karo'}
+    return 'Hindi' if len(words & hindi) >= 3 else configured
 
 
 def contains_exact_line(value, line):
@@ -43,8 +68,10 @@ def lock_final_line_in_story(story, line):
     for scene in story['scenes'][:-1]:
         if _normalized_spoken(scene.get('dialogue_or_vo')) == _normalized_spoken(line):
             scene['dialogue_or_vo'] = ''
-    existing = (final.get('dialogue_or_vo') or '').strip()
-    final['dialogue_or_vo'] = f"{existing}\n{line}" if existing else line
+    # The Script Architect may have translated or embellished the final CTA.
+    # This scene has one source-authored closing line; retaining that invented
+    # variant would prevent the shot-level exact-line guard from binding it.
+    final['dialogue_or_vo'] = line
     return story
 
 

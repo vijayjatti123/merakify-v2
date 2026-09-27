@@ -33,7 +33,7 @@ def review(shots, characters, minimum=None, commercial=None, shot_numbers=None, 
         for field in ("description", "camera_angle", "lens", "lighting"):
             if not isinstance(s.get(field), str) or not s[field].strip():
                 issue(n, f"Complete {field.replace('_', ' ')}.")
-        for problem in ad_direction.problems(s):
+        for problem in ad_direction.problems(s, approved_story):
             issue(n, problem)
         duration = s.get("duration_sec")
         if s.get("has_dialogue") and isinstance(duration, (int, float)) and duration > 15:

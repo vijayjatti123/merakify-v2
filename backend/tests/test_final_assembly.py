@@ -10,6 +10,7 @@ from unittest.mock import patch, Mock
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from app.db import Base
+from app.models import VideoTask
 from app.services import final_assembly_service as assembly, job_service as jobs
 
 
@@ -42,6 +43,40 @@ class AssemblyTests(unittest.TestCase):
         self.assertEqual(first,assembly.fingerprint(self.result,'16:9','480p'))
         self.result['shots'][0]['video_source_changed']=True
         with self.assertRaises(assembly.AssemblyError):assembly.prepare(self.job,self.result)
+    def test_silent_source_can_supply_a_shorter_final_cut_without_regeneration(self):
+        self.result['shots'][1]['video_edit_range']={'start_sec':0.4,'end_sec':1.4}
+        plan=assembly.prepare(self.job,self.result)
+        graph,_,_,timeline=assembly.filter_graph(plan,[{'video_duration':2,'audio_duration':2}]*3)
+        self.assertIn('trim=start=0.400000000:end=1.400000000',graph)
+        self.assertIn('atrim=start=0.400000000:end=1.400000000',graph)
+        self.assertAlmostEqual(timeline['duration'],4.5)
+        self.assertNotEqual(assembly.fingerprint(self.result,'16:9','480p'),
+                            assembly.fingerprint({**self.result,'shots':[
+                                {**shot,'video_edit_range':None} for shot in self.result['shots']]},'16:9','480p'))
+    def test_speaking_footage_cannot_be_cut_without_an_audio_timing_plan(self):
+        self.result['shots'][0].update(has_dialogue=True,speech_mode='onscreen',
+                                       video_edit_range={'start_sec':0.2,'end_sec':1.2})
+        with self.assertRaisesRegex(assembly.AssemblyError,'approved audio timing'):
+            assembly.prepare(self.job,self.result)
+    def test_selection_saves_only_for_current_ready_silent_clip(self):
+        engine=create_engine('sqlite://');Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            job=jobs.create_job(db,'test')
+            current={'video_status':'done','video_key':'clips/current.mp4','video_task_id':'task-1'}
+            db.add(VideoTask(job_id=job.id,shot_number=1,status='done',data_json=json.dumps(current)))
+            db.commit()
+            shot={'shot_number':1,**current,'speech_mode':'none','has_dialogue':False}
+            with patch.object(jobs,'job_result',return_value={'shots':[shot]}):
+                selected={'start_sec':0.4,'end_sec':1.4}
+                self.assertEqual(jobs.set_video_edit_range(db,job.id,1,'clips/current.mp4',selected)['video_edit_range'],selected)
+                with self.assertRaisesRegex(ValueError,'changed'):
+                    jobs.set_video_edit_range(db,job.id,1,'clips/old.mp4',selected)
+                shot['speech_mode']='voiceover'
+                with self.assertRaisesRegex(ValueError,'audio timing'):
+                    jobs.set_video_edit_range(db,job.id,1,'clips/current.mp4',selected)
+            saved=json.loads(db.query(VideoTask).one().data_json)
+            self.assertEqual(saved['video_edit_range'],selected)
+        engine.dispose()
     def test_no_partial_endpoint_or_background_task(self):
         from app.routes.jobs import assemble_final_video
         from fastapi import HTTPException
@@ -82,5 +117,20 @@ class AssemblyTests(unittest.TestCase):
             fade=evidence['timeline']['boundaries'][1]['start']+.25
             self.assertGreater(energy(fade,880),1);self.assertGreater(energy(fade,1320),1)
             self.assertAlmostEqual(evidence['final']['audio_duration'],evidence['timeline']['duration'],delta=.1)
+
+    def test_real_silent_clip_selection_trims_picture_and_sound_together(self):
+        self.result['shots']=[{'shot_number':1,'video_url':'https://example.com/1.mp4',
+            'video_status':'done','speech_mode':'none','video_edit_range':{'start_sec':0.4,'end_sec':1.4}}]
+        self.result['assembly']['transitions']=[]
+        with tempfile.TemporaryDirectory() as folder:
+            source=Path(folder)/'source.mp4';target=Path(folder)/'selected.mp4'
+            subprocess.run([assembly.ffmpeg(),'-nostdin','-loglevel','error','-y',
+                '-f','lavfi','-i','testsrc2=s=320x180:r=30',
+                '-f','lavfi','-i','sine=frequency=440:sample_rate=48000',
+                '-t','2','-c:v','libx264','-c:a','aac',str(source)],check=True,timeout=60)
+            evidence=assembly.render([source],target,assembly.prepare(self.job,self.result))
+            self.assertAlmostEqual(evidence['timeline']['duration'],1.0,delta=.04)
+            self.assertAlmostEqual(evidence['final']['video_duration'],1.0,delta=.1)
+            self.assertAlmostEqual(evidence['final']['audio_duration'],1.0,delta=.1)
 
 if __name__=='__main__':unittest.main()

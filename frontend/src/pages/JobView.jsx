@@ -9,6 +9,7 @@ import ActionProgress from "../components/ActionProgress";
 import ShotImageActions from "../components/ShotImageActions";
 import { AdDirectionPlan, ShotDirectionPlan } from "../components/AdDirectionPlan";
 import ShotPreviewImage from "../components/ShotPreviewImage";
+import VideoPromptDisclosure from "../components/VideoPromptDisclosure";
 import { canFinishSavedLabelVideo, canRepairSavedSilentVideo, friendlyMessage, progressMessage, productLabelIssue, videoReviewGuidance, videoReviewWarnings } from "../utils/presentation";
 import { retryFailedJob, retryShotPreview, retryPreviewPreparation } from "../api/client";
 import { previewState, previewSummary } from "../utils/previewState";
@@ -53,11 +54,12 @@ function FinalVideo({ data, shots, busy, onAssemble }) {
   return (
     <Card component="section" className="generation-stage generation-placeholder generation-placeholder--final" aria-label="Final video" aria-live="polite">
       {busy ? <Loader2 size={30} className="animate-spin" /> : <Clapperboard size={32} />}
-      <p className="eyebrow">{missing.length ? "Video clips" : "Your finished video"}</p>
-      <h2>{busy ? "Putting it all together…" : data?.url ? "Your video is ready" : needsRecovery ? "Some shots need another try" : missing.length ? "Turn your previews into video clips" : "Bring your shots together"}</h2>
+      <p className="eyebrow">{missing.length ? "Video clips" : "Your first cut"}</p>
+      <h2>{busy ? "Putting it all together…" : data?.url ? "First cut ready to review" : needsRecovery ? "Some shots need another try" : missing.length ? "Turn your previews into video clips" : "Bring your shots together"}</h2>
       {busy && <ActionProgress label="Combining your shots, sound and transitions…" />}
       {data?.url && <video controls preload="metadata" src={data.url} className="w-full rounded-md my-3" style={{ maxHeight: "60vh" }} aria-label="Final assembled video" />}
-      {data?.url && <a href={data.url} target="_blank" rel="noreferrer" className="underline">Open final video</a>}
+      {data?.url && <a href={data.url} target="_blank" rel="noreferrer" className="underline">Open first cut</a>}
+      {data?.url && <p>Watch the full cut before using it. Check that the product's effect is clear on screen, the action and people stay consistent between shots, and the spoken words and sound fit the edit. If a clip is weak, regenerate that shot or keep its best usable portion, then update this cut.</p>}
       {data?.stale && <p className="audio-warning">Your shots have changed. Combine them again to update the final video.</p>}
       {data?.error && <Alert severity="error">{friendlyMessage(data.error, "Your final video could not be finished. Please try again.")}</Alert>}
       <p role="status" style={{ fontWeight: 600 }}>{readyCount} of {shots.length} videos ready</p>
@@ -411,7 +413,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
               <p>{result.script.logline}</p>
             </div>
 
-            <AdDirectionPlan direction={result.ad_direction} />
+            <AdDirectionPlan direction={result.ad_direction} shots={shots} />
             <div className="qa-banner" data-approved={result.qa.approved}>
               <Check size={14} />
               <span>{result.qa.review_mode === "user" ? (result.qa.approved ? (approved ? "Plan approved by you" : "Technical checks passed · Review your story") : "Technical details need correction") : (result.qa.approved ? "Consistency checked" : "Some details need your review")} · {Math.round(result.assembly.total_duration_sec * 10) / 10}s{result.assembly.provisional ? " · Timing will update after audio" : ""}</span>
@@ -475,6 +477,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                     )}
 
                     {!isEditing && <ShotDirectionPlan shot={shot} />}
+                    {!isEditing && approved && shot.compiled_prompt && shot.still_frame_url && <VideoPromptDisclosure jobId={jobId} shot={shot} />}
                     {visualStatus === "error" && shot.error_message && <Alert severity="error">{friendlyMessage(shot.error_message, "This shot could not be completed. Please try again.")}</Alert>}
                     {!!shot.characters_in_shot?.length && <div className="shot-characters">
                       <span>{shot.direction_version === 1 ? "Characters in this clip" : "Characters present"}</span>
@@ -487,7 +490,7 @@ export default function JobView({ jobId, onReset, initialJob = null, onRetry }) 
                       {approved && shot.compiled_prompt && !shot.video_url && !(shot.still_frame_error_kind === "mismatch" && shot.still_retry_count) && <Button data-testid={`retry-preview-${shot.shot_number}`} disabled={previews.busy || previewSubmitting !== null} onClick={() => handlePreviewRetry(shot)}>{shot.still_frame_error_kind === "verification" ? "Retry verification" : shot.still_frame_error_kind === "mismatch" ? "Try corrected preview" : "Retry preview"}</Button>}
                     </Alert>}
 
-                    {shot.video_url && <ShotVideo shot={shot} />}
+                    {shot.video_url && <ShotVideo key={shot.video_key || shot.video_url} shot={shot} jobId={jobId} onRefresh={async () => setFinal(await getJob(jobId))} />}
                     {shot.video_url && shot.video_source_changed && <Alert severity="info" sx={{ my: 2 }}>This video uses an earlier version of the shot. Click “Regenerate video” to use your current image before combining the final video.</Alert>}
                     <FaceEnhancement jobId={jobId} shot={shot} onRefresh={async () => setFinal(await getJob(jobId))} />
                     {shot.video_status && <Stack direction="row" spacing={1} alignItems="center" sx={{ my: 1 }}>

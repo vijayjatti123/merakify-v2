@@ -49,7 +49,7 @@ order; do not substitute a new metaphor, ending, action or speaking turn. Creati
 is for genuinely unspecified treatment, never a replacement for approved events.
 For targets of 12 seconds or less, prefer one continuous scene when all required story beats fit naturally.
 Keep complete dialogue and essential actions; do not invent extra speakers or cuts to fill a template.
-An explicitly quoted spoken CTA or final voiceover line in the brief is user-supplied dialogue,
+An explicitly labelled CTA or final voiceover line in the brief is user-supplied copy,
 even when there is no pasted screenplay. Carry those exact words and language into the final
 scene; do not translate, rewrite or silently omit them. If audio_mode is silent, do not turn
 quoted closing copy into speech; keep its visual intent without asking the video model to draw text.
@@ -177,6 +177,13 @@ follow their approved dramatic arc and locked rendering. More camera motion is n
 Every shot must earn its place: shot_direction.purpose states its viewer-facing story/product beat;
 performance describes observable behavior/expression, or object motion for a faceless shot;
 product_props identifies only supplied relevant objects, their placement/contact and product role.
+Before outputting the sequence, decide which approved shot visibly establishes the problem, which
+shows the product's physical role, which proves its effect, and which resolves the story. A spoken
+claim, logo shot, or static final pose cannot substitute for visual evidence when the story requires
+a visible change. Put that evidence in the relevant shot's critical_outcome and give it enough time
+and framing to read. Do not add a formulaic product shot when the approved story calls for a different
+ending. Make edit_intent say what a cut carries forward (action, gaze, prop, or reaction), not just
+"cut to next shot". For the final shot, identify the visible ending hold; music remains an edit plan.
 When a selected product is visible, use its exact supplied product name in product_props and the
 corresponding action beat; never use only a generic noun such as product, package, bottle or can
 (say "No product featured" if absent); edit_intent explains the outgoing visual/rhythmic connection.
@@ -195,6 +202,10 @@ These are parts of ONE achievable shot, not hidden scene cuts or several unrelat
 Budget the visible time needed for every physical change, not just the dialogue syllables.
 A handoff, substantial drink, jump, freefall and canopy deployment cannot be compressed into
 one short shot by naming them as beats. Split incompatible transitions into complete shots;
+an entrance, prop throw, forceful pull, visible deformation and rebound are separate physical
+changes, not one action. Give a change-and-reversal payoff its own readable performance time;
+if this shot also establishes a new character or effect, carry the payoff into the next shot
+with matching start/end positions instead of squeezing it into the last second.
 if the requested total cannot fit every mandatory beat at the supplied shot minimum, do not
 pretend it can. Preserve the story and make the runtime conflict visible for user review.
 dialogue_beat_index: for onscreen speech or voiceover, the 1-based action_beats entry during which
@@ -209,6 +220,9 @@ must occur before the action or answer it motivates; a reaction line occurs afte
 event. Never reorder speech merely to simplify timing. For example, an offer to drink is delivered
 during the offer/handoff, followed by the separate drinking beat.
 critical_outcome: the single observable fact the audience must see for the shot to work.
+When that fact is a transformation or resisted action, name both visible phases (for example
+the subject stretches under a pull AND visibly recoils to its original shape). A final static
+position or a taut prop by itself is not proof of the change and reversal.
 For a failed attempt specify what moves and what remains fixed; for a reveal specify what becomes
 visible; for a product shot preserve supplied geometry/markings and reserve a readable ending hold.
 Frame the cause and its visible effect together when the story depends on a relationship (a bond
@@ -234,6 +248,10 @@ The opening preview uses state_at_shot_start as its sole physical staging author
 shot_direction describes the complete moving performance. Put every opening support, contact,
 inside/outside and relative-position fact in state_at_shot_start. Never defer an opening fact to
 blocking/support_and_contact/spatial_invariants, and never put an ending fact in the opening state.
+Name each opening body's exact pose (lying supine/prone, seated, standing, kneeling or airborne),
+its support surface, and any separate body/spirit occupying the same set. Explicitly name a
+story-critical character or prop that enters only in later action as ABSENT from the opening;
+otherwise an image model can insert it early. A vague "on the floor" does not establish pose.
 opening_characters lists ONLY cast visible in that opening instant, as an exact-name subset of
 characters_in_shot (which covers the entire video). Do not put a spirit/visitor into the opening
 preview if they only appear later during the action. Use [] for an opening without visible characters.
@@ -245,11 +263,18 @@ Cover the supplied story beats in order, with purposeful establishing, action, r
 shots. Prefer fewer complete visual beats over gratuitous cuts; never omit a story payoff or dialogue.
 Each shot must have one achievable primary action and enough performance time, not a montage hidden
 inside a single shot. Treat complex interactions conservatively; do not promise model capabilities.
+For any repeated attempt, show each attempt as a distinct visible cause and result; a reaction
+close-up cannot substitute for the second physical resistance. Keep both the moving force and
+resisting subject in the same frame, or use neighboring shots with continuous matching states.
+A shot marked silent has no vocal performance direction: no gasping, grunting, groaning,
+whispering, or mouthing words. Convey a startled or strained reaction through eyes, posture,
+hands and breath without directed vocalization; put intentional nonverbal effects in sound
+postproduction, not in the video model's performance prompt.
 Keep user-supplied script dialogue verbatim and in order. For an AI-written scene breakdown,
 preserve its meaning and speaking turns while expressing dialogue in the selected language
 and native script: Hindi dialogue_text uses Devanagari, even when the AI scene breakdown uses
 Romanized Hindi. This language conversion applies to AI-written scenes, not user-scripted words.
-An explicitly quoted CTA/final line in source_context is user-scripted even if it came from the
+An explicitly labelled CTA/final line in source_context is user-scripted even if it came from the
 brief rather than the screenplay field. Copy it verbatim into one complete spoken shot.
 Each speaking shot contains a complete self-contained
 utterance; multiple complete utterances may use separate shots in ONE scene. Never split a line,
@@ -287,6 +312,11 @@ seat or other appropriate set landmark when containment matters. Do not require 
 every close-up: choose visible evidence appropriate to framing, or a wider frame when necessary
 to establish a story-critical relationship. Keep this staging in the existing 500-character opening
 state budget. Respect fantastical action explicitly requested; do not invent supports or props.
+If the opening or payoff depends on several separated subjects or objects being visible together,
+do not prescribe a tight portrait lens or "isolate subject" composition that excludes them. Use
+one motivated wider frame with readable foreground/midground/background placement, then move or
+cut closer only after that relationship is established. Camera_angle, lens, composition_note and
+the image opening state must describe the same achievable frame.
 
 TIMING AND PHYSICAL CONTINUITY
 Propose durations near the supplied total with adequate time for each complete action and spoken
@@ -342,6 +372,16 @@ state_at_shot_start/end and action_beats.
 If required_corrections are supplied, repair ONLY the identified violations; retain all other decisions.
 Do not include URLs, voice IDs or copied Vault/style metadata in the output; code attaches references.
 """
+
+INDIC_TTS_SCRIPT_REVIEW = """You check a phonetic native-script copy for one approved Romanized Indian-language speech line.
+The original Romanized words are authoritative. Preserve their order, brand names, and pronunciation;
+do not translate, paraphrase, omit, add, or improve the advertising copy. Correct the draft's
+wrong sounds or words. Use standard native-language spelling, resolving ambiguous Roman letters
+from the word's meaning in the original line. For example, Hindi "atoot" (unbreakable) is
+"अटूट", never "अतुल" or "अतूट". This example is a spelling rule, not text to add.
+Return only JSON: {"native_text":"the corrected native-script line"}.
+If the draft is already exact, return it unchanged. This is a TTS input copy only; the approved
+Romanized line remains the storyboard and video-prompt text."""
 
 CINEMATOGRAPHY_PATCH = """Repair only the identified visual/mechanical or story-execution violations in this shot plan.
 The full plan is read-only continuity context. Return only changed fields for each flagged shot,
@@ -433,6 +473,10 @@ Review the whole plan once, collecting ALL evidenced problems together:
    that actually reveals its absence. Do not force every scene participant into every frame.
    Reject contradictory lighting/style or semantically duplicate framing; code handles literal
    identical framing for direction_version 1. Music is planned only; absence of music is not an error.
+   Check that opening framing and lens can actually show every story-critical subject, body and
+   prop whose spatial relationship the shot claims to establish. A tight portrait "isolating"
+   one subject conflicts with a simultaneous wide relationship; flag the camera fields for repair
+   rather than deleting a required story entity. Distinguish intentional off-screen subjects.
    Audit product_props as a physical inventory: count actual units in each shot and track each
    unit's support, holder and position across adjacent shots. Reject an unexplained duplicate or
    teleportation. When the story's payoff depends on cause and effect, demand a readable shot or
@@ -462,6 +506,10 @@ original brief/source script and user-reviewed direction must not be lost throug
 Product names identify selected references, NOT verified benefits or packaging colors.
 For each uncovered requirement, include an issue with its requirement_id and the actual shot to repair.
 Collect ALL defects together. mechanical_findings are already code-checked; do not rediscover them.
+Before approving each shot, verify its opening state specifies the pose and support of each
+visible body, including a separate physical body and spirit. Compare the opening to the prior
+shot's ending. If a later character, prop or effect is not explicitly absent at the opening,
+or a body could be either lying or standing, request a local state_at_shot_start repair.
 For local visual repairs add repair_kind="visual_fields" and repair_fields containing ONLY the
 necessary keys from description, shot_direction, state_at_shot_start, state_at_shot_end,
 opening_characters, camera_angle, camera_direction, lens, lighting, composition_note, duration_sec.

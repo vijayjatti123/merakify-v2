@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from app.agents import prompts
 from app.agents.director import validate_and_correct
-from app.agents.dialogue_integrity import screen_issues, protected_dialogue
+from app.agents.dialogue_integrity import screen_issues, protected_dialogue, explicit_final_line, spoken_language_for_locked_line, lock_final_line_in_story, lock_final_line_in_shots
 
 
 def shots(two=False):
@@ -17,6 +17,25 @@ def issue(number=1,problem='Scene 2 has two shots with dialogue',instruction='Re
 
 
 class DialogueIntegrityTests(unittest.TestCase):
+    def test_unquoted_romanized_hindi_cta_is_locked(self):
+        line = 'Apne kaam ko de atoot bandhan. Abhi Fevicol se judiye, mazbooti ka wada.'
+        self.assertEqual(explicit_final_line('Story first.\nCTA:' + line), line)
+        self.assertEqual(explicit_final_line('Final voiceover: “' + line + '”'), line)
+        self.assertIsNone(explicit_final_line('A stronger bond is the desired takeaway.'))
+        self.assertEqual(spoken_language_for_locked_line(line, 'English'), 'Hindi')
+        self.assertEqual(spoken_language_for_locked_line('Buy now for a better bond.', 'English'), 'English')
+
+    def test_translated_final_scene_is_replaced_before_shot_direction(self):
+        line = 'Apne kaam ko de atoot bandhan. Abhi Fevicol se judiye, mazbooti ka wada.'
+        story = {'scenes': [{'scene_number': 4,
+            'dialogue_or_vo': 'Give your work an unbreakable bond.'}]}
+        lock_final_line_in_story(story, line)
+        self.assertEqual(story['scenes'][0]['dialogue_or_vo'], line)
+        shots = [{'scene_number': 4, 'has_dialogue': True,
+            'dialogue_text': 'Give your work an unbreakable bond.'}]
+        lock_final_line_in_shots(shots, line, 4, story['scenes'][0]['dialogue_or_vo'])
+        self.assertEqual(shots[0]['dialogue_text'], line)
+
     def test_false_count_discarded_without_touching_script(self):
         protected = protected_dialogue(shots(), 'Nila: Time to go.')
         accepted, _, rejected, _ = screen_issues(shots(), [issue()], protected, lambda *_: None)

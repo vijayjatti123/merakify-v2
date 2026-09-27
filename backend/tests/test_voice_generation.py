@@ -43,6 +43,21 @@ class VoiceAssignmentTests(unittest.TestCase):
             self.assertEqual(character["voice_sample_ref"], character["voice_id"])
 
 
+class IndicTtsScriptTests(unittest.TestCase):
+    def test_romanized_hindi_uses_sarvam_transliteration_only_for_tts(self):
+        line = 'Apne kaam ko de atoot bandhan.'
+        client = SimpleNamespace(post=AsyncMock(return_value=SimpleNamespace(
+            is_success=True, json=lambda: {'transliterated_text': 'अपने काम को दे अटूट बंधन।'})))
+        with patch.object(voice_generation_service.settings, 'sarvam_api_key', 'test-key'), \
+             patch('app.agents.llm_client.call_agent', return_value={
+                 'native_text': 'अपने काम को दे अटूट बंधन।'}) as review:
+            spoken = asyncio.run(voice_generation_service._tts_script(client, line, 'Hindi'))
+        self.assertEqual(spoken, 'अपने काम को दे अटूट बंधन।')
+        self.assertEqual(line, 'Apne kaam ko de atoot bandhan.')
+        self.assertEqual(client.post.call_args.kwargs['json']['target_language_code'], 'hi-IN')
+        review.assert_called_once()
+
+
 class PreviewAudioOverlapTests(unittest.TestCase):
     def test_preview_merge_preserves_audio_and_compiler_fields(self) -> None:
         current = {

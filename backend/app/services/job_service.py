@@ -253,6 +253,8 @@ def set_status(db: Session, job_id: str, status: str, error_message: Optional[st
     job.status = status
     if error_message is not None:
         job.error_message = error_message
+    elif status in ('running', 'done'):
+        job.error_message = None
     db.commit()
 
 
@@ -649,6 +651,7 @@ def claim_video(db, job_id, number, fields, *, replace_token=None):
 def update_video(db, job_id, number, **fields):
     expected_task = fields.pop("expected_task_id", None)
     expected_started = fields.pop("expected_submitted_at", None)
+    expected_key = fields.pop("expected_video_key", None)
     for _ in range(3):
         row = db.query(VideoTask).filter_by(job_id=job_id, shot_number=number).with_for_update().populate_existing().one()
         old_json = row.data_json
@@ -657,7 +660,8 @@ def update_video(db, job_id, number, **fields):
             db.rollback()
             return False
         if ((expected_task is not None and data.get("video_task_id") != expected_task)
-                or (expected_started is not None and data.get("video_submitted_at") != expected_started)):
+                or (expected_started is not None and data.get("video_submitted_at") != expected_started)
+                or (expected_key is not None and data.get("video_key") != expected_key)):
             db.rollback()
             return False
         data.update(fields)
@@ -668,6 +672,28 @@ def update_video(db, job_id, number, **fields):
             return True
         db.rollback()
     raise ValueError("Video task changed concurrently; retry the saved task update")
+
+
+def set_video_edit_range(db, job_id, number, expected_video_key, edit_range):
+    """Select existing silent footage for the final cut without altering its source."""
+    job = get_job(db, job_id)
+    if not job:
+        raise LookupError("Job not found")
+    result = job_result(job) or {}
+    shot = next((item for item in result.get("shots", []) if item.get("shot_number") == number), None)
+    if not shot:
+        raise LookupError("Shot not found")
+    if shot.get("video_status") != "done" or shot.get("video_source_changed"):
+        raise ValueError("This clip is not ready to edit. Refresh the job and try again.")
+    if shot.get("video_key") != expected_video_key:
+        raise ValueError("This clip has changed. Refresh before selecting footage.")
+    if shot.get("has_dialogue") or shot.get("speech_mode") not in (None, "none"):
+        raise ValueError("Speaking and narrated clips keep their approved audio timing.")
+    if not update_video(db, job_id, number, expected_task_id=shot.get("video_task_id"),
+                        expected_video_key=expected_video_key,
+                        video_edit_range=edit_range):
+        raise ValueError("This clip changed while saving. Refresh before trying again.")
+    return {"shot_number": number, "video_edit_range": edit_range}
 
 
 def stop_video(db, job_id, number, expected_attempt):

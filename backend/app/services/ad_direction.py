@@ -18,6 +18,71 @@ EXECUTION_FIELDS = ("blocking", "action_beats", "critical_outcome", "entry_exit_
                     "support_and_contact", "spatial_invariants", "forbidden_geometry")
 DIRECTION_FIELDS = ("shot_direction", "state_at_shot_start", "state_at_shot_end", "opening_characters")
 
+# The audio-capable video model may enact a vocal verb even when the shot is
+# marked silent. Detect positive instructions before paid generation. A denied
+# action ("without speaking") is a constraint, not a direction to speak.
+_VOCAL_ACTION = re.compile(
+    r"\b(?:gasp(?:s|ing|ed)?|grunt(?:s|ing|ed)?|groan(?:s|ing|ed)?|"
+    r"mutter(?:s|ing|ed)?|whisper(?:s|ing|ed)?|scream(?:s|ing|ed)?|"
+    r"yell(?:s|ing|ed)?|speak(?:s|ing)?|say(?:s|ing)?|sings?|hums?)\b",
+    re.I,
+)
+
+
+def silent_vocal_directions(shot, approved_story=None):
+    if shot.get('has_dialogue') or shot.get('speech_mode') not in (None, 'none'):
+        return []
+    direction = shot.get('shot_direction') or {}
+    fields = [shot.get('description'), shot.get('state_at_shot_start'),
+              shot.get('state_at_shot_end'), direction.get('performance'),
+              direction.get('blocking'), direction.get('critical_outcome'),
+              *(direction.get('action_beats') or [])]
+    source = ((approved_story or {}).get('production_context') or {}).get('original_brief') or ''
+    approved_nonverbal = {root for root in ('gasp', 'grunt', 'groan', 'scream')
+        if re.search(rf"\b{root}(?:s|ing|ed)?\b", source, re.I)}
+    found = []
+    for value in fields:
+        if not isinstance(value, str):
+            continue
+        for match in _VOCAL_ACTION.finditer(value):
+            prefix = value[max(0, match.start() - 36):match.start()]
+            if re.search(r"\b(?:no|without|never|does\s+not|doesn't|do\s+not|don't)"
+                         r"(?:\s+\w+){0,4}\s*$", prefix, re.I):
+                continue
+            word = match.group().lower()
+            if any(word.startswith(root) for root in approved_nonverbal):
+                continue  # User-authored nonverbal sound remains subject to speech QA.
+            found.append(word)
+    return sorted(set(found))
+
+
+def normalize_silent_startle(shots, approved_story=None):
+    """Keep an invented awakening gasp visual in a silent shot.
+
+    A Director often writes "gasps and jolts" for a source that only says
+    "wakes with a start". That single word invites the audio-capable renderer
+    to improvise speech. Preserve an explicitly requested gasp instead.
+    """
+    source = ((approved_story or {}).get('production_context') or {}).get('original_brief') or ''
+    if re.search(r'\bgasp(?:s|ing|ed)?\b', source, re.I):
+        return
+    for shot in shots:
+        if shot.get('has_dialogue') or shot.get('speech_mode') not in (None, 'none'):
+            continue
+        for field in ('description', 'state_at_shot_start', 'state_at_shot_end'):
+            value = shot.get(field)
+            if isinstance(value, str):
+                shot[field] = re.sub(r'\bgasps?\b', 'startles', value, flags=re.I)
+        direction = shot.get('shot_direction')
+        if isinstance(direction, dict):
+            for field in ('performance', 'blocking', 'critical_outcome'):
+                value = direction.get(field)
+                if isinstance(value, str):
+                    direction[field] = re.sub(r'\bgasps?\b', 'startles', value, flags=re.I)
+            if isinstance(direction.get('action_beats'), list):
+                direction['action_beats'] = [re.sub(r'\bgasps?\b', 'startles', beat, flags=re.I)
+                    if isinstance(beat, str) else beat for beat in direction['action_beats']]
+
 
 def opening_cast(shot):
     return shot.get('opening_characters', []) if shot.get('direction_version') == 1 else shot.get('characters_in_shot', [])
@@ -25,14 +90,29 @@ def opening_cast(shot):
 
 def shot_visual_text(result, shot, text, *, opening=False):
     """Drop project-wide appearance clauses about subjects absent from this shot."""
-    from app.services.video_references import mentions
+    from app.services.video_references import mentions, shot_text
 
     cast = opening_cast(shot) if opening else (shot.get('characters_in_shot') or [])
     visible = {name.casefold() for name in cast}
     absent = [character.get('name', '') for character in
               (result.get('continuity') or {}).get('characters', [])
               if character.get('name') and character['name'].casefold() not in visible]
+    # Props established in another shot are not style instructions for this
+    # shot. A global palette such as "gold on the lasso and bucket" otherwise
+    # invites an absent lasso into a product-only hero frame.
+    present_text = shot_text(shot)
+    absent.extend(key.split(':', 1)[1] for key in result.get('entity_references', {})
+                  if key.startswith('props:') and not mentions(present_text, key.split(':', 1)[1]))
     def keep(clause):
+        # A global palette may name story props that belong to another shot
+        # (for example a lasso in a product packshot). Color is portable;
+        # that physical inventory is not. Omit an object-scoped clause unless
+        # every object it names is present in this shot's own positive facts.
+        scoped = re.search(r'\bonly\s+on\s+(.+)', clause, re.I)
+        if scoped and any(not mentions(present_text, item.strip())
+                          for item in re.split(r'\s+and\s+|,', scoped.group(1))
+                          if item.strip()):
+            return False
         return (not any(mentions(clause, name) for name in absent)
                 and (visible or not re.search(
                     r'\b(?:skin tones?|lifelike skin|wardrobe|people|person|human|faces?|hair|divine elements)\b',
@@ -47,7 +127,10 @@ def shot_visual_style(result, shot, *, opening=False):
     if isinstance(style, dict):
         return {key: (shot_visual_text(result, shot, value, opening=opening)
                       if isinstance(value, str) else value)
-                for key, value in style.items()}
+                for key, value in style.items()
+                if not (key == 'lighting_motif' and shot.get('lighting')
+                        and isinstance(value, str)
+                        and re.search(r'\bwhen\b|\bshift(?:s|ing)?\b', value, re.I))}
     if isinstance(style, str):
         return shot_visual_text(result, shot, style, opening=opening)
     return style
@@ -68,7 +151,7 @@ def source_key(shot):
         ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
-def problems(shot):
+def problems(shot, approved_story=None):
     if shot.get("direction_version") != 1:
         return []
     found = []
@@ -123,6 +206,9 @@ def problems(shot):
     for field in ("state_at_shot_start", "state_at_shot_end"):
         if not isinstance(shot.get(field), str) or not shot[field].strip() or len(shot[field]) > 500:
             found.append(f"{field} must describe one visible instant, including static shots")
+    if vocal := silent_vocal_directions(shot, approved_story):
+        found.append("Silent shot directs vocal performance (" + ", ".join(vocal)
+                     + "); describe visible expression instead and reserve nonverbal sound for postproduction")
     if shot.get("direction_source") and shot["direction_source"] != source_key(shot):
         found.append("The action or dialogue was edited; refresh opening/end states and performance to match it")
     return found
@@ -150,10 +236,10 @@ def execution_sections(shot):
     return sections
 
 
-def check_plan(qa, shots):
+def check_plan(qa, shots, approved_story=None):
     issues = []
     for shot in shots:
-        errors = problems(shot)
+        errors = problems(shot, approved_story)
         if errors:
             issues.append({"shot_number": shot["shot_number"], "code": "ad_direction_contract",
                 "problem": "; ".join(errors), "fix_instruction":
@@ -170,13 +256,13 @@ def check_plan(qa, shots):
     return {**qa, "approved": False, "issues": [*qa.get("issues", []), *issues]} if issues else qa
 
 
-def accept_shots(shots, shot_numbers=None):
+def accept_shots(shots, shot_numbers=None, approved_story=None):
     targets = set(shot_numbers) if shot_numbers is not None else None
     for shot in shots:
         if targets is not None and shot.get('shot_number') not in targets:
             continue
         if shot.get("direction_version") == 1:
-            errors = problems(shot)
+            errors = problems(shot, approved_story)
             if errors:
                 raise ValueError(f"Shot {shot['shot_number']} direction is not ready: {'; '.join(errors)}")
             shot["direction_source"] = source_key(shot)

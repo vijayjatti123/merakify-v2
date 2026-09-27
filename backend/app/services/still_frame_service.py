@@ -37,11 +37,13 @@ class VisualMismatch(StillFrameError):
 
 
 class StillProviderError(StillFrameError):
-    def __init__(self, status, model):
+    def __init__(self, status, model, *, reason=None):
         self.status = status
         self.model = model
+        self.reason = reason
         self.retryable = status in (408, 429) or status >= 500
-        super().__init__(f"Google still-frame request failed (HTTP {status})")
+        super().__init__(f"Google still-frame request failed (HTTP {status})"
+                         + (f": {reason}" if reason else ""))
 
 
 class NoStillImageError(StillFrameError):
@@ -127,11 +129,17 @@ def invalidate_changed_stills(result, shot_numbers=None):
             current_input = preview_input(result, shot) or {}
             old_project_style = (result.get("continuity") or {}).get("visual_style") or result.get("visual_style")
             old_ad_look = {'visual_approach': (result.get('ad_direction') or {}).get('visual_approach')}
+            from app.services.ad_direction import shot_visual_style
+            continuity = result.get('continuity') or {}
+            projected_old_style = (shot_visual_style({**result, 'continuity': {
+                **continuity, 'visual_style': stored_input.get('visual_style')}}, shot, opening=True)
+                if stored_input.get('visual_style') is not None else None)
             source_changed = source_changed or any(
                 current_input[key] != value
                 # Earlier previews stored the unfiltered project look. A new
                 # shot-specific projection alone must not discard their image.
                 and not (key == "visual_style" and value == old_project_style)
+                and not (key == "visual_style" and projected_old_style == current_input[key])
                 and not (key == "ad_visual_direction" and value == old_ad_look)
                 for key, value in stored_input.items() if key in current_input
             )
@@ -227,7 +235,15 @@ def _google(parts, *, aspect_ratio=None, verification=False, response_schema=Non
             return json.loads(response.read())
     except HTTPError as error:
         # Never put provider payloads, source prompts or signed URLs in shared traces.
-        raise StillProviderError(error.code, model) from error
+        reason = None
+        if error.code in (400, 401, 403):
+            try:
+                provider_message = str(json.loads(error.read()).get("error", {}).get("message", "")).casefold()
+                if "api key not valid" in provider_message:
+                    reason = "configured Google AI API key is invalid"
+            except (ValueError, TypeError):
+                pass
+        raise StillProviderError(error.code, model, reason=reason) from error
 
 
 def _continuation_parts(continuation, *, checking=False):
@@ -303,7 +319,7 @@ def generate_still(visual, references, aspect_ratio, feedback="", *, continuatio
         + generation_prompt(contract)
         + ("\n\nPreserve existing product packaging text and logos exactly as shown in approved product references."
            if product_reference else "")
-        + "\n\nAUTHORITATIVE MACHINE-READABLE CONTRACT:\n" + contract_text(contract)
+        + "\n\nAUTHORITATIVE MACHINE-READABLE CONTRACT:\n" + contract_text(contract, for_generation=True)
         + ("\n\nADDITIONAL CORRECTION FOR THIS REPLACEMENT:\n" + feedback if feedback else "")
     )})
     try:
@@ -337,7 +353,7 @@ def _fal_generate_still(contract, references, aspect_ratio, feedback="", *, cont
     """Direct fal Nano Banana fallback for pre-inference Google 402 failures."""
     from app.services.preview_plan import contract_text, generation_prompt
     prompt = ("Create this approved commercial opening frame exactly.\n\n" + generation_prompt(contract)
-              + "\n\nAUTHORITATIVE MACHINE-READABLE CONTRACT:\n" + contract_text(contract)
+              + "\n\nAUTHORITATIVE MACHINE-READABLE CONTRACT:\n" + contract_text(contract, for_generation=True)
               + ("\n\nADDITIONAL CORRECTION FOR THIS REPLACEMENT:\n" + feedback if feedback else ""))
     images = []
     labels = []
@@ -425,6 +441,11 @@ def check_still(visual, references, image, *, emit=None, entities=None, continua
         "because of occlusion/cropping/ambiguity, use uncertain, NEVER assume it passes. Do not require "
         "feet in every close-up: appropriate visible cabin/seat/threshold geometry can establish position. "
         "Use not_applicable only when no requirement/reference exists for that category; explain why. "
+        "The contract's verifier_future_action lists events AFTER this opening. A person or prop first "
+        "introduced in those events must not already appear at the start. Compare the actual body pose "
+        "(lying, seated, standing or airborne) with the opening and prior held state; do not call a "
+        "standing subject on the floor a match for a body lying on that floor. Record these as "
+        "opening_state or props_contact failures with the visible evidence. "
         "Report ALL failures together with specific corrective evidence. Approve only when every applicable "
         "check passes. Set spatially_grounded false for failed/uncertain placement_support.\n"
         + "The exact checklist used before image generation follows. Do not replace its requirements with your own:\n"

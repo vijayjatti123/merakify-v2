@@ -65,7 +65,8 @@ class StoryRequirementsTests(unittest.TestCase):
             if system == prompts.CINEMATOGRAPHY_PATCH:
                 self.assertEqual([s['shot_number'] for s in payload['target_shots']], [1])
                 self.assertNotIn('still_frame_url', payload['target_shots'][0])
-                self.assertEqual(kwargs['max_tokens'], 1792)
+                self.assertGreaterEqual(kwargs['max_tokens'], 3072)
+                self.assertGreater(kwargs['truncation_retry_tokens'], kwargs['max_tokens'])
                 return {'patches': [{'shot_number': 1, 'changes': {'camera_direction': {
                     'movement': 'zoom', 'direction': 'in', 'speed': 'slow',
                     'stabilization': 'smooth'}}}]}

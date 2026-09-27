@@ -21,7 +21,7 @@ def preview_input(result, shot):
         return None  # Legacy compiled-only records retain their existing adapter.
     if shot.get('direction_version') == 1:
         from app.services.ad_direction import problems
-        errors = problems(shot)
+        errors = problems(shot, result.get('script'))
         if errors:
             raise ValueError(f"Shot {shot['shot_number']}: direction needs review before previews: {'; '.join(errors)}")
     characters = [c for c in result.get("continuity", {}).get("characters", [])
@@ -46,6 +46,7 @@ def preview_input(result, shot):
     if shot.get("direction_version") == 1:
         from app.services.ad_direction import visual_direction
         facts['direction_version'] = 1
+        facts['later_action_beats'] = list((shot.get('shot_direction') or {}).get('action_beats') or [])
         direction = visual_direction(result)
         from app.services.ad_direction import shot_visual_text
         facts['ad_visual_direction'] = {'visual_approach': shot_visual_text(
@@ -62,7 +63,7 @@ def preview_input(result, shot):
 
 def preview_visual(facts):
     # Video motion/end-state belongs to compilation, not the still request.
-    visible = {k: v for k, v in facts.items() if k not in {"state_at_shot_end", "camera_movement"}}
+    visible = {k: v for k, v in facts.items() if k not in {"state_at_shot_end", "camera_movement", "later_action_beats"}}
     if facts.get("state_at_shot_start"):
         visible.pop("description", None)
         # Whole-shot composition can describe a later reveal (e.g. an open
@@ -141,6 +142,8 @@ def visual_contract(facts, visual=None):
             "Approved product references lock geometry, packaging, color, logo and existing printed text; invent no claims or markings.",
         ],
     }
+    if facts.get('later_action_beats'):
+        contract['verifier_future_action'] = facts['later_action_beats']
     contract["generation_brief"] = polished_generation_brief(facts, contract)
     return contract
 
@@ -199,7 +202,10 @@ def generation_prompt(contract):
     return "\n".join(lines)
 
 
-def contract_text(contract):
+def contract_text(contract, *, for_generation=False):
+    if for_generation:
+        contract = {key: value for key, value in contract.items()
+                    if key != 'verifier_future_action'}
     return json.dumps(contract, ensure_ascii=False, sort_keys=True)
 
 
